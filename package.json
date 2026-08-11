@@ -1,0 +1,9 @@
+{
+  "name": "motamo-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serverless API bridging Barsy POS menu data to motamo.bg",
+  "engines": {
+    "node": "20.x"
+  }
+}
