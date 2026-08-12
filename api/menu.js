@@ -3,15 +3,25 @@ const SOURCES = {
   shop: "https://motamo.barsy.online/public/endpoints/json?"
 };
 
+// Barsy's own storefront builds product images from article_id via this endpoint
+// (found in the storefront's JS bundle: getArticlesAvatarThumb). It returns the
+// uploaded photo when one exists, or a graceful placeholder SVG when it doesn't —
+// no dependency on the raw `picture` filename field, which isn't directly servable.
+const IMAGE_BASE = {
+  point: "https://motamoshop.barsyonline.menu/public/endpoints/res/Articles_getavatar",
+  shop: "https://motamo.barsy.online/public/endpoints/res/Articles_getavatar"
+};
+
 const ALLOWED_ORIGIN = "https://motamo.bg";
 const CACHE_SECONDS = 300;
 
-function mapArticle(a) {
+function mapArticle(a, source) {
   return {
     id: a.article_id,
     name: a.article_name_public,
     price: Number(a.current_price),
-    description: (a.description_ml && a.description_ml.bg_BG) || ""
+    description: (a.description_ml && a.description_ml.bg_BG) || "",
+    image: `${IMAGE_BASE[source]}?article_id=${a.article_id}&mode=fix&width=550`
   };
 }
 
@@ -94,7 +104,7 @@ module.exports = async function handler(req, res) {
       if (seenIds.has(a.article_id)) return;
       seenIds.add(a.article_id);
       if (!hasName(a)) return;
-      items.push(mapArticle(a));
+      items.push(mapArticle(a, source));
     });
     if (items.length) menu.push({ category: cat.cat_name || "", items: items });
   });
@@ -104,7 +114,7 @@ module.exports = async function handler(req, res) {
     if (seenIds.has(a.article_id)) return;
     seenIds.add(a.article_id);
     if (!hasName(a)) return;
-    extraItems.push(mapArticle(a));
+    extraItems.push(mapArticle(a, source));
   });
   if (extraItems.length) menu.push({ category: rootCatName, items: extraItems });
 
