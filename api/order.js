@@ -27,6 +27,8 @@
 // host is only the public menu frontend and authenticates *clients* (loyalty
 // cards), which is why staff credentials are rejected there.
 
+const crypto = require("crypto");
+
 const BARSY_API = "https://motamoshop.barsy.online";
 const BARSY_PUBLIC = "https://motamoshop.barsyonline.menu/public/endpoints/json?";
 const ALLOWED_ORIGIN = "https://motamo.bg";
@@ -178,6 +180,17 @@ function makeRef(clientRef) {
   const stamp = Date.now().toString(36).toUpperCase();
   const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
   return `WEB-${stamp}-${rand}`;
+}
+
+// Barsy validates `uuid` as a real UUID — handing it our own reference earns
+// "Некоректна дата … (id:UUID)". Derive one from the reference instead of
+// generating a random one, so a retry carrying the same reference produces the
+// same uuid and Barsy's duplicate guard actually catches it.
+function refToUuid(ref) {
+  const hex = crypto.createHash("sha1").update(ref).digest("hex");
+  const version = "5" + hex.slice(13, 16);              // version nibble
+  const variant = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16) + hex.slice(17, 20);
+  return [hex.slice(0, 8), hex.slice(8, 12), version, variant, hex.slice(20, 32)].join("-");
 }
 
 // Flatten Barsy's category tree into article_id → {name, price}. Same dedupe as
@@ -375,7 +388,7 @@ module.exports = async function handler(req, res) {
       // Barsy's own duplicate guard. Two requests carrying the same uuid are one
       // account, which is stronger than anything the browser can promise on a
       // dropped connection.
-      uuid: ref,
+      uuid: refToUuid(ref),
       client_id: PICKUP_CLIENT_ID,
       contact_name: name,
       phone: phone,
