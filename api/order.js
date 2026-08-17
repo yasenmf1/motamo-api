@@ -129,7 +129,14 @@ function hasLetters(value) {
 // One reference per attempt, echoed into the order description. When the
 // response gets lost on a flaky phone connection this is what lets the customer
 // and the kitchen identify the same order over the phone instead of guessing.
-function makeRef() {
+//
+// The browser generates it and sends it along, precisely so it still knows the
+// code when our response never arrives. We only sanity-check the shape and fall
+// back to our own if the client sent nothing usable.
+const REF_PATTERN = /^WEB-[A-Z0-9]{4,12}-[A-Z0-9]{2,8}$/;
+
+function makeRef(clientRef) {
+  if (typeof clientRef === "string" && REF_PATTERN.test(clientRef)) return clientRef;
   const stamp = Date.now().toString(36).toUpperCase();
   const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
   return `WEB-${stamp}-${rand}`;
@@ -318,7 +325,7 @@ module.exports = async function handler(req, res) {
   }
 
   // --- place it ------------------------------------------------------------
-  const ref = makeRef();
+  const ref = makeRef(body.ref);
   const description = note ? `Онлайн поръчка ${ref} · ${note}` : `Онлайн поръчка ${ref}`;
 
   const payload = {
