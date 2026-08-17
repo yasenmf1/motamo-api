@@ -3,6 +3,9 @@
   "functions": {
     "api/menu.js": {
       "maxDuration": 10
+    },
+    "api/order.js": {
+      "maxDuration": 10
     }
   }
 }
