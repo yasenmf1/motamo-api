@@ -1,76 +1,121 @@
 // Guest PICKUP checkout → Barsy POS (Каравелов 101).
 //
 // The browser never talks to Barsy directly. It posts a minimal cart here
-// ({article_id, amount} only) and this function is the one that decides what
-// the order actually costs: it re-fetches the live menu from Barsy and prices
-// every line server-side. Anything the client says about money is ignored.
+// ({article_id, amount} only) and this function decides what the order costs:
+// it re-fetches the live menu and prices every line server-side. Anything the
+// client says about money is ignored.
 //
-// Barsy's public endpoint takes guest orders unauthenticated via
-// `Publicorders_place` — same host and path the menu already uses, no
-// credentials involved. Pickup is expressed as delivery_address.delivery_type
-// = "no" ("home" would be delivery, which this endpoint deliberately refuses).
+// This goes through the AUTHENTICATED api (`Clientorders_create`), not the
+// public `Publicorders_place`. The public one works without credentials but
+// produces an account that Barsy immediately marks "Обслужена" with no order
+// status at all, books it to the anonymous client, and cannot express "pickup"
+// — Barsy documents this as "работен сценарий 2", which by design has no
+// statuses. The authenticated client-order path gives all three back:
+// status defaults to „Нова", `delivery_barsy_id` means genuine pickup, and
+// booking to client 2 lets the −15% pickup pricelist apply.
+//
+// Host note: the tenant lives at motamoshop.barsy.online. The .barsyonline.menu
+// host is only the public menu frontend and authenticates *clients* (loyalty
+// cards), which is why staff credentials are rejected there.
 
-const BARSY_ENDPOINT = "https://motamoshop.barsyonline.menu/public/endpoints/json?";
+const BARSY_API = "https://motamoshop.barsy.online";
+const BARSY_PUBLIC = "https://motamoshop.barsyonline.menu/public/endpoints/json?";
 const ALLOWED_ORIGIN = "https://motamo.bg";
 
-// Read back from Barsy: 1 = "В брой", 2 = "Карта". Prices are in EUR.
-const PAYMENT_METHODS = { 1: "cash", 2: "card" };
+// MOTAMO SHOP === Каравелов 101; the two names are the same place.
+const BARSY_ID = 1;
 
-// Barsy accepts public orders Mon–Fri 11:00–18:50 Europe/Sofia. The check must
-// live here rather than in the browser: a visitor's clock and timezone are not
-// evidence of anything, and the static site can sit in LiteSpeed's cache for a
-// while after the hours change.
+// Barsy client 2 is „НА МЯСТО". The −15% pricelist lists exactly this client, so
+// booking a web pickup order to it is what makes the rule fire. Orders left on
+// the anonymous client (id 1) get no discount at all.
+const PICKUP_CLIENT_ID = 2;
+
+// Kept in sync with the pricelist so the site can show the price the POS will
+// charge. Barsy rounds half-up at two decimals — verified against every computed
+// price in its own pricelist screen — so the arithmetic is done in integer
+// cents to avoid binary-float surprises (4.675 * 100 is 467.49999… in JS).
+const PICKUP_DISCOUNT_PCT = 15;
+
+function discountedCents(baseCents) {
+  return Math.floor((baseCents * (100 - PICKUP_DISCOUNT_PCT) + 50) / 100);
+}
+
+// Barsy accepts orders Mon–Fri 11:00–18:50 Europe/Sofia. Checked here rather
+// than in the browser: a visitor's clock is not evidence, and the static site
+// can sit in LiteSpeed's cache after the hours change.
 const OPEN_DAYS = new Set(["Mon", "Tue", "Wed", "Thu", "Fri"]);
 const OPEN_FROM_MIN = 11 * 60;
 const OPEN_TO_MIN = 18 * 60 + 50;
 
-// Caps exist to stop fat-fingered quantity steppers and casual pranks from
-// reaching the kitchen. They are not a security boundary — Barsy's own
-// storefront is publicly reachable with the same capability — but they do keep
-// this new channel from being the easy way to do damage.
+// Caps stop fat-fingered quantity steppers and casual pranks from reaching the
+// kitchen. Not a security boundary — Barsy's own storefront is public with the
+// same capability — but they keep this channel from being the easy way to do
+// damage.
 const MAX_PER_LINE = 20;
 const MAX_TOTAL_ITEMS = 50;
 const MAX_ORDER_EUR = 200;
 const MAX_NAME_LEN = 60;
 const MAX_NOTE_LEN = 300;
 
-// Vercel kills the function at 10s; stay under it so a slow Barsy produces our
-// own explainable error instead of an opaque platform 504.
 const BARSY_TIMEOUT_MS = 8000;
 
 function fail(res, status, code, message) {
   res.status(status).json({ ok: false, code: code, message: message });
 }
 
-async function barsyCall(action, params) {
+async function withTimeout(run) {
   const controller = new AbortController();
-  const timer = setTimeout(function () {
-    controller.abort();
-  }, BARSY_TIMEOUT_MS);
-
+  const timer = setTimeout(() => controller.abort(), BARSY_TIMEOUT_MS);
   try {
-    const barsyRes = await fetch(BARSY_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json; charset=UTF-8" },
-      body: JSON.stringify({ [action]: params }),
-      signal: controller.signal
-    });
-
-    const text = await barsyRes.text();
-    let parsed = null;
-    try {
-      parsed = JSON.parse(text);
-    } catch (err) {
-      parsed = null;
-    }
-    return { status: barsyRes.status, ok: barsyRes.ok, data: parsed, raw: text };
+    return await run(controller.signal);
   } finally {
     clearTimeout(timer);
   }
 }
 
-// Europe/Sofia wall clock via Intl, so DST switches are handled by the runtime's
-// timezone database instead of hand-rolled offset arithmetic.
+async function readResponse(barsyRes) {
+  const text = await barsyRes.text();
+  let parsed = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    parsed = null;
+  }
+  return { status: barsyRes.status, ok: barsyRes.ok, data: parsed, raw: text };
+}
+
+// Public endpoint: action in the JSON envelope, no credentials.
+function publicCall(action, params) {
+  return withTimeout(async function (signal) {
+    const barsyRes = await fetch(BARSY_PUBLIC, {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify({ [action]: params }),
+      signal: signal
+    });
+    return readResponse(barsyRes);
+  });
+}
+
+// Authenticated endpoint: action in the URL path, bare params as the body.
+// A different shape from the public one — sending the envelope here answers
+// "Няма подаден екшън".
+function authedCall(action, params, user, pass) {
+  const auth = Buffer.from(`${user}:${pass}`).toString("base64");
+  return withTimeout(async function (signal) {
+    const barsyRes = await fetch(`${BARSY_API}/endpoints/json/${action}?bid=${BARSY_ID}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/json; charset=UTF-8"
+      },
+      body: JSON.stringify(params),
+      signal: signal
+    });
+    return readResponse(barsyRes);
+  });
+}
+
 function sofiaNow() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Europe/Sofia",
@@ -79,18 +124,11 @@ function sofiaNow() {
     minute: "2-digit",
     hour12: false
   }).formatToParts(new Date());
-
   const get = function (type) {
-    const found = parts.find(function (p) {
-      return p.type === type;
-    });
+    const found = parts.find((p) => p.type === type);
     return found ? found.value : "";
   };
-
-  return {
-    weekday: get("weekday"),
-    minutes: Number(get("hour")) * 60 + Number(get("minute"))
-  };
+  return { weekday: get("weekday"), minutes: Number(get("hour")) * 60 + Number(get("minute")) };
 }
 
 function isOpen() {
@@ -100,25 +138,20 @@ function isOpen() {
 }
 
 // Bulgarians type their mobile every which way: 0888 123 456, +359 88 812 3456,
-// 00359..., with spaces, dashes and slashes. Normalise to 08XXXXXXXX and only
-// then judge it. This filters typos, not liars — a determined prankster can
-// always supply a real-looking number.
+// 00359…, with spaces, dashes and slashes. Normalise, then judge. This filters
+// typos, not liars.
 function normalizePhone(raw) {
   if (typeof raw !== "string") return null;
-
   let digits = raw.replace(/[^\d+]/g, "");
   if (digits.startsWith("+")) digits = digits.slice(1);
   if (digits.startsWith("00")) digits = digits.slice(2);
   if (digits.startsWith("359")) digits = "0" + digits.slice(3);
-
-  // Bulgarian mobile numbers are 10 digits and begin 08.
   if (/^08\d{8}$/.test(digits)) return digits;
   return null;
 }
 
 function sanitizeText(value, maxLen) {
   if (typeof value !== "string") return "";
-  // Strip control characters so nothing odd reaches the kitchen ticket.
   return value.replace(/[\u0000-\u001F\u007F]/g, " ").trim().slice(0, maxLen);
 }
 
@@ -126,13 +159,9 @@ function hasLetters(value) {
   return /\p{L}/u.test(value);
 }
 
-// One reference per attempt, echoed into the order description. When the
-// response gets lost on a flaky phone connection this is what lets the customer
-// and the kitchen identify the same order over the phone instead of guessing.
-//
-// The browser generates it and sends it along, precisely so it still knows the
-// code when our response never arrives. We only sanity-check the shape and fall
-// back to our own if the client sent nothing usable.
+// The browser generates the reference before sending, so it still knows the code
+// when our response is lost on a flaky connection. We only sanity-check the
+// shape and fall back to our own.
 const REF_PATTERN = /^WEB-[A-Z0-9]{4,12}-[A-Z0-9]{2,8}$/;
 
 function makeRef(clientRef) {
@@ -142,28 +171,27 @@ function makeRef(clientRef) {
   return `WEB-${stamp}-${rand}`;
 }
 
-// Flatten Barsy's category tree into article_id → {name, price}. Same dedupe
-// logic as api/menu.js: subcategory articles are repeated at root level, and on
-// sources without subcategories the root array is the whole catalogue.
+// Flatten Barsy's category tree into article_id → {name, price}. Same dedupe as
+// api/menu.js: subcategory articles are repeated at root level.
 function buildPriceMap(tree) {
   const map = new Map();
-
   const add = function (a) {
-    if (!a || a.article_id == null) return;
-    if (map.has(a.article_id)) return;
+    if (!a || a.article_id == null || map.has(a.article_id)) return;
     const price = Number(a.current_price);
     if (!Number.isFinite(price) || price <= 0) return;
     const name = typeof a.article_name_public === "string" ? a.article_name_public.trim() : "";
     if (!name) return;
     map.set(a.article_id, { name: name, price: price });
   };
-
-  (tree.categories || []).forEach(function (entry) {
-    (entry.articles || []).forEach(add);
-  });
+  (tree.categories || []).forEach((entry) => (entry.articles || []).forEach(add));
   (tree.articles || []).forEach(add);
-
   return map;
+}
+
+function clientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.length) return forwarded.split(",")[0].trim();
+  return "";
 }
 
 module.exports = async function handler(req, res) {
@@ -178,6 +206,13 @@ module.exports = async function handler(req, res) {
   }
   if (req.method !== "POST") {
     fail(res, 405, "method_not_allowed", "Method not allowed");
+    return;
+  }
+
+  const user = process.env.BARSY_USER;
+  const pass = process.env.BARSY_PASS;
+  if (!user || !pass) {
+    fail(res, 500, "not_configured", "Barsy credentials are not configured");
     return;
   }
 
@@ -208,9 +243,10 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const payId = Number(body.pay_id);
-  if (!PAYMENT_METHODS[payId]) {
-    fail(res, 400, "invalid_payment", "Invalid payment method");
+  // The site shows the terms and privacy checkboxes; refuse if they did not
+  // actually come back ticked.
+  if (body.consent !== true) {
+    fail(res, 400, "consent_required", "Terms must be accepted");
     return;
   }
 
@@ -231,7 +267,6 @@ module.exports = async function handler(req, res) {
   for (const item of items) {
     const articleId = Number(item && item.article_id);
     const amount = Number(item && item.amount);
-
     if (!Number.isInteger(articleId) || articleId <= 0) {
       fail(res, 400, "invalid_item", "Invalid item");
       return;
@@ -240,7 +275,6 @@ module.exports = async function handler(req, res) {
       fail(res, 400, "invalid_amount", "Invalid quantity");
       return;
     }
-    // Tolerate a client that sends the same article twice instead of merging.
     const running = (wanted.get(articleId) || 0) + amount;
     if (running > MAX_PER_LINE) {
       fail(res, 400, "invalid_amount", "Invalid quantity");
@@ -250,16 +284,12 @@ module.exports = async function handler(req, res) {
   }
 
   let totalItems = 0;
-  wanted.forEach(function (amount) {
-    totalItems += amount;
-  });
+  wanted.forEach((amount) => (totalItems += amount));
   if (totalItems > MAX_TOTAL_ITEMS) {
     fail(res, 400, "cart_too_large", "Too many items");
     return;
   }
 
-  // Closed is checked before touching Barsy — no point pricing an order that
-  // cannot be placed.
   if (!isOpen()) {
     fail(res, 409, "closed", "Online ordering is closed right now");
     return;
@@ -268,7 +298,7 @@ module.exports = async function handler(req, res) {
   // --- price it from the live menu, never from the browser ------------------
   let menuRes;
   try {
-    menuRes = await barsyCall("Categories_getalltree", {});
+    menuRes = await publicCall("Categories_getalltree", {});
   } catch (err) {
     fail(res, 503, "barsy_unreachable", "Could not reach Barsy");
     return;
@@ -280,9 +310,10 @@ module.exports = async function handler(req, res) {
 
   const priceMap = buildPriceMap(menuRes.data.Categories_getalltree);
 
-  const lines = [];
+  const rows = [];
   const unavailable = [];
-  let totalCents = 0;
+  let baseCentsTotal = 0;
+  let dueCentsTotal = 0;
 
   wanted.forEach(function (amount, articleId) {
     const article = priceMap.get(articleId);
@@ -290,20 +321,22 @@ module.exports = async function handler(req, res) {
       unavailable.push(articleId);
       return;
     }
-    const cents = Math.round(article.price * 100) * amount;
-    totalCents += cents;
-    lines.push({
+    const unitBaseCents = Math.round(article.price * 100);
+    baseCentsTotal += unitBaseCents * amount;
+    dueCentsTotal += discountedCents(unitBaseCents) * amount;
+
+    // Full menu price goes to Barsy; its own pricelist applies the −15% for
+    // client 2. Sending an already-discounted price here would risk the rule
+    // discounting a second time.
+    rows.push({
       article_id: articleId,
       amount: amount,
-      original_current_price: article.price,
-      supplements: [],
-      modificators: []
+      original_price: article.price
     });
   });
 
-  // An item can vanish or be renamed between page load and checkout — a stale
-  // localStorage cart from days ago is the common case. Refuse the whole order
-  // and let the customer re-confirm rather than silently dropping a line.
+  // A stale localStorage cart from days ago is the common case. Refuse the whole
+  // order and let the customer re-confirm rather than silently dropping a line.
   if (unavailable.length) {
     res.status(409).json({
       ok: false,
@@ -314,46 +347,49 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const total = Number((totalCents / 100).toFixed(2));
-  if (total <= 0) {
+  const baseTotal = Number((baseCentsTotal / 100).toFixed(2));
+  const dueTotal = Number((dueCentsTotal / 100).toFixed(2));
+  if (dueTotal <= 0) {
     fail(res, 400, "empty_cart", "Cart is empty");
     return;
   }
-  if (total > MAX_ORDER_EUR) {
+  if (baseTotal > MAX_ORDER_EUR) {
     fail(res, 400, "order_too_large", "Order total is too large");
     return;
   }
 
   // --- place it ------------------------------------------------------------
   const ref = makeRef(body.ref);
-  const description = note ? `Онлайн поръчка ${ref} · ${note}` : `Онлайн поръчка ${ref}`;
 
-  // Shape verified against a real accepted order (2026-08-17). Two things the
-  // storefront bundle hides at first glance and Barsy rejects with an opaque
-  // "непредвидена грешка" if you get them wrong:
-  //   * payments carry `paymethod_id` / `original_paid_sum` — `pay_num` is only
-  //     the key of the redux map, never a field in the request;
-  //   * `public_order_id` is left out entirely for a new order, not sent as null.
   const payload = {
-    public_order_data: {
-      delivery_address: { delivery_type: "no" },
-      phone: phone,
+    order: {
+      // External reference; shows on the order so a lost response can be
+      // reconciled over the phone.
+      order_num: ref,
+      client_id: PICKUP_CLIENT_ID,
       contact_name: name,
-      description: description,
-      place_sid: null,
-      delivery_date: null
+      client_tel: phone,
+      barsy_id: BARSY_ID,
+      // Present = collected from that object. Omitting it would make Barsy treat
+      // the order as a delivery to an address.
+      delivery_barsy_id: BARSY_ID,
+      description: note ? `Онлайн поръчка ${ref} · ${note}` : `Онлайн поръчка ${ref}`,
+      public_notes: note,
+      ip_address: clientIp(req)
+      // status_id deliberately omitted — Barsy defaults it to „Нова".
     },
-    orders: lines,
-    payments: [{ paymethod_id: payId, original_paid_sum: total, req_value: null }],
-    client_code: ""
+    rows: rows,
+    // No payment yet: the customer pays on collection. Sending one would settle
+    // the order the moment it is created.
+    payments: []
   };
 
   let placed;
   try {
-    placed = await barsyCall("Publicorders_place", payload);
+    placed = await authedCall("Clientorders_create", payload, user, pass);
   } catch (err) {
-    // Aborted or network-level failure. The order may or may not have landed in
-    // the POS, so the client must be told to call rather than blindly retry.
+    // The order may or may not have landed. The client must be told to call
+    // rather than blindly retry.
     res.status(504).json({
       ok: false,
       code: "uncertain",
@@ -363,7 +399,7 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  if (!placed.ok || !placed.data || !placed.data.Publicorders_place) {
+  if (!placed.ok) {
     res.status(502).json({
       ok: false,
       code: "barsy_rejected",
@@ -373,17 +409,13 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const result = placed.data.Publicorders_place;
-
   res.status(200).json({
     ok: true,
     ref: ref,
-    total: total,
-    payment: PAYMENT_METHODS[payId],
-    public_order_id: result.public_order_id || null,
-    // Barsy leaves public_order_num null on creation and fills it later, so the
-    // customer-facing confirmation falls back to our own ref.
-    public_order_num: result.public_order_num || null,
-    online_payment_url: result.online_payment_url || null
+    total: dueTotal,
+    base_total: baseTotal,
+    discount_pct: PICKUP_DISCOUNT_PCT,
+    payment: "cash",
+    barsy: placed.data
   });
 };
