@@ -15,11 +15,34 @@ const IMAGE_BASE = {
 const ALLOWED_ORIGIN = "https://motamo.bg";
 const CACHE_SECONDS = 300;
 
+// The Каравелов 101 point runs a −15% pricelist that Barsy applies to guest
+// orders, so the public catalogue price is not what such an order actually
+// costs. api/order.js sends Barsy the discounted figure and Barsy rejects
+// anything else, so the site has to display the same number or customers would
+// be quoted a price the POS refuses. Mirrored here rather than imported because
+// the two functions are deployed independently.
+//
+// Barsy rounds half-up at two decimals; the arithmetic stays in integer cents
+// because 4.675 * 100 is 467.49999… in binary floating point.
+const DISCOUNT_PCT = { point: 15, shop: 0 };
+
+function discounted(price, source) {
+  const pct = DISCOUNT_PCT[source] || 0;
+  const cents = Math.round(Number(price) * 100);
+  if (!pct) return cents / 100;
+  return Math.floor((cents * (100 - pct) + 50) / 100) / 100;
+}
+
 function mapArticle(a, source) {
+  const base = Number(a.current_price);
+  const price = discounted(base, source);
   return {
     id: a.article_id,
     name: a.article_name_public,
-    price: Number(a.current_price),
+    price: price,
+    // Present only when a discount actually applies, so the site can show the
+    // struck-through original without inventing one.
+    base_price: price === base ? null : base,
     description: (a.description_ml && a.description_ml.bg_BG) || "",
     image: `${IMAGE_BASE[source]}?article_id=${a.article_id}&mode=fix&width=550`
   };
