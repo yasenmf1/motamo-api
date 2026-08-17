@@ -344,16 +344,20 @@ module.exports = async function handler(req, res) {
       return;
     }
     const unitBaseCents = Math.round(article.price * 100);
+    const unitDueCents = discountedCents(unitBaseCents);
     baseCentsTotal += unitBaseCents * amount;
-    dueCentsTotal += discountedCents(unitBaseCents) * amount;
+    dueCentsTotal += unitDueCents * amount;
 
-    // Full menu price goes to Barsy; its own pricelist applies the −15% for
-    // client 2. Sending an already-discounted price here would risk the rule
-    // discounting a second time.
+    // Barsy expects the price its own pricelist computes for this client and
+    // refuses the order otherwise ("Вашата роля няма право да променя
+    // продажната цена"), quoting both figures. That refusal is a feature: the
+    // price the site showed and the price the POS charges cannot silently
+    // diverge — if our arithmetic ever drifts from the pricelist, the order
+    // fails loudly instead of charging the customer something else.
     rows.push({
       article_id: articleId,
       amount: amount,
-      original_current_price: article.price
+      original_current_price: unitDueCents / 100
     });
   });
 
