@@ -328,8 +328,13 @@ module.exports = async function handler(req, res) {
   const ref = makeRef(body.ref);
   const description = note ? `Онлайн поръчка ${ref} · ${note}` : `Онлайн поръчка ${ref}`;
 
+  // Shape verified against a real accepted order (2026-08-17). Two things the
+  // storefront bundle hides at first glance and Barsy rejects with an opaque
+  // "непредвидена грешка" if you get them wrong:
+  //   * payments carry `paymethod_id` / `original_paid_sum` — `pay_num` is only
+  //     the key of the redux map, never a field in the request;
+  //   * `public_order_id` is left out entirely for a new order, not sent as null.
   const payload = {
-    public_order_id: null,
     public_order_data: {
       delivery_address: { delivery_type: "no" },
       phone: phone,
@@ -339,7 +344,7 @@ module.exports = async function handler(req, res) {
       delivery_date: null
     },
     orders: lines,
-    payments: [{ pay_num: 1, pay_id: payId, paid_sum: total, req_value: null }],
+    payments: [{ paymethod_id: payId, original_paid_sum: total, req_value: null }],
     client_code: ""
   };
 
@@ -376,6 +381,8 @@ module.exports = async function handler(req, res) {
     total: total,
     payment: PAYMENT_METHODS[payId],
     public_order_id: result.public_order_id || null,
+    // Barsy leaves public_order_num null on creation and fills it later, so the
+    // customer-facing confirmation falls back to our own ref.
     public_order_num: result.public_order_num || null,
     online_payment_url: result.online_payment_url || null
   });
