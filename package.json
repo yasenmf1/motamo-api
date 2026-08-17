@@ -4,6 +4,6 @@
   "private": true,
   "description": "Serverless API bridging Barsy POS menu data to motamo.bg",
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   }
 }
