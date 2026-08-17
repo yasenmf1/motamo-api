@@ -5,14 +5,23 @@
 // it re-fetches the live menu and prices every line server-side. Anything the
 // client says about money is ignored.
 //
-// This goes through the AUTHENTICATED api (`Clientorders_create`), not the
-// public `Publicorders_place`. The public one works without credentials but
-// produces an account that Barsy immediately marks "Обслужена" with no order
-// status at all, books it to the anonymous client, and cannot express "pickup"
-// — Barsy documents this as "работен сценарий 2", which by design has no
-// statuses. The authenticated client-order path gives all three back:
-// status defaults to „Нова", `delivery_barsy_id` means genuine pickup, and
-// booking to client 2 lets the −15% pickup pricelist apply.
+// Orders arrive as an open Barsy account ("сметка") — the owner's staff work
+// from that list, and Barsy drives its statuses („Чака одобрение" → „За
+// обслужване" → …) from the register's „Режим на одобрение", which their admin
+// configures. This is Barsy's „работен сценарий 2".
+//
+// It uses the AUTHENTICATED `Accounts_create` rather than the public
+// `Publicorders_place` that produces the same kind of account without
+// credentials, because only the authenticated call can carry the three things
+// this checkout needs:
+//   * `client_id` 2 („НА МЯСТО") — the one client the −15% pricelist lists, so
+//     the discount actually applies;
+//   * `uuid` — Barsy's own key for "избягване на дублиране на сметка", real
+//     protection against a double submit rather than a disabled button;
+//   * `account_alias` — a title, so web orders are identifiable at a glance in
+//     the accounts list.
+// `Accounts_place` is the wrong sibling: it runs the whole scenario including
+// payment and closing, and these orders are paid on collection.
 //
 // Host note: the tenant lives at motamoshop.barsy.online. The .barsyonline.menu
 // host is only the public menu frontend and authenticates *clients* (loyalty
@@ -331,7 +340,7 @@ module.exports = async function handler(req, res) {
     rows.push({
       article_id: articleId,
       amount: amount,
-      original_price: article.price
+      original_current_price: article.price
     });
   });
 
@@ -362,31 +371,29 @@ module.exports = async function handler(req, res) {
   const ref = makeRef(body.ref);
 
   const payload = {
-    order: {
-      // External reference; shows on the order so a lost response can be
-      // reconciled over the phone.
-      order_num: ref,
+    account: {
+      // Barsy's own duplicate guard. Two requests carrying the same uuid are one
+      // account, which is stronger than anything the browser can promise on a
+      // dropped connection.
+      uuid: ref,
       client_id: PICKUP_CLIENT_ID,
       contact_name: name,
-      client_tel: phone,
-      barsy_id: BARSY_ID,
-      // Present = collected from that object. Omitting it would make Barsy treat
-      // the order as a delivery to an address.
-      delivery_barsy_id: BARSY_ID,
+      phone: phone,
+      // Shows in the accounts list, so staff can spot web orders at a glance.
+      account_alias: `ОНЛАЙН ${ref}`,
+      // description prints on the receipt; notes do not.
       description: note ? `Онлайн поръчка ${ref} · ${note}` : `Онлайн поръчка ${ref}`,
-      public_notes: note,
-      ip_address: clientIp(req)
-      // status_id deliberately omitted — Barsy defaults it to „Нова".
+      notes: `IP ${clientIp(req)}`,
+      delivery_address: { delivery_type: "no" }
     },
-    rows: rows,
-    // No payment yet: the customer pays on collection. Sending one would settle
-    // the order the moment it is created.
-    payments: []
+    rows: rows
+    // No payments: the customer pays on collection. Sending one settles and
+    // closes the account the moment it is created.
   };
 
   let placed;
   try {
-    placed = await authedCall("Clientorders_create", payload, user, pass);
+    placed = await authedCall("Accounts_create", payload, user, pass);
   } catch (err) {
     // The order may or may not have landed. The client must be told to call
     // rather than blindly retry.
@@ -409,6 +416,7 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // Accounts_create answers with the new account id.
   res.status(200).json({
     ok: true,
     ref: ref,
@@ -416,6 +424,6 @@ module.exports = async function handler(req, res) {
     base_total: baseTotal,
     discount_pct: PICKUP_DISCOUNT_PCT,
     payment: "cash",
-    barsy: placed.data
+    account_id: typeof placed.data === "number" ? placed.data : (placed.data || null)
   });
 };
