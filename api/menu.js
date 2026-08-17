@@ -35,14 +35,16 @@ function discounted(price, source) {
 
 function mapArticle(a, source) {
   const base = Number(a.current_price);
-  const price = discounted(base, source);
+  const pickup = discounted(base, source);
   return {
     id: a.article_id,
     name: a.article_name_public,
-    price: price,
-    // Present only when a discount actually applies, so the site can show the
-    // struck-through original without inventing one.
-    base_price: price === base ? null : base,
+    // The menu deliberately quotes the full price. Showing the discounted one
+    // everywhere would quietly turn it into the normal price — the discount
+    // stops reading as a discount, and it is the number competitors see. The
+    // saving belongs at checkout, as its own line.
+    price: base,
+    pickup_price: pickup === base ? null : pickup,
     description: (a.description_ml && a.description_ml.bg_BG) || "",
     image: `${IMAGE_BASE[source]}?article_id=${a.article_id}&mode=fix&width=550`
   };
