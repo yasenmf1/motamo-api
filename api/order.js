@@ -36,11 +36,14 @@ const ALLOWED_ORIGIN = "https://motamo.bg";
 // MOTAMO SHOP === Каравелов 101; the two names are the same place.
 const BARSY_ID = 1;
 
-// Client 1 is „Анонимен", Barsy's default for a guest. The owner extended the
-// −15% pickup pricelist to cover it, so web orders get the discount while still
-// being recorded as what they are — one anonymous guest per order — instead of
-// all being booked to the „НА МЯСТО" (id 2) client used for phone orders.
-const PICKUP_CLIENT_ID = 1;
+// Client 7 „Онлайн", created for this channel. Web orders used to go to client 1
+// „Анонимен", Barsy's built-in guest, but that is a system record: its name,
+// phone and e-mail are locked, and Barsy refuses to issue a public payment link
+// for an account whose client has no e-mail — „Липсват задължителни данни за
+// email на клиента!". Client 7 is an ordinary client, so it carries one, and the
+// owner put it in the same −15% pricing rule — without that rule Barsy would
+// price the rows at full catalogue price and reject the order.
+const PICKUP_CLIENT_ID = 7;
 
 // Kept in sync with the pricelist so the site can show the price the POS will
 // charge. Barsy rounds half-up at two decimals — verified against every computed
