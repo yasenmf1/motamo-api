@@ -211,12 +211,6 @@ function buildPriceMap(tree) {
   return map;
 }
 
-function clientIp(req) {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.length) return forwarded.split(",")[0].trim();
-  return "";
-}
-
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -402,9 +396,12 @@ module.exports = async function handler(req, res) {
       // orders recognisable at a glance. The reference stays in `description`,
       // which is what prints on the receipt.
       account_alias: `ОНЛАЙН ${name}`,
-      // description prints on the receipt; notes do not.
-      description: note ? `Онлайн поръчка ${ref} · ${note}` : `Онлайн поръчка ${ref}`,
-      notes: `IP ${clientIp(req)}`,
+      description: `Онлайн поръчка ${ref}`,
+      // What the customer typed goes in `notes`, the field the staff actually
+      // read on the account. It used to be appended to `description` and the
+      // owner never saw it there; the IP that sat here instead told nobody in
+      // the kitchen anything.
+      notes: note,
       delivery_address: { delivery_type: "no" }
     },
     rows: rows
