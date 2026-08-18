@@ -397,8 +397,11 @@ module.exports = async function handler(req, res) {
       client_id: PICKUP_CLIENT_ID,
       contact_name: name,
       phone: phone,
-      // Shows in the accounts list, so staff can spot web orders at a glance.
-      account_alias: `ОНЛАЙН ${ref}`,
+      // The title in the accounts list. It carries the customer's name so staff
+      // know whose order it is without opening it; the „ОНЛАЙН" prefix keeps web
+      // orders recognisable at a glance. The reference stays in `description`,
+      // which is what prints on the receipt.
+      account_alias: `ОНЛАЙН ${name}`,
       // description prints on the receipt; notes do not.
       description: note ? `Онлайн поръчка ${ref} · ${note}` : `Онлайн поръчка ${ref}`,
       notes: `IP ${clientIp(req)}`,
