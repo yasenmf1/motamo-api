@@ -269,6 +269,16 @@ module.exports = async function handler(req, res) {
 
   const note = sanitizeText(body.note, MAX_NOTE_LEN);
 
+  // Cash or card, both paid at the counter — nothing is charged online yet. The
+  // kitchen needs to know which, so the terminal is ready when the customer
+  // arrives. A cached copy of the old page sends nothing; treat that as cash
+  // rather than refusing an otherwise valid order.
+  const pay = body.pay === "card" ? "card" : "cash";
+  if (body.pay != null && body.pay !== "card" && body.pay !== "cash") {
+    fail(res, 400, "invalid_payment", "Invalid payment method");
+    return;
+  }
+
   // --- what is being ordered ----------------------------------------------
   const items = Array.isArray(body.items) ? body.items : null;
   if (!items || items.length === 0) {
@@ -381,6 +391,7 @@ module.exports = async function handler(req, res) {
 
   // --- place it ------------------------------------------------------------
   const ref = makeRef(body.ref);
+  const payLabel = pay === "card" ? "С КАРТА" : "В БРОЙ";
 
   const payload = {
     account: {
@@ -395,13 +406,17 @@ module.exports = async function handler(req, res) {
       // know whose order it is without opening it; the „ОНЛАЙН" prefix keeps web
       // orders recognisable at a glance. The reference stays in `description`,
       // which is what prints on the receipt.
-      account_alias: `ОНЛАЙН ${name}`,
+      // Barsy's own „начин на плащане" cannot be set here: the only way to name
+      // one is the `payments` array, which settles and closes the account on
+      // creation. So the choice is written where staff will read it — the title
+      // in the accounts list, and the first line of the notes.
+      account_alias: `ОНЛАЙН ${name} · ${payLabel}`,
       description: `Онлайн поръчка ${ref}`,
       // What the customer typed goes in `notes`, the field the staff actually
       // read on the account. It used to be appended to `description` and the
       // owner never saw it there; the IP that sat here instead told nobody in
       // the kitchen anything.
-      notes: note,
+      notes: note ? `Плащане: ${payLabel}\n${note}` : `Плащане: ${payLabel}`,
       delivery_address: { delivery_type: "no" }
     },
     rows: rows
@@ -441,7 +456,7 @@ module.exports = async function handler(req, res) {
     total: dueTotal,
     base_total: baseTotal,
     discount_pct: PICKUP_DISCOUNT_PCT,
-    payment: "cash",
+    payment: pay,
     account_id: typeof placed.data === "number" ? placed.data : (placed.data || null)
   });
 };
