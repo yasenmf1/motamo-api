@@ -12,6 +12,13 @@ const IMAGE_BASE = {
   shop: "https://motamo.barsy.online/public/endpoints/res/Articles_getavatar"
 };
 
+// The −15% pickup pricelist covers food only. Alcohol is sold across the counter
+// but is not offered online: quoting it at −15% makes Barsy reject the whole order
+// („Подадената цена … се различава от очакваната"), and quoting it at full price next to
+// discounted food is a different price rule on one screen. The owner's call: keep it
+// off the site entirely.
+const HIDDEN_CATEGORY = /алкохол/i;
+
 const ALLOWED_ORIGIN = "https://motamo.bg";
 const CACHE_SECONDS = 300;
 
@@ -124,10 +131,14 @@ module.exports = async function handler(req, res) {
   categories.forEach(function (entry) {
     const cat = entry.category || {};
     const articles = entry.articles || [];
+    // Hidden articles are still marked as seen, or Barsy's duplicate copies of them
+    // in the root list would resurface under the generic bucket.
+    const hidden = HIDDEN_CATEGORY.test(cat.cat_name || "");
     const items = [];
     articles.forEach(function (a) {
       if (seenIds.has(a.article_id)) return;
       seenIds.add(a.article_id);
+      if (hidden) return;
       if (!hasName(a)) return;
       items.push(mapArticle(a, source));
     });

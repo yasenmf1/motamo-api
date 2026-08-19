@@ -72,6 +72,13 @@ const MAX_ORDER_EUR = 200;
 const MAX_NAME_LEN = 60;
 const MAX_NOTE_LEN = 300;
 
+// The −15% pickup pricelist covers food only. Alcohol is sold across the counter
+// but is not offered online: quoting it at −15% makes Barsy reject the whole order
+// („Подадената цена … се различава от очакваната"), and quoting it at full price next to
+// discounted food is a different price rule on one screen. The owner's call: keep it
+// off the site entirely.
+const HIDDEN_CATEGORY = /алкохол/i;
+
 const BARSY_TIMEOUT_MS = 8000;
 
 function fail(res, status, code, message) {
@@ -209,8 +216,22 @@ function refToUuid(ref) {
 // api/menu.js: subcategory articles are repeated at root level.
 function buildPriceMap(tree) {
   const map = new Map();
+
+  // Anything the site does not sell must not be orderable either, whatever a
+  // crafted request asks for. Barsy repeats subcategory articles in the root
+  // list, so collect the hidden ids first and skip them in both passes.
+  const hiddenIds = new Set();
+  (tree.categories || []).forEach(function (entry) {
+    const name = (entry.category && entry.category.cat_name) || "";
+    if (!HIDDEN_CATEGORY.test(name)) return;
+    (entry.articles || []).forEach(function (a) {
+      if (a && a.article_id != null) hiddenIds.add(a.article_id);
+    });
+  });
+
   const add = function (a) {
     if (!a || a.article_id == null || map.has(a.article_id)) return;
+    if (hiddenIds.has(a.article_id)) return;
     const price = Number(a.current_price);
     if (!Number.isFinite(price) || price <= 0) return;
     const name = typeof a.article_name_public === "string" ? a.article_name_public.trim() : "";
