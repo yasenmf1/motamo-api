@@ -79,6 +79,13 @@ const MAX_NOTE_LEN = 300;
 // off the site entirely.
 const HIDDEN_CATEGORY = /алкохол/i;
 
+// Online card payment is off unless Vercel says otherwise. Barsy's ДСК settings are
+// still on „Тестова среда", so a link produced today points at the bank's sandbox:
+// a customer would „pay" with no money moving and the account would be marked paid.
+// Flip ONLINE_CARD to "1" only once the merchant contract is live and Barsy is out
+// of test mode.
+const ONLINE_CARD = process.env.ONLINE_CARD === "1";
+
 const BARSY_TIMEOUT_MS = 8000;
 
 function fail(res, status, code, message) {
@@ -497,6 +504,40 @@ module.exports = async function handler(req, res) {
   }
 
   // Accounts_create answers with the new account id.
+  const accountId = typeof placed.data === "number"
+    ? placed.data
+    : (placed.data && placed.data.account_id) || null;
+
+  // `Accounts_getpaymentlink` returns a one-off public URL for the remaining amount
+  // on the account. The payment method is left unset on purpose: the public access
+  // record offers only „Карта site", so there is nothing to choose between.
+  //
+  // A failure here must not fail the order — the account already exists and the food
+  // will be made. The customer simply gets the ordinary confirmation and pays at the
+  // counter, which is what every order did until now.
+  let paymentUrl = null;
+  if (ONLINE_CARD && pay === "card" && accountId) {
+    try {
+      const link = await authedCall("Accounts_getpaymentlink", { account_id: accountId }, user, pass);
+      const url = typeof link.data === "string" ? link.data.trim() : "";
+      if (link.ok && /^https:\/\//.test(url)) {
+        paymentUrl = url;
+      } else {
+        console.error(JSON.stringify({
+          event: "paymentlink_failed",
+          ref: ref,
+          account_id: accountId,
+          status: link.status,
+          barsy: typeof link.raw === "string" ? link.raw.slice(0, 400) : null
+        }));
+      }
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: "paymentlink_error", ref: ref, account_id: accountId, message: String(err && err.message)
+      }));
+    }
+  }
+
   res.status(200).json({
     ok: true,
     ref: ref,
@@ -504,6 +545,7 @@ module.exports = async function handler(req, res) {
     base_total: baseTotal,
     discount_pct: PICKUP_DISCOUNT_PCT,
     payment: pay,
-    account_id: typeof placed.data === "number" ? placed.data : (placed.data || null)
+    account_id: accountId,
+    online_payment_url: paymentUrl
   });
 };
