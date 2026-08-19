@@ -43,6 +43,11 @@ function discounted(price, source) {
 function mapArticle(a, source) {
   const base = Number(a.current_price);
   const pickup = discounted(base, source);
+  // The avatar endpoint is keyed only by article_id, so replacing a product photo
+  // in Barsy leaves the URL identical and browsers keep showing the old picture
+  // for hours. Barsy stamps every article with `last_update`, which moves whenever
+  // the article does — hanging it on the URL makes a new photo a new address.
+  const stamp = typeof a.last_update === "string" ? a.last_update.replace(/\D/g, "") : "";
   return {
     id: a.article_id,
     name: a.article_name_public,
@@ -54,6 +59,7 @@ function mapArticle(a, source) {
     pickup_price: pickup === base ? null : pickup,
     description: (a.description_ml && a.description_ml.bg_BG) || "",
     image: `${IMAGE_BASE[source]}?article_id=${a.article_id}&mode=fix&width=550`
+      + (stamp ? `&v=${stamp}` : "")
   };
 }
 
