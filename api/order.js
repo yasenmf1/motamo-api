@@ -86,6 +86,12 @@ const HIDDEN_CATEGORY = /алкохол/i;
 // of test mode.
 const ONLINE_CARD = process.env.ONLINE_CARD === "1";
 
+// „Карта site" — the only payment method the „Линк за плащане" public access offers.
+// Naming it means Barsy skips its own chooser page, which is a dark generic screen
+// with clip-art that the customer has no reason to see when there is nothing to
+// choose between. Without it the link lands there first.
+const CARD_PAYMETHOD_ID = 8;
+
 const BARSY_TIMEOUT_MS = 8000;
 
 function fail(res, status, code, message) {
@@ -518,7 +524,11 @@ module.exports = async function handler(req, res) {
   let paymentUrl = null;
   if (ONLINE_CARD && pay === "card" && accountId) {
     try {
-      const link = await authedCall("Accounts_getpaymentlink", { account_id: accountId }, user, pass);
+      const link = await authedCall(
+        "Accounts_getpaymentlink",
+        { account_id: accountId, paymethod_id: CARD_PAYMETHOD_ID },
+        user, pass
+      );
       const url = typeof link.data === "string" ? link.data.trim() : "";
       if (link.ok && /^https:\/\//.test(url)) {
         paymentUrl = url;
