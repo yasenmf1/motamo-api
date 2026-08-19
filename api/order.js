@@ -177,13 +177,15 @@ function hasLetters(value) {
 // The browser generates the reference before sending, so it still knows the code
 // when our response is lost on a flaky connection. We only sanity-check the
 // shape and fall back to our own.
-const REF_PATTERN = /^WEB-[A-Z0-9]{4,12}-[A-Z0-9]{2,8}$/;
+// `W-7K3QD` today. The old `WEB-…-…` shape is still accepted because a copy of the
+// previous page can sit in LiteSpeed's cache for a while after a deploy.
+const REF_PATTERN = /^(W-[A-Z0-9]{4,8}|WEB-[A-Z0-9]{4,12}-[A-Z0-9]{2,8})$/;
 
 function makeRef(clientRef) {
   if (typeof clientRef === "string" && REF_PATTERN.test(clientRef)) return clientRef;
-  const stamp = Date.now().toString(36).toUpperCase();
-  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `WEB-${stamp}-${rand}`;
+  const stamp = Math.floor(Date.now() / 60000).toString(36).toUpperCase().slice(-2);
+  const rand = ("00" + Math.floor(Math.random() * 46656).toString(36).toUpperCase()).slice(-3);
+  return `W-${stamp}${rand}`;
 }
 
 // Barsy validates `uuid` as a real UUID — handing it our own reference earns
@@ -191,7 +193,13 @@ function makeRef(clientRef) {
 // generating a random one, so a retry carrying the same reference produces the
 // same uuid and Barsy's duplicate guard actually catches it.
 function refToUuid(ref) {
-  const hex = crypto.createHash("sha1").update(ref).digest("hex");
+  // Scoped to the day. A short reference is readable but its space is small, and
+  // two orders months apart landing on the same code would otherwise hash to the
+  // same uuid and be merged by Barsy's duplicate guard. Within one day a repeat is
+  // vanishingly unlikely, and a retry seconds later still produces the same uuid,
+  // which is the whole point of deriving it.
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Sofia" }).format(new Date());
+  const hex = crypto.createHash("sha1").update(`${day}|${ref}`).digest("hex");
   const version = "5" + hex.slice(13, 16);              // version nibble
   const variant = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16) + hex.slice(17, 20);
   return [hex.slice(0, 8), hex.slice(8, 12), version, variant, hex.slice(20, 32)].join("-");
@@ -414,7 +422,8 @@ module.exports = async function handler(req, res) {
       // creation. So the choice is written where staff will read it — the title
       // in the accounts list, and the first line of the notes.
       account_alias: `ОНЛАЙН ${name} · ${payLabel}`,
-      description: `Онлайн поръчка ${ref}`,
+      // Prints on the fiscal receipt, so it is short and says what it is.
+      description: `Поръчка ${ref} · ВЗЕМАНЕ ОТ МЯСТО`,
       // What the customer typed goes in `notes`, the field the staff actually
       // read on the account. It used to be appended to `description` and the
       // owner never saw it there; the IP that sat here instead told nobody in
