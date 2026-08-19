@@ -86,6 +86,14 @@ const HIDDEN_CATEGORY = /алкохол/i;
 // of test mode.
 const ONLINE_CARD = process.env.ONLINE_CARD === "1";
 
+// The shop is not operating yet — the POS equipment is not installed and the
+// packaging has not arrived — so the site must not take orders nobody can fill.
+// Set ORDERS_OPEN=1 to open. PREVIEW_TOKEN lets the owner order anyway, so the
+// checkout can be tested while the door is shut; the repository is public, so the
+// token lives only in the environment.
+const ORDERS_OPEN = process.env.ORDERS_OPEN === "1";
+const PREVIEW_TOKEN = process.env.PREVIEW_TOKEN || "";
+
 // „Карта site" — the only payment method the „Линк за плащане" public access offers.
 // Naming it means Barsy skips its own chooser page, which is a dark generic screen
 // with clip-art that the customer has no reason to see when there is nothing to
@@ -362,7 +370,14 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  if (!isOpen()) {
+  const previewing = PREVIEW_TOKEN !== "" && body.preview === PREVIEW_TOKEN;
+
+  if (!ORDERS_OPEN && !previewing) {
+    fail(res, 409, "not_launched", "Online ordering has not started yet");
+    return;
+  }
+
+  if (!isOpen() && !previewing) {
     fail(res, 409, "closed", "Online ordering is closed right now");
     return;
   }
