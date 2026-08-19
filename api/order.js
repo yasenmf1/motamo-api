@@ -528,7 +528,7 @@ module.exports = async function handler(req, res) {
           ref: ref,
           account_id: accountId,
           status: link.status,
-          barsy: typeof link.raw === "string" ? link.raw.slice(0, 400) : null
+          barsy: typeof link.raw === "string" ? link.raw.slice(0, 1500) : null
         }));
       }
     } catch (err) {
