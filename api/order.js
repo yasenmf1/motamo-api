@@ -443,6 +443,20 @@ module.exports = async function handler(req, res) {
   }
 
   if (!placed.ok) {
+    // The customer only ever sees „Кухнята не отговаря", which tells us nothing an
+    // hour later. Barsy names the reason — a price that no longer matches its
+    // pricelist, a missing article, a right the API user lost — so put it in the
+    // function log. The reference and the priced lines go with it; the customer's
+    // name and phone deliberately do not.
+    console.error(JSON.stringify({
+      event: "barsy_rejected",
+      ref: ref,
+      status: placed.status,
+      client_id: PICKUP_CLIENT_ID,
+      due_total: dueTotal,
+      rows: rows,
+      barsy: typeof placed.raw === "string" ? placed.raw.slice(0, 600) : null
+    }));
     res.status(502).json({
       ok: false,
       code: "barsy_rejected",
