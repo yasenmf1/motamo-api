@@ -36,6 +36,15 @@ const SORT_BY_PROFIT = { point: true, shop: false };
 const ALLOWED_ORIGIN = "https://motamo.bg";
 const CACHE_SECONDS = 300;
 
+// How long the CDN may keep serving the last good menu after it goes stale, while
+// it refreshes in the background. It was 60s, which meant a Barsy outage longer
+// than a minute left the site with no menu at all. A day of stale prices is a
+// worse menu; an empty page is no menu — and Barsy is read fresh every 5 minutes
+// anyway, so a customer sees a stale one only while Barsy is actually unreachable.
+// The error paths below deliberately set no Cache-Control, so a failure is never
+// what gets cached.
+const STALE_SECONDS = 86400;
+
 // The Каравелов 101 point runs a −15% pricelist that Barsy applies to guest
 // orders, so the public catalogue price is not what such an order actually
 // costs. api/order.js sends Barsy the discounted figure and Barsy rejects
@@ -185,6 +194,6 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  res.setHeader("Cache-Control", `s-maxage=${CACHE_SECONDS}, stale-while-revalidate=60`);
+  res.setHeader("Cache-Control", `s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${STALE_SECONDS}`);
   res.status(200).json(menu);
 };
