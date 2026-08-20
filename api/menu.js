@@ -17,7 +17,14 @@ const IMAGE_BASE = {
 // („Подадената цена … се различава от очакваната"), and quoting it at full price next to
 // discounted food is a different price rule on one screen. The owner's call: keep it
 // off the site entirely.
-const HIDDEN_CATEGORY = /алкохол/i;
+// „ПРОМОЦИИ" holds the gift articles, priced 0.00 in Barsy. They must never appear
+// as a menu tab — a category of free food is an invitation to fill a basket with it.
+// They are hidden from the *catalogue* only: when the offers feature lands, the gift
+// will reach the browser through its own field, granted by the server once the offer's
+// condition is met, and never as something the customer can browse and add.
+// Note this regex is menu.js's alone. `order.js` keeps its own, narrower one — adding
+// ПРОМОЦИИ there would make the gift unorderable, which is the opposite of the point.
+const HIDDEN_CATEGORY = /алкохол|промоции/i;
 
 const { sortByProfit } = require("./costs");
 
