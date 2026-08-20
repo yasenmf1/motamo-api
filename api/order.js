@@ -86,6 +86,83 @@ const HIDDEN_CATEGORY = /алкохол/i;
 // of test mode.
 const ONLINE_CARD = process.env.ONLINE_CARD === "1";
 
+// ONLINE_CARD being off is a decision someone has to keep making. The failure it
+// guards against is quiet and expensive: while Barsy's ДСК settings say
+// „Тестова среда", every payment link points at the bank's sandbox, where a
+// customer completes a payment, no money moves, and Barsy still marks the account
+// settled. Whoever flips the flag one day will not be reading the comment above
+// it, so the code checks the link itself rather than trusting the flag.
+const SANDBOX_PAYMENT_HOSTS = [
+  "uat.dskbank.bg",
+  "vpostest.dskbank.bg",
+  "test.dskbank.bg"
+];
+
+/* Спирачка срещу наводняване на касата.
+ *
+ * Всяка приета поръчка вдига „Чака одобрение" на екрана в кухнята. Скрипт, който
+ * праща валидни поръчки в цикъл, не краде нищо — просто затрупва хората, докато
+ * престанат да различават истинската поръчка от боклука.
+ *
+ * Помни се в паметта на инстанцията. Vercel вдига по няколко и ги приспива, така
+ * че това НЕ е точен глобален лимит: разпределена атака или студен старт минават
+ * покрай него. Хваща обаче случая, който реално се случва — един източник в
+ * серия — и не струва нито външна услуга, нито ключ. Ако някой ден потрябва
+ * твърда гаранция, тя се слага пред функцията (Vercel Firewall), не в нея.
+ */
+const RATE_WINDOW_MS = 10 * 60 * 1000;
+// Офисите по Каравелов излизат в интернет през един адрес, така че обедът на
+// цял етаж е десетина поръчки от „един" IP за няколко минути. Затова лимитът по
+// адрес е висок — той цели скрипт, който би пратил стотици, не колеги, които
+// поръчват заедно. Тесният лимит е по телефон: три поръчки от един номер за
+// десет минути вече не е обяд.
+const MAX_PER_IP = 20;
+const MAX_PER_PHONE = 3;
+const RATE_MAX_KEYS = 5000;          // таван на паметта, ако някой обикаля IP-та
+const rateHits = new Map();
+
+function rateCheck(key) {
+  if (!key) return true;
+  const now = Date.now();
+  if (rateHits.size > RATE_MAX_KEYS) rateHits.clear();
+  const fresh = (rateHits.get(key) || []).filter(function (t) { return now - t < RATE_WINDOW_MS; });
+  rateHits.set(key, fresh);
+  return fresh;
+}
+
+function rateExceeded(key, limit) {
+  const fresh = rateCheck(key);
+  return fresh === true ? false : fresh.length >= limit;
+}
+
+function rateRecord(key) {
+  if (!key) return;
+  const fresh = rateCheck(key);
+  if (fresh !== true) fresh.push(Date.now());
+}
+
+function clientIp(req) {
+  const fwd = req.headers && req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
+  return (req.headers && req.headers["x-real-ip"]) || null;
+}
+
+function sandboxHostOf(url) {
+  let host;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch (err) {
+    return null;
+  }
+  return SANDBOX_PAYMENT_HOSTS.find(function (h) {
+    return host === h || host.endsWith("." + h);
+  }) || null;
+}
+
+function isSandboxPaymentUrl(url) {
+  return sandboxHostOf(url) !== null;
+}
+
 // The shop is not operating yet — the POS equipment is not installed and the
 // packaging has not arrived — so the site must not take orders nobody can fill.
 // Set ORDERS_OPEN=1 to open. PREVIEW_TOKEN lets the owner order anyway, so the
@@ -382,6 +459,16 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // Проверява се СЛЕД валидацията и ПРЕДИ Барси: боклукът пада по-рано и на
+  // по-евтино, а бройката се вдига само за заявка, която иначе би станала
+  // поръчка. Собственикът в режим на преглед не се брои — той тества.
+  const ip = clientIp(req);
+  if (!previewing && (rateExceeded(ip, MAX_PER_IP) || rateExceeded(phone, MAX_PER_PHONE))) {
+    console.error(JSON.stringify({ event: "rate_limited", client_ref: String(body.ref || "").slice(0, 20) }));
+    fail(res, 429, "too_many_orders", "Too many orders in a short time");
+    return;
+  }
+
   // --- price it from the live menu, never from the browser ------------------
   let menuRes;
   try {
@@ -524,6 +611,14 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // Броим чак сега, когато поръчката наистина е в касата. Отказана от Барси не
+  // е натоварила никого и не бива да изяжда квотата на човек, който после ще
+  // поръча както трябва.
+  if (!previewing) {
+    rateRecord(ip);
+    rateRecord(phone);
+  }
+
   // Accounts_create answers with the new account id.
   const accountId = typeof placed.data === "number"
     ? placed.data
@@ -545,8 +640,19 @@ module.exports = async function handler(req, res) {
         user, pass
       );
       const url = typeof link.data === "string" ? link.data.trim() : "";
-      if (link.ok && /^https:\/\//.test(url)) {
+      if (link.ok && /^https:\/\//.test(url) && !isSandboxPaymentUrl(url)) {
         paymentUrl = url;
+      } else if (link.ok && isSandboxPaymentUrl(url)) {
+        // Barsy is still on „Тестова среда": this link leads to the bank's
+        // sandbox, where a customer „pays" and the account is marked settled
+        // with no money moving. Refuse it and let them pay at the counter —
+        // the order itself is already placed and the food gets made.
+        console.error(JSON.stringify({
+          event: "paymentlink_sandbox_refused",
+          ref: ref,
+          account_id: accountId,
+          host: sandboxHostOf(url)
+        }));
       } else {
         console.error(JSON.stringify({
           event: "paymentlink_failed",
