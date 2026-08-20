@@ -19,6 +19,13 @@ const IMAGE_BASE = {
 // off the site entirely.
 const HIDDEN_CATEGORY = /алкохол/i;
 
+const { sortByProfit } = require("./costs");
+
+// Подредбата по печалба важи само за точката. Магазинният каталог е друг —
+// други article_id, друг ценоразпис, себестойности за него няма — така че там
+// редът остава този от касата, вместо да го подреждаме по налучкан разход.
+const SORT_BY_PROFIT = { point: true, shop: false };
+
 const ALLOWED_ORIGIN = "https://motamo.bg";
 const CACHE_SECONDS = 300;
 
@@ -148,7 +155,13 @@ module.exports = async function handler(req, res) {
       if (!hasName(a)) return;
       items.push(mapArticle(a, source));
     });
-    if (items.length) menu.push({ category: cat.cat_name || "", items: items });
+    if (items.length) {
+      const name = cat.cat_name || "";
+      menu.push({
+        category: name,
+        items: SORT_BY_PROFIT[source] ? sortByProfit(items, name) : items
+      });
+    }
   });
 
   const extraItems = [];
@@ -158,7 +171,12 @@ module.exports = async function handler(req, res) {
     if (!hasName(a)) return;
     extraItems.push(mapArticle(a, source));
   });
-  if (extraItems.length) menu.push({ category: rootCatName, items: extraItems });
+  if (extraItems.length) {
+    menu.push({
+      category: rootCatName,
+      items: SORT_BY_PROFIT[source] ? sortByProfit(extraItems, rootCatName) : extraItems
+    });
+  }
 
   res.setHeader("Cache-Control", `s-maxage=${CACHE_SECONDS}, stale-while-revalidate=60`);
   res.status(200).json(menu);
