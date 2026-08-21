@@ -27,11 +27,18 @@ const IMAGE_BASE = {
 const HIDDEN_CATEGORY = /алкохол|промоции/i;
 
 const { sortByProfit } = require("./costs");
+const { allergensFor } = require("./allergens");
+const { parseDescription } = require("./describe");
 
 // Подредбата по печалба важи само за точката. Магазинният каталог е друг —
 // други article_id, друг ценоразпис, себестойности за него няма — така че там
 // редът остава този от касата, вместо да го подреждаме по налучкан разход.
 const SORT_BY_PROFIT = { point: true, shop: false };
+
+// Алергените са ключирани по article_id на точката. Магазинният каталог е друг —
+// други id-та — така че там таблицата не важи и мълчанието е по-честно от чужд
+// списък, залепен по съвпадащ номер.
+const HAS_ALLERGENS = { point: true, shop: false };
 
 const ALLOWED_ORIGIN = "https://motamo.bg";
 const CACHE_SECONDS = 300;
@@ -71,7 +78,7 @@ function mapArticle(a, source) {
   // for hours. Barsy stamps every article with `last_update`, which moves whenever
   // the article does — hanging it on the URL makes a new photo a new address.
   const stamp = typeof a.last_update === "string" ? a.last_update.replace(/\D/g, "") : "";
-  return {
+  const item = {
     id: a.article_id,
     name: a.article_name_public,
     // The menu deliberately quotes the full price. Showing the discounted one
@@ -80,10 +87,22 @@ function mapArticle(a, source) {
     // saving belongs at checkout, as its own line.
     price: base,
     pickup_price: pickup === base ? null : pickup,
+    // `description` остава суровото поле от Барси заради всичко, което вече го
+    // чете. Разборът се добавя до него, а не вместо него.
     description: (a.description_ml && a.description_ml.bg_BG) || "",
+    // Едни и същи полета за всеки артикул, извлечени от свободния текст в касата.
+    // Липсващото е `null` — сайтът пропуска реда, вместо да рисува празен етикет.
+    spec: parseDescription((a.description_ml && a.description_ml.bg_BG) || "", a.article_name_public),
     image: `${IMAGE_BASE[source]}?article_id=${a.article_id}&mode=fix&width=550`
       + (stamp ? `&v=${stamp}` : "")
   };
+  // Три различни отговора, три различни стойности, защото сайтът ги показва
+  // различно: масив = обявени; `null` = има ред, но неустановени → „попитай ни";
+  // липсващ ключ = този каталог изобщо не носи алергени, така че сайтът не
+  // изписва нищо. Слети в едно, магазинът щеше да пише „неустановени" на всеки
+  // артикул — шум, който обезсмисля същото изречение там, където значи нещо.
+  if (HAS_ALLERGENS[source]) item.allergens = allergensFor(a.article_id);
+  return item;
 }
 
 function hasName(a) {
