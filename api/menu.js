@@ -61,7 +61,9 @@ const STALE_SECONDS = 86400;
 //
 // Barsy rounds half-up at two decimals; the arithmetic stays in integer cents
 // because 4.675 * 100 is 467.49999… in binary floating point.
-const DISCOUNT_PCT = { point: 15, shop: 0 };
+// 0 от 24.08.2026 — виж бележката в order.js. `pickup_price` вече излиза null,
+// така че картите показват една цена, което е и истината.
+const DISCOUNT_PCT = { point: 0, shop: 0 };
 
 function discounted(price, source) {
   const pct = DISCOUNT_PCT[source] || 0;

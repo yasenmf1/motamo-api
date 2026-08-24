@@ -49,7 +49,11 @@ const PICKUP_CLIENT_ID = 7;
 // charge. Barsy rounds half-up at two decimals — verified against every computed
 // price in its own pricelist screen — so the arithmetic is done in integer
 // cents to avoid binary-float surprises (4.675 * 100 is 467.49999… in JS).
-const PICKUP_DISCOUNT_PCT = 15;
+// 0 от 24.08.2026. Дотогава каталогът носеше „доставъчната" цена, а ценоразпис
+// „- 15%" при клиент 7 правеше цената за вземане. Сега в Барси стои самата цена
+// за вземане и правилото е махнато, така че тук няма какво да се смъква — но
+// сметките остават в цели стотинки, за да върне цената 0 % непроменена.
+const PICKUP_DISCOUNT_PCT = 0;
 
 function discountedCents(baseCents) {
   return Math.floor((baseCents * (100 - PICKUP_DISCOUNT_PCT) + 50) / 100);
