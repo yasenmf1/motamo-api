@@ -63,6 +63,13 @@ function discountedCents(baseCents) {
 // than in the browser: a visitor's clock is not evidence, and the static site
 // can sit in LiteSpeed's cache after the hours change.
 const OPEN_DAYS = new Set(["Mon", "Tue", "Wed", "Thu", "Fri"]);
+
+// Отделни неработни дни — обектът е затворен, макар да е делник. Датите са по
+// Europe/Sofia. Същият списък стои и в `index.html`, но решението е тук: там
+// сменя надписа, тук затваря вратата. Стара отворена страница иначе би пратила
+// поръчка в ден, в който няма кой да я приготви, и клиентът щеше да дойде за
+// нея. Празниците 07.09 и 22.09 се добавят и на двете места, заедно.
+const CLOSED_DAYS = new Set(["2026-08-28"]);
 const OPEN_FROM_MIN = 11 * 60;
 const OPEN_TO_MIN = 18 * 60 + 50;
 
@@ -244,6 +251,9 @@ function sofiaNow() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Europe/Sofia",
     weekday: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false
@@ -252,11 +262,16 @@ function sofiaNow() {
     const found = parts.find((p) => p.type === type);
     return found ? found.value : "";
   };
-  return { weekday: get("weekday"), minutes: Number(get("hour")) * 60 + Number(get("minute")) };
+  return {
+    weekday: get("weekday"),
+    minutes: Number(get("hour")) * 60 + Number(get("minute")),
+    date: get("year") + "-" + get("month") + "-" + get("day")
+  };
 }
 
 function isOpen() {
   const now = sofiaNow();
+  if (CLOSED_DAYS.has(now.date)) return false;
   if (!OPEN_DAYS.has(now.weekday)) return false;
   return now.minutes >= OPEN_FROM_MIN && now.minutes <= OPEN_TO_MIN;
 }
