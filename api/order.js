@@ -683,6 +683,12 @@ module.exports = async function handler(req, res) {
       return;
     }
 
+    // Логваме id-то на заявката — успехът иначе не оставя следа, а то ни трябва,
+    // за да превърнем платената заявка в сметка (`api/order-settle.js`).
+    console.error(JSON.stringify({
+      event: "clientorder_placed", ref: ref, client_order_id: clientOrderId, due_total: dueTotal
+    }));
+
     res.status(200).json({
       ok: true,
       ref: ref,
