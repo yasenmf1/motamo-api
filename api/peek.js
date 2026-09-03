@@ -21,6 +21,8 @@ const ALLOWED = new Set([
   "Clientorders_getlist",
   "Clientorders_get",
   "Clientorders_getdetails",
+  "Clientorders_getstatuslistdata",
+  "Accounts_servicestatusgetlist",
   "Payments_getlist",
   // Каталог/цени/рецепти — само четене, за да мога да видя какво евентуално да сменя.
   "Articles_getlist",
