@@ -188,6 +188,15 @@ const PREVIEW_TOKEN = process.env.PREVIEW_TOKEN || "";
 // choose between. Without it the link lands there first.
 const CARD_PAYMETHOD_ID = 8;
 
+// Колко дълго живее линкът за плащане. Barsy оставя 7 дни по подразбиране, което е
+// далеч отвъд деня, в който някой е на касата. Поръчки се приемат до 18:50, а щандът
+// затваря в 19:00: линк с недѐлен живот значи, че някой може да плати в 23:00 или на
+// другата сутрин — звънецът за одобрение звъни в празен магазин и сметката стои
+// платена, но неприключена. Един час стига на всеки, който наистина плаща (пренасочваме
+// го веднага), и затваря опашката. Изтече ли линкът, поръчката не се губи — човекът
+// плаща на касата, точно както при отказан линк.
+const PAYMENT_LINK_EXP_HOURS = 1;
+
 const BARSY_TIMEOUT_MS = 8000;
 
 function fail(res, status, code, message) {
@@ -655,7 +664,11 @@ module.exports = async function handler(req, res) {
     try {
       const link = await authedCall(
         "Accounts_getpaymentlink",
-        { account_id: accountId, paymethod_id: CARD_PAYMETHOD_ID },
+        {
+          account_id: accountId,
+          paymethod_id: CARD_PAYMETHOD_ID,
+          exp_hours: PAYMENT_LINK_EXP_HOURS
+        },
         user, pass
       );
       const url = typeof link.data === "string" ? link.data.trim() : "";
