@@ -21,7 +21,14 @@ const ALLOWED = new Set([
   "Clientorders_getlist",
   "Clientorders_get",
   "Clientorders_getdetails",
-  "Payments_getlist"
+  "Payments_getlist",
+  // Каталог/цени/рецепти — само четене, за да мога да видя какво евентуално да сменя.
+  "Articles_getlist",
+  "Articles_get",
+  "Categories_getlist",
+  "Categories_getalltree",
+  "Paymentmethods_getlist",
+  "Taxgroups_getlist"
 ]);
 
 async function withTimeout(run) {
