@@ -77,11 +77,23 @@ const OPEN_TO_MIN = 18 * 60 + 50;
 // kitchen. Not a security boundary — Barsy's own storefront is public with the
 // same capability — but they keep this channel from being the easy way to do
 // damage.
-const MAX_PER_LINE = 20;
-const MAX_TOTAL_ITEMS = 50;
-const MAX_ORDER_EUR = 200;
+// Таван на бройката от един артикул. Различен по категория, по искане на
+// собственика: поке върви на по-големи порции, сушито — не. Всичко извън поке пада
+// на 7. Проверява се СЛЕД като знаем категорията (тя идва от менюто), затова тук
+// стои и общ абсолютен таван за ранната валидация на входа.
+const PER_LINE_POKE = 10;
+const PER_LINE_DEFAULT = 7;
+const POKE_CATEGORY = /поке|poke/i;
+const MAX_PER_LINE = PER_LINE_POKE;      // абсолютният таван на входа = най-високият по категория
+const MAX_TOTAL_ITEMS = 20;
+const MAX_ORDER_EUR = 250;
 const MAX_NAME_LEN = 60;
 const MAX_NOTE_LEN = 300;
+
+// Колко от този артикул е позволено — по категорията му.
+function perLineLimit(category) {
+  return POKE_CATEGORY.test(category || "") ? PER_LINE_POKE : PER_LINE_DEFAULT;
+}
 
 // The −15% pickup pricelist covers food only. Alcohol is sold across the counter
 // but is not offered online: quoting it at −15% makes Barsy reject the whole order
@@ -352,8 +364,9 @@ function refToUuid(ref) {
   return [hex.slice(0, 8), hex.slice(8, 12), version, variant, hex.slice(20, 32)].join("-");
 }
 
-// Flatten Barsy's category tree into article_id → {name, price}. Same dedupe as
-// api/menu.js: subcategory articles are repeated at root level.
+// Flatten Barsy's category tree into article_id → {name, price, category}. Same
+// dedupe as api/menu.js: subcategory articles are repeated at root level. The
+// category rides along so the per-line limit can differ by it (поке vs суши).
 function buildPriceMap(tree) {
   const map = new Map();
 
@@ -369,17 +382,23 @@ function buildPriceMap(tree) {
     });
   });
 
-  const add = function (a) {
+  const add = function (a, category) {
     if (!a || a.article_id == null || map.has(a.article_id)) return;
     if (hiddenIds.has(a.article_id)) return;
     const price = Number(a.current_price);
     if (!Number.isFinite(price) || price <= 0) return;
     const name = typeof a.article_name_public === "string" ? a.article_name_public.trim() : "";
     if (!name) return;
-    map.set(a.article_id, { name: name, price: price });
+    map.set(a.article_id, { name: name, price: price, category: category || "" });
   };
-  (tree.categories || []).forEach((entry) => (entry.articles || []).forEach(add));
-  (tree.articles || []).forEach(add);
+  // First the categorised pass, so each article keeps its own category; the root
+  // pass only mops up anything a category did not already claim (dupes are skipped
+  // by map.has, so they never overwrite the category set here).
+  (tree.categories || []).forEach(function (entry) {
+    const cat = (entry.category && entry.category.cat_name) || "";
+    (entry.articles || []).forEach((a) => add(a, cat));
+  });
+  (tree.articles || []).forEach((a) => add(a, ""));
   return map;
 }
 
@@ -528,6 +547,7 @@ module.exports = async function handler(req, res) {
 
   const rows = [];
   const unavailable = [];
+  const overLimit = [];
   let baseCentsTotal = 0;
   let dueCentsTotal = 0;
 
@@ -535,6 +555,14 @@ module.exports = async function handler(req, res) {
     const article = priceMap.get(articleId);
     if (!article) {
       unavailable.push(articleId);
+      return;
+    }
+    // Таван на бройката по категория (поке 10, останалото 7). Прилага се тук,
+    // защото категорията идва от менюто, което вече е изтеглено. Входната
+    // валидация вече е спряла всичко над абсолютния таван; това стяга под него.
+    const lineMax = perLineLimit(article.category);
+    if (amount > lineMax) {
+      overLimit.push({ article_id: articleId, name: article.name, max: lineMax });
       return;
     }
     const unitBaseCents = Math.round(article.price * 100);
@@ -563,6 +591,19 @@ module.exports = async function handler(req, res) {
       code: "cart_out_of_date",
       message: "Some items are no longer available",
       unavailable: unavailable
+    });
+    return;
+  }
+
+  // Твърде много от един артикул — казваме кой и колко е таванът, за да свали
+  // бройката вместо да гадае. Сървърна преграда: и да е пипана количката в
+  // браузъра, тук не минава.
+  if (overLimit.length) {
+    res.status(400).json({
+      ok: false,
+      code: "quantity_over_limit",
+      message: "Too many of an item",
+      over_limit: overLimit
     });
     return;
   }
