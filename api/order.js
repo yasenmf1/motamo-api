@@ -197,6 +197,20 @@ const CARD_PAYMETHOD_ID = 8;
 // плаща на касата, точно както при отказан линк.
 const PAYMENT_LINK_EXP_HOURS = 1;
 
+// „Вариант 1" — картовата поръчка влиза като КЛИЕНТСКА ЗАЯВКА, не като отворена
+// сметка. Зад собствен флаг, за да е обратимо със смяна на env, без да пипа нито
+// поръчките в брой, нито стария картов път.
+//
+// Защо: „Карта site" е фискален, затова плащането по отворена сметка печата
+// фискален бон веднага, а по-късното затваряне на вече нулевия остатък печата
+// СЛУЖЕБЕН бон — недопустим при продажба (писмо на БИМ до производителите на ФУ) и
+// маркер за проверка пред НАП, при това по един на всяка картова поръчка.
+// Клиентската заявка не е фискална операция; тя става сметка чак при
+// `Accounts_createfromclientorder` с `flag_close_account=1` — сметката се ражда
+// платена и затворена в едно действие и печата ЕДИН фискален бон. Второто го върши
+// `api/order-settle.js`, след като плащането по заявката е потвърдено.
+const ONLINE_CARD_V2 = process.env.ONLINE_CARD_V2 === "1";
+
 const BARSY_TIMEOUT_MS = 8000;
 
 function fail(res, status, code, message) {
@@ -567,6 +581,120 @@ module.exports = async function handler(req, res) {
   // --- place it ------------------------------------------------------------
   const ref = makeRef(body.ref);
   const payLabel = pay === "card" ? "С КАРТА" : "В БРОЙ";
+
+  // ── Вариант 1: картовата поръчка като клиентска заявка (зад ONLINE_CARD_V2) ──
+  // Само за карта; в брой продължава надолу като отворена сметка, платена на
+  // касата. Заявката не е фискална операция — фискализацията идва чак при
+  // превръщането ѝ в сметка в `api/order-settle.js`, така служебният бон отпада.
+  if (ONLINE_CARD_V2 && pay === "card") {
+    // Редът на заявката носи `original_price` (сметката ползва
+    // `original_current_price` — различно поле, същата стойност).
+    const orderRows = rows.map(function (r) {
+      return { article_id: r.article_id, amount: r.amount, original_price: r.original_current_price };
+    });
+    const orderObj = {
+      client_id: PICKUP_CLIENT_ID,
+      // Нашият W-XXXXX като външен номер на заявката.
+      order_num: ref,
+      contact_name: name,
+      client_tel: phone,
+      // Печата се на фискалната бележка при превръщането в сметка.
+      description: `Поръчка ${ref} · ВЗЕМАНЕ ОТ МЯСТО`,
+      // Бележката на клиента — не се печата.
+      public_notes: note || "",
+      // Вземане от място, без доставка — както при отворената сметка.
+      delivery_address: { delivery_type: "no" }
+    };
+
+    let zayavka;
+    try {
+      zayavka = await authedCall("Clientorders_create", { order: orderObj, rows: orderRows }, user, pass);
+    } catch (err) {
+      res.status(504).json({
+        ok: false, code: "uncertain",
+        message: "No response from Barsy — the order may have been placed", ref: ref
+      });
+      return;
+    }
+    if (!zayavka.ok) {
+      console.error(JSON.stringify({
+        event: "clientorder_rejected", ref: ref, status: zayavka.status,
+        due_total: dueTotal, rows: orderRows,
+        barsy: typeof zayavka.raw === "string" ? zayavka.raw.slice(0, 600) : null
+      }));
+      res.status(502).json({
+        ok: false, code: "barsy_rejected",
+        message: typeof zayavka.raw === "string" ? zayavka.raw.slice(0, 300) : "Barsy rejected the order", ref: ref
+      });
+      return;
+    }
+
+    if (!previewing) {
+      rateRecord(ip);
+      rateRecord(phone);
+    }
+
+    const clientOrderId = typeof zayavka.data === "number"
+      ? zayavka.data
+      : (zayavka.data && (zayavka.data.client_order_id || zayavka.data.id)) || null;
+
+    // Линк за плащане по заявката — същият механизъм като по сметка, само
+    // адресиран към `client_order_id`. `paymethod_id` 8 „Карта site" пропуска
+    // избора; `exp_hours` 1 — линкът умира до час.
+    let paymentUrl = null;
+    if (clientOrderId) {
+      try {
+        const link = await authedCall(
+          "Clientorders_getpaymentlink",
+          { client_order_id: clientOrderId, paymethod_id: CARD_PAYMETHOD_ID, exp_hours: PAYMENT_LINK_EXP_HOURS },
+          user, pass
+        );
+        const url = typeof link.data === "string" ? link.data.trim() : "";
+        if (link.ok && /^https:\/\//.test(url) && !isSandboxPaymentUrl(url)) {
+          paymentUrl = url;
+        } else if (link.ok && isSandboxPaymentUrl(url)) {
+          console.error(JSON.stringify({
+            event: "clientorder_paymentlink_sandbox_refused", ref: ref,
+            client_order_id: clientOrderId, host: sandboxHostOf(url)
+          }));
+        } else {
+          console.error(JSON.stringify({
+            event: "clientorder_paymentlink_failed", ref: ref, client_order_id: clientOrderId,
+            status: link.status, barsy: typeof link.raw === "string" ? link.raw.slice(0, 1500) : null
+          }));
+        }
+      } catch (err) {
+        console.error(JSON.stringify({
+          event: "clientorder_paymentlink_error", ref: ref, client_order_id: clientOrderId, message: String(err && err.message)
+        }));
+      }
+    }
+
+    // Тук линкът НЕ е по избор, за разлика от отворената сметка: заявка без
+    // плащане не влиза в списъка със сметки и кухнята не я вижда. Без линк не
+    // потвърждаваме поръчката — заявката стои неплатена (безвредна, не е фискална
+    // операция) и клиентът опитва пак. (Заслужава по-мек резерв — превръщане в
+    // отворена сметка за плащане на касата — но не преди пътят да е доказан.)
+    if (!paymentUrl) {
+      res.status(502).json({
+        ok: false, code: "paymentlink_required",
+        message: "Card order needs an online payment link, which could not be created", ref: ref
+      });
+      return;
+    }
+
+    res.status(200).json({
+      ok: true,
+      ref: ref,
+      total: dueTotal,
+      base_total: baseTotal,
+      discount_pct: PICKUP_DISCOUNT_PCT,
+      payment: pay,
+      client_order_id: clientOrderId,
+      online_payment_url: paymentUrl
+    });
+    return;
+  }
 
   const payload = {
     account: {
