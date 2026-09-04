@@ -204,11 +204,13 @@ module.exports = async function handler(req, res) {
         account_id: Number(acct),
         flag_close_account: 1,
         // AccountPaymentInputData: сумата е `original_paid_sum` (НЕ `sum`).
-        // orderId-то на ДСК влиза в `payment_data` за проследяване на касата.
+        // `payment_data` НЕ се подава: живото API го иска като object, не string
+        // (примерът в доката е подвеждащ — подаде ли се текст, връща „Некоректен
+        // тип … Очаква се: object"). То е по избор — за проследяване; orderId-то
+        // на ДСК остава в лога (payreturn_settled), което стига за засичане.
         payments: [{
           paymethod_id: CARD_PAYMETHOD_ID,
-          original_paid_sum: sumEur,
-          payment_data: `ДСК ${orderId}`
+          original_paid_sum: sumEur
         }]
       },
       user, pass
