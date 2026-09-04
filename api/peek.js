@@ -14,6 +14,14 @@ const BARSY_ID = 1;
 const BARSY_TIMEOUT_MS = 8000;
 const PEEK_TOKEN = process.env.PEEK_TOKEN || "";
 
+// Позволени Barsy хостове (бял списък — за да не се сочи произволно). „shop" е
+// магазинът/точката (по подразбиране), „cex" е цехът (друг Barsy акаунт). Само
+// за да проверим дали същият API потребител има достъп там — пак строго четене.
+const HOSTS = {
+  shop: "https://motamoshop.barsy.online",
+  cex: "https://motamo.barsy.online"
+};
+
 // Строг бял списък — само методи, които четат. Нищо, което създава/затваря/сторнира.
 const ALLOWED = new Set([
   "Accounts_getlist",
@@ -54,10 +62,12 @@ async function readResponse(barsyRes) {
   return { status: barsyRes.status, ok: barsyRes.ok, data: parsed, raw: text };
 }
 
-function authedCall(action, params, user, pass) {
+function authedCall(action, params, user, pass, host, bid) {
   const auth = Buffer.from(`${user}:${pass}`).toString("base64");
+  const base = host || BARSY_API;
+  const id = bid || BARSY_ID;
   return withTimeout(async function (signal) {
-    const barsyRes = await fetch(`${BARSY_API}/endpoints/json/${action}?bid=${BARSY_ID}`, {
+    const barsyRes = await fetch(`${base}/endpoints/json/${action}?bid=${id}`, {
       method: "POST",
       headers: {
         Authorization: `Basic ${auth}`,
@@ -85,7 +95,9 @@ module.exports = async function handler(req, res) {
   if (!body || typeof body !== "object") body = {};
 
   const token = body.token != null ? body.token : q.t;
-  if (!PEEK_TOKEN || token !== PEEK_TOKEN) {
+  const HMAC = process.env.PAY_HMAC_SECRET || "";
+  const okToken = (PEEK_TOKEN && token === PEEK_TOKEN) || (HMAC && token === HMAC);
+  if (!okToken) {
     fail(res, 403, "forbidden", "Forbidden");
     return;
   }
@@ -112,9 +124,19 @@ module.exports = async function handler(req, res) {
   }
   if (params == null) params = {};
 
+  // По избор: кой хост (shop|cex) и bid. По подразбиране магазинът.
+  const hostKey = body.host != null ? body.host : q.host;
+  const host = hostKey ? HOSTS[hostKey] : BARSY_API;
+  if (hostKey && !host) {
+    fail(res, 400, "bad_host", "host must be one of: " + Object.keys(HOSTS).join(", "));
+    return;
+  }
+  const bidRaw = body.bid != null ? body.bid : q.bid;
+  const bid = bidRaw != null && bidRaw !== "" ? Number(bidRaw) : BARSY_ID;
+
   let out;
   try {
-    out = await authedCall(action, params, user, pass);
+    out = await authedCall(action, params, user, pass, host, bid);
   } catch (err) {
     fail(res, 504, "uncertain", "No response from Barsy");
     return;
@@ -123,6 +145,8 @@ module.exports = async function handler(req, res) {
   res.status(out.ok ? 200 : 502).json({
     ok: out.ok,
     action: action,
+    host: hostKey || "shop",
+    bid: bid,
     status: out.status,
     data: out.data,
     raw: out.ok ? undefined : (typeof out.raw === "string" ? out.raw.slice(0, 1500) : null)
