@@ -42,9 +42,12 @@ module.exports = async function handler(req, res) {
   const q = (req.query && typeof req.query === "object") ? req.query : {};
   const first = (v) => Array.isArray(v) ? v[0] : v;
   const token = String(first(q.token) || "");
+  // Приема PREVIEW_TOKEN или PAY_HMAC_SECRET — второто, за да може пробата да се
+  // извика server-to-server при пускането ѝ, без токенът да минава през браузър.
   const PREVIEW_TOKEN = process.env.PREVIEW_TOKEN || "";
-
-  if (!PREVIEW_TOKEN || token !== PREVIEW_TOKEN) {
+  const HMAC = process.env.PAY_HMAC_SECRET || "";
+  const okToken = (PREVIEW_TOKEN && token === PREVIEW_TOKEN) || (HMAC && token === HMAC);
+  if (!okToken) {
     res.status(403).json({ ok: false, error: "forbidden" });
     return;
   }
