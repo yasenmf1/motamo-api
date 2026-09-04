@@ -102,13 +102,6 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const user = process.env.BARSY_USER;
-  const pass = process.env.BARSY_PASS;
-  if (!user || !pass) {
-    fail(res, 500, "not_configured", "Barsy credentials are not configured");
-    return;
-  }
-
   const action = body.action != null ? body.action : q.action;
   if (!action || !ALLOWED.has(action)) {
     fail(res, 400, "action_not_allowed", "action must be one of: " + Array.from(ALLOWED).join(", "));
@@ -133,6 +126,15 @@ module.exports = async function handler(req, res) {
   }
   const bidRaw = body.bid != null ? body.bid : q.bid;
   const bid = bidRaw != null && bidRaw !== "" ? Number(bidRaw) : BARSY_ID;
+
+  // Кредити по хост: цехът е отделен акаунт със свои (BARSY_CEX_USER/PASS);
+  // магазинът ползва основните. Слагат се във Vercel env от собственика.
+  const user = hostKey === "cex" ? process.env.BARSY_CEX_USER : process.env.BARSY_USER;
+  const pass = hostKey === "cex" ? process.env.BARSY_CEX_PASS : process.env.BARSY_PASS;
+  if (!user || !pass) {
+    fail(res, 500, "not_configured", "Barsy credentials are not configured for host " + (hostKey || "shop"));
+    return;
+  }
 
   let out;
   try {
