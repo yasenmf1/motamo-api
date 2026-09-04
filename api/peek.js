@@ -35,10 +35,43 @@ const ALLOWED = new Set([
   // Каталог/цени/рецепти — само четене, за да мога да видя какво евентуално да сменя.
   "Articles_getlist",
   "Articles_get",
+  "Articles_getdetails",
+  "Articles_getrecipe",
+  "Articles_getavailability",
   "Categories_getlist",
   "Categories_getalltree",
   "Paymentmethods_getlist",
-  "Taxgroups_getlist"
+  "Taxgroups_getlist",
+  // Склад / зареждане / производство / партиди — кандидати за четене (цех анализ).
+  // Всички са *_getlist/_get (четене по конвенцията на Barsy). Несъществуващ метод
+  // просто връща грешка — безвредно.
+  "Stores_getlist",
+  "Store_getlist",
+  "Store_getavailability",
+  "Storeloads_getlist",
+  "Storeloads_get",
+  "Storemoves_getlist",
+  "Storemoves_get",
+  "Availabilities_getlist",
+  "Availability_getlist",
+  "Productions_getlist",
+  "Productions_get",
+  "Production_getlist",
+  "Lots_getlist",
+  "Lots_get",
+  "Lot_getlist",
+  "Invoices_getlist",
+  "Invoices_get",
+  "Shipments_getlist",
+  "Storenotes_getlist",
+  "Documents_getlist",
+  "Clients_getlist",
+  "Clients_get",
+  "Contragents_getlist",
+  "Suppliers_getlist",
+  "Recipes_getlist",
+  "Recipe_getlist",
+  "Warehouses_getlist"
 ]);
 
 async function withTimeout(run) {
