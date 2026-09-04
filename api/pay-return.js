@@ -86,17 +86,6 @@ function timingSafeEqual(a, b) {
   return crypto.timingSafeEqual(ba, bb);
 }
 
-// Барси иска валиден UUID за uuid; извеждаме го от референцията, скопиран 1:1 от
-// api/order.js, за да съвпадне с този на създаването и двойно връщане да е
-// идемпотентно (без второ закриване).
-function refToUuid(ref) {
-  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Sofia" }).format(new Date());
-  const hex = crypto.createHash("sha1").update(`${day}|${ref}`).digest("hex");
-  const version = "5" + hex.slice(13, 16);
-  const variant = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16) + hex.slice(17, 20);
-  return [hex.slice(0, 8), hex.slice(8, 12), version, variant, hex.slice(20, 32)].join("-");
-}
-
 // ДСК getOrderStatusExtended.do — питаме банката какъв е статусът на плащането.
 // Връща { ok, orderStatus, amount, raw }. orderStatus: 0 регистрирано, неплатено;
 // 1 холд (двуфазен терминал); 2 напълно оторизирано/платено; 3 сторнирано;
@@ -194,15 +183,15 @@ module.exports = async function handler(req, res) {
   // 4) Платено и сумата съвпада → закриваме сметката ЕДНОВРЕМЕННО с плащането.
   //    Едно фискално действие → един фискален бон, нула служебни.
   //
-  // ⚠ СХЕМАТА НА Accounts_place ТРЯБВА ДА СЕ СВЕРИ С ДОКУМЕНТАЦИЯТА НА BARSY
-  //   (docs.lukanet.com/barsy.api) ПРЕДИ първата истинска поръчка. По-долу е
-  //   най-вероятната форма: продължаване на СЪЩЕСТВУВАЩА сметка по account_id,
-  //   с плащане и закриване. Полетата, за които не сме 100% сигурни:
-  //     • обвивката: account_id на горно ниво vs. в { account: {...} };
-  //     • елементът на payments: { paymethod_id, sum } vs. друго име за сумата;
-  //     • дали flag_close_account върви на горно ниво (както при
-  //       Accounts_createfromclientorder в api/order-settle.js).
-  //   Затова DIRECT_DSK стои ИЗКЛЮЧЕН, докато това не се потвърди в ДСК sandbox.
+  // Схемата е сверена с документацията на Barsy (docs.lukanet.com/barsy.api,
+  // Accounts_place). Продължаваме СЪЩЕСТВУВАЩАТА сметка по `account_id` — НЕ
+  // подаваме нито `account`, нито `orders`: редовете вече са на сметката от
+  // Accounts_create, повторното им подаване би удвоило поръчката. `payments` се
+  // приемат само заедно с `flag_close_account=1` (както пише в доката).
+  //
+  // Идемпотентност при двойно връщане (клиент презарежда return-а): второто
+  // извикване удря вече затворена сметка и Barsy го отказва — логваме и връщаме
+  // успех, без второ плащане или втори бон.
   const user = process.env.BARSY_USER;
   const pass = process.env.BARSY_PASS;
   const sumEur = Number((Number(amt) / 100).toFixed(2));
@@ -213,9 +202,14 @@ module.exports = async function handler(req, res) {
       "Accounts_place",
       {
         account_id: Number(acct),
-        uuid: refToUuid(ref),
         flag_close_account: 1,
-        payments: [{ paymethod_id: CARD_PAYMETHOD_ID, sum: sumEur }]
+        // AccountPaymentInputData: сумата е `original_paid_sum` (НЕ `sum`).
+        // orderId-то на ДСК влиза в `payment_data` за проследяване на касата.
+        payments: [{
+          paymethod_id: CARD_PAYMETHOD_ID,
+          original_paid_sum: sumEur,
+          payment_data: `ДСК ${orderId}`
+        }]
       },
       user, pass
     );
