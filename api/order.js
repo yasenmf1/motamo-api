@@ -687,6 +687,15 @@ module.exports = async function handler(req, res) {
   const ref = makeRef(body.ref);
   const payLabel = pay === "card" ? "С КАРТА" : "В БРОЙ";
 
+  // По директния ДСК път картовата сметка се ражда ОТВОРЕНА (кухнята я вижда,
+  // звънецът звъни) още преди клиентът да плати — плащането е след това, а
+  // pay-return.js я затваря сама, щом ДСК потвърди. За да не одобри някой
+  // неплатена картова поръчка в този прозорец, надписът ѝ крещи „ИЗЧАКВА
+  // ПЛАЩАНЕ", докато е отворена; платената се затваря и пада от списъка.
+  const cardWaiting = DIRECT_DSK && pay === "card";
+  const aliasPay = cardWaiting ? "❗КАРТА – ИЗЧАКВА ПЛАЩАНЕ" : payLabel;
+  const notesPay = cardWaiting ? "КАРТА – ИЗЧАКВА ОНЛАЙН ПЛАЩАНЕ" : payLabel;
+
   // ── Вариант 1: картовата поръчка като клиентска заявка (зад ONLINE_CARD_V2) ──
   // Само за карта; в брой продължава надолу като отворена сметка, платена на
   // касата. Заявката не е фискална операция — фискализацията идва чак при
@@ -824,14 +833,14 @@ module.exports = async function handler(req, res) {
       // one is the `payments` array, which settles and closes the account on
       // creation. So the choice is written where staff will read it — the title
       // in the accounts list, and the first line of the notes.
-      account_alias: `ОНЛАЙН ${name} · ${payLabel}`,
+      account_alias: `ОНЛАЙН ${name} · ${aliasPay}`,
       // Prints on the fiscal receipt, so it is short and says what it is.
       description: `Поръчка ${ref} · ВЗЕМАНЕ ОТ МЯСТО`,
       // What the customer typed goes in `notes`, the field the staff actually
       // read on the account. It used to be appended to `description` and the
       // owner never saw it there; the IP that sat here instead told nobody in
       // the kitchen anything.
-      notes: note ? `Плащане: ${payLabel}\n${note}` : `Плащане: ${payLabel}`,
+      notes: note ? `Плащане: ${notesPay}\n${note}` : `Плащане: ${notesPay}`,
       delivery_address: { delivery_type: "no" }
     },
     rows: rows
