@@ -234,8 +234,11 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // Логваме и суровия отговор на Accounts_place — за да видим дали Barsy връща
+  // номер на фискалния бон (за евентуално записване/показване към сметката).
   console.error(JSON.stringify({
-    event: "payreturn_settled", ref: ref, acct: acct, orderId: orderId, sum: sumEur
+    event: "payreturn_settled", ref: ref, acct: acct, orderId: orderId, sum: sumEur,
+    barsy: typeof placed.raw === "string" ? placed.raw.slice(0, 800) : placed.data
   }));
   redirect(res, back(1));
 };
