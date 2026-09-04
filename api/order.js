@@ -223,6 +223,18 @@ const PAYMENT_LINK_EXP_HOURS = 1;
 // `api/order-settle.js`, след като плащането по заявката е потвърдено.
 const ONLINE_CARD_V2 = process.env.ONLINE_CARD_V2 === "1";
 
+// ── Директна ДСК интеграция (зад собствен флаг) ─────────────────────────────
+// Заменя Barsy „Accounts_getpaymentlink" с директно register.do към ДСК. Barsy
+// линкът фискализира плащането ОТДЕЛНО (оттам служебният бон при по-късното
+// закриване). Директният път оставя плащането нефискализирано в Barsy до
+// връщането, където api/pay-return.js закрива сметката ЕДНОВРЕМЕННО с плащането
+// (Accounts_place) → един фискален бон, нула служебни. Изключено по подразбиране:
+// без флага картовият път е непокътнатият стар Barsy линк.
+const DIRECT_DSK = process.env.DIRECT_DSK === "1";
+const DSK_API = "https://epg.dskbank.bg/payment/rest/";
+const DSK_CURRENCY = "978"; // EUR (ISO 4217). Терминалът е в евро (потвърдено).
+const PAY_RETURN_URL = "https://motamo-api.vercel.app/api/pay-return";
+
 const BARSY_TIMEOUT_MS = 8000;
 
 function fail(res, status, code, message) {
@@ -279,6 +291,58 @@ function authedCall(action, params, user, pass) {
       signal: signal
     });
     return readResponse(barsyRes);
+  });
+}
+
+// HMAC подпис на данните, които пътуват през браузъра в returnUrl (референция,
+// сметка, сума), за да не може клиентът да ги подправи. Същата тайна и същият
+// ред на полетата се проверяват в api/pay-return.js.
+function paySign(parts) {
+  const secret = process.env.PAY_HMAC_SECRET || "";
+  return crypto.createHmac("sha256", secret).update(parts.join("|")).digest("hex");
+}
+
+// ДСК register.do — регистрира плащане и връща формата на банката (formUrl).
+// НЕ таксува нищо: таксуването става, когато клиентът плати на formUrl, затова е
+// безопасна проба дори в продукция. amount е в центове (минорни единици).
+// Връща { ok, formUrl, orderId } или { ok:false, error, raw }.
+async function dskRegister({ ref, amountCents, returnUrl, failUrl, description }) {
+  const dskUser = process.env.DSK_API_USER;
+  const dskPass = process.env.DSK_API_PASS;
+  if (!dskUser || !dskPass) return { ok: false, error: "dsk_not_configured" };
+  const form = new URLSearchParams({
+    userName: dskUser,
+    password: dskPass,
+    orderNumber: ref,
+    amount: String(amountCents),
+    currency: DSK_CURRENCY,
+    returnUrl: returnUrl,
+    failUrl: failUrl,
+    description: description,
+    language: "bg",
+    sessionTimeoutSecs: String(PAYMENT_LINK_EXP_HOURS * 3600)
+  });
+  return withTimeout(async function (signal) {
+    const r = await fetch(DSK_API + "register.do", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+      signal: signal
+    });
+    const text = await r.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch (e) { data = null; }
+    const formUrl = data && typeof data.formUrl === "string" ? data.formUrl : "";
+    const orderId = data && typeof data.orderId === "string" ? data.orderId : "";
+    // RBS/ДСК: успех = върнат formUrl + orderId (errorCode „0" или липсва).
+    // Иначе errorCode/errorMessage назовава причината (напр. returnUrl извън
+    // whitelist-а, невалидни кредити, грешна валута).
+    if (formUrl && orderId) return { ok: true, formUrl: formUrl, orderId: orderId };
+    return {
+      ok: false,
+      error: data && (data.errorMessage || data.errorCode) ? String(data.errorMessage || data.errorCode) : "register_failed",
+      raw: text.slice(0, 600)
+    };
   });
 }
 
@@ -835,7 +899,43 @@ module.exports = async function handler(req, res) {
   // will be made. The customer simply gets the ordinary confirmation and pays at the
   // counter, which is what every order did until now.
   let paymentUrl = null;
-  if (ONLINE_CARD && pay === "card" && accountId) {
+  if (ONLINE_CARD && pay === "card" && accountId && DIRECT_DSK) {
+    // Директен ДСК път: register.do → formUrl. returnUrl носи референцията,
+    // сметката и сумата (в центове), подписани с HMAC, за да не се подправят;
+    // ДСК добавя своя orderId при връщането. Закриването става в pay-return.js.
+    const sig = paySign([ref, String(accountId), String(dueCentsTotal)]);
+    const q = new URLSearchParams({
+      ref: ref, acct: String(accountId), amt: String(dueCentsTotal), sig: sig
+    });
+    const returnUrl = `${PAY_RETURN_URL}?${q.toString()}`;
+    const failUrl = `${PAY_RETURN_URL}?${q.toString()}&fail=1`;
+    try {
+      const reg = await dskRegister({
+        ref: ref,
+        amountCents: dueCentsTotal,
+        returnUrl: returnUrl,
+        failUrl: failUrl,
+        description: `MOTAMO ${ref}`
+      });
+      if (reg.ok && /^https:\/\//.test(reg.formUrl) && !isSandboxPaymentUrl(reg.formUrl)) {
+        paymentUrl = reg.formUrl;
+      } else if (reg.ok && isSandboxPaymentUrl(reg.formUrl)) {
+        console.error(JSON.stringify({
+          event: "dsk_register_sandbox_refused", ref: ref, account_id: accountId,
+          host: sandboxHostOf(reg.formUrl)
+        }));
+      } else {
+        console.error(JSON.stringify({
+          event: "dsk_register_failed", ref: ref, account_id: accountId,
+          error: reg.error || null, raw: reg.raw || null
+        }));
+      }
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: "dsk_register_error", ref: ref, account_id: accountId, message: String(err && err.message)
+      }));
+    }
+  } else if (ONLINE_CARD && pay === "card" && accountId) {
     try {
       const link = await authedCall(
         "Accounts_getpaymentlink",
