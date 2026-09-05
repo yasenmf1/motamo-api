@@ -276,7 +276,7 @@ MENU.forEach(function(m){var v=(s.order&&s.order[m.name])||0;h+='<td class="'+(m
 function collect(){document.querySelectorAll('#grid input').forEach(function(inp){var i=+inp.getAttribute('data-i'),n=inp.getAttribute('data-n'),v=parseFloat(inp.value)||0;if(!shops[i].order)shops[i].order={};if(v)shops[i].order[n]=v;else delete shops[i].order[n]})}
 function calc(){collect();msg('Смятам…');api({shops:shops}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}renderPlan(j);msg('Планът е готов.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function tbl(t,o){var ks=Object.keys(o||{});if(!ks.length)return '';var h='<table><tr><th class="shop">'+t+'</th><th>кол.</th></tr>';ks.forEach(function(k){h+='<tr><td class="shop">'+esc(k)+'</td><td class="q">'+o[k]+'</td></tr>'});return h+'</table>'}
-function renderPlan(j){$('planbox').innerHTML='<h2>За производство</h2><div class="plan">'+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
+function renderPlan(j){$('planbox').innerHTML='<h2>За производство</h2><div class="plan">'+tbl('Сетове',j.produce_sets)+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
 function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}collect();var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy:\\n• ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (ролки → сетове)');api({action:'produce_plan',shops:shops,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||(j.zagotovki&&j.zagotovki.error)||j.error||j.message||''),'err');return}var ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;msg('✓ Производството е създадено. Партида '+j.lot+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+'. Провери в касата и „Приключи", ако е ок.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}collect();if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy по магазин.\\nЦените ги слага Barsy по правилото на клиента (аз не подавам цена).\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:shops}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. Провери в касата.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function renderCreated(cr){var h='<h2>Създадени сметки</h2><table><tr><th class="shop">Магазин</th><th>сметка №</th><th>артикули</th><th>статус</th></tr>';cr.forEach(function(c){var full=(c.client||'')+(c.rep?(' · '+c.rep):'');h+='<tr><td class="shop" title="'+esc(full)+'">'+esc(shortName(c.client,c.rep))+'</td><td>'+(c.account_id||'—')+'</td><td>'+(c.items||0)+'</td><td>'+(c.ok?'✓':esc(c.skipped||'грешка'))+'</td></tr>'});$('planbox').innerHTML=h+'</table>'}
@@ -306,14 +306,15 @@ module.exports = async function handler(req, res) {
     let seed;
     try { seed = await seedShops(date, user, pass); }
     catch (e) { res.status(200).send(todayPage(`<div class="wrap"><h2>Грешка</h2><p>Не мога да прочета сметките сега. Опитай пак след минута.</p></div>`)); return; }
-    const { rolls, zag } = compute(seed.shops);
+    const { agg, rolls, zag } = compute(seed.shops);
+    const sets = {}; for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set) sets[name] = qty; }
     const tbl = (obj) => Object.keys(obj).sort().map(k => `<tr><td>${esc(k)}</td><td class="q">${round(obj[k])}</td></tr>`).join("") || `<tr><td colspan="2" style="color:#999">няма</td></tr>`;
     const empty = !Object.keys(rolls).length;
     res.status(200).send(todayPage(`
       <header><h1>Цех · за производство днес</h1><div class="d">${esc(date)} · ${seed.accounts} магазина · обновено ${esc(sofiaTime())}</div></header>
       <div class="wrap">${empty
         ? `<h2>Още няма заявки за днес</h2><p>Когато влязат сметките, тук ще се появи какво да се произведе. Страницата се обновява сама.</p>`
-        : `<h2>Ролки / поке</h2><table>${tbl(rolls)}</table><h2>Заготовки</h2><table>${tbl(zag)}</table>`}
+        : `${Object.keys(sets).length ? `<h2>Сетове</h2><table>${tbl(sets)}</table>` : ""}<h2>Ролки / поке</h2><table>${tbl(rolls)}</table><h2>Заготовки</h2><table>${tbl(zag)}</table>`}
         <div class="note">Обновява се автоматично на всеки 3 минути. Числата са общо за всички магазини.</div></div>`));
     return;
   }
@@ -453,9 +454,12 @@ module.exports = async function handler(req, res) {
   }
 
   const { agg, rolls, zag } = compute(shops);
+  // Сетовете = сборът по сметки на артикулите-сетове (както се поръчват/продават).
+  const sets = {};
+  for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set) sets[name] = qty; }
   res.status(200).json({
     ok: true, seed_date: seedDate || null, seeded_accounts: seededAccounts,
     shops: shops.map(s => ({ client: s.client, rep: s.rep, client_id: s.client_id, person_id: s.person_id, account_id: s.account_id, order: sortObj(s.order || {}, 2) })),
-    order_total: sortObj(agg, 2), produce_rolls: sortObj(rolls, 2), produce_zagotovki: sortObj(zag, 3)
+    order_total: sortObj(agg, 2), produce_sets: sortObj(sets, 2), produce_rolls: sortObj(rolls, 2), produce_zagotovki: sortObj(zag, 3)
   });
 };
