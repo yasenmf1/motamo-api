@@ -104,7 +104,17 @@ const ALLOWED = new Set([
   "Recipe_getlist",
   "Warehouses_getlist",
   // Партиден регистър (само четене): движения по партиди (lot_value, amount, amount_sum).
-  "Reports_lot_list_details"
+  "Reports_lot_list_details",
+  // TEMP PROBE (S12): методи за ревизия/изписване (за зануляване на стари партиди).
+  "Revisions_save",
+  "Revisions_place",
+  "Revisions_create",
+  "Revision_save",
+  "Storeouts_save",
+  "Storeouts_place",
+  "Storeouts_create",
+  "Storeout_save",
+  "Storeouts_edit"
 ]);
 
 async function withTimeout(run) {
