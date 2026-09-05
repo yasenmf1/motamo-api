@@ -101,7 +101,10 @@ async function seedShops(date, user, pass) {
   if (!Array.isArray(all)) all = Object.values(all);
   // Групираме по ДЕНЯ НА ДОСТАВКА = close_date (сметките се правят по-рано, но се
   // затварят в деня на разноса; create_date размесва два дни). Fallback: ref_date.
-  const accts = all.filter(a => String(a.close_date || a.ref_date || "").startsWith(date));
+  // Затворените се групират по ден на доставка (close_date/ref_date). ОТВОРЕНИТЕ
+  // (още незатворени, напр. току-що създадените за понеделник) нямат close_date →
+  // ползваме create_date, за да се виждат веднага в кухненския екран/плана.
+  const accts = all.filter(a => String(a.close_date || a.ref_date || a.create_date || "").startsWith(date));
   // Паралелно по сметка — иначе ~13 последователни заявки надхвърлят лимита на функцията.
   const shops = await Promise.all(accts.map(async (a) => {
     const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
