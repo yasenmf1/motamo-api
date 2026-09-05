@@ -102,24 +102,7 @@ const ALLOWED = new Set([
   "Suppliers_getlist",
   "Recipes_getlist",
   "Recipe_getlist",
-  "Warehouses_getlist",
-  // TEMP PROBE (S12): does a production-WRITE method exist? Called with empty
-  // params → either "действието не съществува" or "липсва <required field>".
-  // Remove after probing. Nothing is created (no valid payload).
-  "Storeproductions_create",
-  "Storeproductions_place",
-  "Storeproductions_save",
-  "Storeproductions_add",
-  "Storeproductions_produce",
-  "Storeproductions_new",
-  "Storeproductions_edit",
-  "Storeproductions_update",
-  "Storeproduction_create",
-  "Storeproduction_place",
-  "Production_create",
-  "Production_place",
-  "Productions_create",
-  "Productions_place"
+  "Warehouses_getlist"
 ]);
 
 async function withTimeout(run) {
@@ -143,16 +126,12 @@ async function readResponse(barsyRes) {
   return { status: barsyRes.status, ok: barsyRes.ok, data: parsed, raw: text };
 }
 
-function authedCall(action, params, user, pass, host, bid, query) {
+function authedCall(action, params, user, pass, host, bid) {
   const auth = Buffer.from(`${user}:${pass}`).toString("base64");
   const base = host || BARSY_API;
   const id = bid || BARSY_ID;
-  let qs = `?bid=${id}`;
-  if (query && typeof query === "object") {
-    for (const k of Object.keys(query)) qs += `&${encodeURIComponent(k)}=${encodeURIComponent(query[k])}`;
-  }
   return withTimeout(async function (signal) {
-    const barsyRes = await fetch(`${base}/endpoints/json/${action}${qs}`, {
+    const barsyRes = await fetch(`${base}/endpoints/json/${action}?bid=${id}`, {
       method: "POST",
       headers: {
         Authorization: `Basic ${auth}`,
@@ -223,7 +202,7 @@ module.exports = async function handler(req, res) {
 
   let out;
   try {
-    out = await authedCall(action, params, user, pass, host, bid, body.q || null);
+    out = await authedCall(action, params, user, pass, host, bid);
   } catch (err) {
     fail(res, 504, "uncertain", "No response from Barsy");
     return;
