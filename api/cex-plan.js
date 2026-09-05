@@ -81,7 +81,7 @@ async function mapLimit(items, limit, fn) {
 // Наличности на всички СУРОВИНИ + ЗАГОТОВКИ (за ежедневния репорт „кое е на изчерпване").
 async function readStock(user, pass) {
   const arts = Object.values(ARTS).filter(a => a.cat === "Суровини" || a.cat === "Заготовки");
-  const rows = await mapLimit(arts, 18, async (a) => {
+  const rows = await mapLimit(arts, 34, async (a) => {
     let qty = null;
     try {
       const r = await cexCall("Articles_getavailability", { article_id: a.id, depots: [CEX_DEPOT] }, user, pass);
