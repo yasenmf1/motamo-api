@@ -10,6 +10,7 @@
 // (генериран от експорта). Само ЧЕТЕ Barsy (сметки/поръчки на цеха). Гейт за JSON:
 // RECONCILE_TOKEN / PAY_HMAC_SECRET / PREVIEW_TOKEN. За view=today и CEX_VIEW_TOKEN.
 
+const crypto = require("crypto");
 const DATA = require("./_cexdata.js");
 const ARTS = DATA.articles, NAME2ID = DATA.name2id;
 const MENU = Object.values(ARTS).filter(a => a.is_menu)
@@ -46,9 +47,39 @@ async function seedShops(date, user, pass) {
       const art = byId(o.article_id) || resolve(o.article_name);
       if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + (Number(o.amount) || 0);
     }
-    return { account_id: a.account_id, client: a.client_name || null, rep: a.person_name || null, order };
+    return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, order };
   }));
   return { shops, accounts: accts.length };
+}
+// UUID за идемпотентност — един и същ за (ден+магазин), за да не се дублира сметка.
+function uuidFor(date, s) {
+  const key = `${date}|${s.client_id || ""}|${s.person_id || ""}|${s.rep || ""}`;
+  const h = crypto.createHash("sha1").update(key).digest("hex");
+  const v = "5" + h.slice(13, 16), a = ((parseInt(h[16], 16) & 0x3) | 0x8).toString(16) + h.slice(17, 20);
+  return [h.slice(0, 8), h.slice(8, 12), v, a, h.slice(20, 32)].join("-");
+}
+// Създава ОТВОРЕНИ сметки-чернови по магазин (без затваряне → без фискален бон, без склад).
+async function createAccounts(shops, date, user, pass) {
+  const out = [];
+  for (const s of shops) {
+    const orders = Object.entries(s.order || {})
+      .map(([name, qty]) => { const art = resolve(name); return art ? { article_id: art.id, amount: Number(qty) } : null; })
+      .filter(o => o && o.amount > 0);   // цена НЕ подаваме → Barsy слага по ценово правило на клиента
+    if (!orders.length) { out.push({ client: s.client, rep: s.rep, skipped: "празна" }); continue; }
+    const account = {
+      uuid: uuidFor(date, s),
+      account_alias: [s.client, s.rep].filter(Boolean).join(" · ") || "ОНЛАЙН"
+    };
+    if (s.client_id) account.client_id = s.client_id;
+    if (s.person_id) account.person_id = s.person_id;
+    let r;
+    try { r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass); }
+    catch (e) { out.push({ client: s.client, rep: s.rep, ok: false, error: String(e && e.message) }); continue; }
+    const accId = typeof r.data === "number" ? r.data : (r.data && (r.data.account_id || r.data.id)) || null;
+    out.push({ client: s.client, rep: s.rep, ok: !!r.ok, account_id: accId, items: orders.length,
+      error: r.ok ? undefined : String(r.raw || "").slice(0, 200) });
+  }
+  return out;
 }
 function explodeToRolls(order) {
   const rolls = {};
@@ -174,6 +205,18 @@ module.exports = async function handler(req, res) {
   const token = body.token != null ? body.token : q.token;
   const okJson = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN].some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+
+  // ── СЪЗДАВАНЕ на отворени сметки-чернови в Barsy (ПИШЕ; зад силен токен) ──
+  if (body.action === "create_accounts") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const shopsIn = Array.isArray(body.shops) ? body.shops : [];
+    if (!shopsIn.length) { res.status(400).json({ ok: false, error: "no_shops" }); return; }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    const created = await createAccounts(shopsIn, date, user, pass);
+    res.status(200).json({ ok: true, created });
+    return;
+  }
 
   let shops = null, seededAccounts = null;
   const seedDate = body.seed_date || q.seed_date;
