@@ -18,6 +18,43 @@ const MENU = Object.values(ARTS).filter(a => a.is_menu)
   .map(a => ({ id: a.id, name: a.name, is_set: !!a.is_set }));
 
 const CEX_API = "https://motamo.barsy.online", CEX_BID = 1, CEX_DEPOT = 1, TIMEOUT_MS = 9000;
+
+// ── Цех лист (ЧЕРНОВА): срок (дни) + препоръчителна наличност + доставчик, по
+// ръчния лист на собственика (числата за проверка/корекция). Наличността се тегли
+// от Barsy по id. производство/заявка = препоръчителна − наличност.
+const CEX_SHEET = {
+  sushi: [ // {id, зад име, срок(дни), preporuka, ед}
+    { id: 65, срок: 46, preporuka: 0.2, ед: "кг" },   // заг. Сос Манго с мед
+    { id: 59, срок: 15, preporuka: 6, ед: "бр" },     // заг. Крем/Смес рулца раци
+    { id: 36, срок: 46, preporuka: 2, ед: "кг" },     // Крема сирене
+    { id: 56, срок: 46, preporuka: 4.5, ед: "кг" },   // Краставици
+    { id: 58, срок: 24, preporuka: 0.5, ед: "кг" },   // Фурикаке риба тон
+    { id: 66, срок: 46, preporuka: 7, ед: "кг" },     // заг. Марината за ориз
+    { id: 67, срок: 46, preporuka: 15, ед: "кг" }     // заг. Сварен суши ориз
+  ],
+  poke: [
+    { id: 68, срок: 15, preporuka: 6, ед: "кг" },     // заг. Соево чеснова майонеза
+    { id: 131, срок: 24, preporuka: 3, ед: "кг" },    // Зеле овкусено
+    { id: 123, срок: 24, preporuka: 3, ед: "кг" },    // Сладка Царевица
+    { id: 87, срок: 48, preporuka: 1, ед: "кг" },     // Уакаме
+    { id: 52, срок: 12, preporuka: 2, ед: "пакета" }, // Авокадо
+    { id: 53, срок: 24, preporuka: 1, ед: "кг" },     // Унаги сос
+    { id: 98, срок: 96, preporuka: 2, ед: "кг" }      // Сусам бял печен
+  ],
+  order: [ // поръчки към доставчик: {id?, name, доставчик, дни, preporuka, ед}
+    { id: 148, доставчик: "Алекс", дни: "пон/четв", preporuka: 10, ед: "пакета" }, // Сьомга Сурова
+    { name: "Раци рулца", доставчик: "Алекс", дни: "пон/четв", preporuka: 20, ед: "пакета" },
+    { id: 52, доставчик: "АйсБокс", дни: "пон/четв", preporuka: 5, ед: "пакета" }, // Авокадо
+    { id: 123, доставчик: "АйсБокс", дни: "пон/четв", preporuka: 5, ед: "пакета" }, // Царевица
+    { id: 86, доставчик: "Фишекспрес", дни: "пон/четв", preporuka: 10, ед: "пакета" }, // Едамаме
+    { id: 127, доставчик: "Брадърс", дни: "пон/четв", preporuka: 20, ед: "пакета" }, // Пиле
+    { id: 37, доставчик: "Брадърс", дни: "пон/четв", preporuka: 3, ед: "кофи" }, // Майонеза
+    { id: 29, доставчик: "Брадърс", дни: "пон/четв", preporuka: 3, ед: "кофи" }, // Олио
+    { id: 36, доставчик: "Брадърс", дни: "пон/четв", preporuka: 3, ед: "кофи" }, // Крема сирене
+    { name: "Скарида", доставчик: "Фишекспрес", дни: "пон/петък", preporuka: 20, ед: "пакета" },
+    { id: 98, доставчик: "Фишекспрес", дни: "пон/петък", preporuka: 2, ед: "кг" } // Сусам
+  ]
+};
 const byId = id => ARTS[String(id)] || null;
 const resolve = k => ARTS[String(k)] || (NAME2ID[k] != null ? ARTS[String(NAME2ID[k])] : null);
 
@@ -94,6 +131,15 @@ async function readStock(user, pass) {
   }
   rows.sort((x, y) => (x.qty == null ? 1 : y.qty == null ? -1 : x.qty - y.qty));
   return rows;
+}
+// Карта {article_id: наличност} за всички артикули (една заявка).
+async function stockMap(user, pass) {
+  const r = await cexCall("Articles_getlistobject", { filters: {}, depots: [CEX_DEPOT], extra_properties: ["store_amount"] }, user, pass);
+  const L = r.data && (r.data.list || r.data) || {};
+  const list = Array.isArray(L) ? L : Object.values(L);
+  const m = {};
+  for (const a of list) { const id = a && (a.article_id || a.id); if (id != null) { const q = Number(a.store_amount); m[String(id)] = isNaN(q) ? null : Math.round(q * 1000) / 1000; } }
+  return m;
 }
 async function seedShops(date, user, pass) {
   const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 900 }, user, pass);
@@ -221,6 +267,26 @@ header{background:#b3121b;color:#fff;padding:14px 18px}header h1{margin:0;font-s
 table{border-collapse:collapse;width:100%}th,td{padding:9px 12px;border-bottom:1px solid #eee;text-align:left;font-size:16px}
 th{background:#f0f1f3}td.q,th.q{text-align:right;font-weight:800;white-space:nowrap}td.c{color:#888;font-size:13px;text-align:center}
 tr.lo td{background:#fde8e8}tr.lo td.q{color:#9b1c1c}.ok{color:#1b5e20;font-weight:600}.note{color:#666;font-size:13px;margin-top:18px}
+</style></head><body>${inner}</body></html>`;
+}
+
+// ── HTML: цех лист (наличност + производство + поръчки), четящ ────────────────
+function sheetPage(inner) {
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Цех лист</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}body{font:16px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#eef0f3;color:#14171a}
+header{background:linear-gradient(135deg,#b3121b,#7a0c12);color:#fff;padding:16px 18px;position:sticky;top:0;z-index:5;box-shadow:0 2px 12px rgba(0,0,0,.18)}
+header h1{margin:0;font-size:22px;font-weight:800}header .d{font-size:14px;opacity:.92;margin-top:3px}
+.wrap{padding:14px;max-width:900px;margin:0 auto;display:grid;gap:16px}
+.card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(20,23,26,.08)}
+.card>h2{margin:0;font-size:15px;font-weight:800;color:#fff;padding:11px 16px;letter-spacing:.5px;text-transform:uppercase}
+.card.sushi>h2{background:#b3121b}.card.poke>h2{background:#2b7a78}.card.order>h2{background:#b8860b}
+table{border-collapse:collapse;width:100%}th,td{padding:9px 10px;font-size:15px;border-top:1px solid #f1f2f4;text-align:right;white-space:nowrap}
+th{background:#f7f8fa;color:#555;font-size:12px;text-transform:uppercase;letter-spacing:.3px;border-top:0}
+td.n,th.n{text-align:left;white-space:normal}
+td.prod{font-weight:800;color:#b3121b}td.prod.zero{color:#1b5e20}
+.low{background:#fff7ed}.draft{color:#9a6a00;font-size:12px;background:#fff8e1;padding:8px 14px;border-radius:8px;margin-top:4px}
+.note{color:#7a8087;font-size:12px;text-align:center;margin:4px 0 16px}
 </style></head><body>${inner}</body></html>`;
 }
 
@@ -356,6 +422,43 @@ module.exports = async function handler(req, res) {
         ${low.length ? `<h2>⚠️ На изчерпване (≤1)</h2><table>${rowHtml(low)}</table>` : `<p class="ok">Няма критично ниски (всичко над 1).</p>`}
         <h2>Всички (най-малко първо)</h2><table><tr><th>Артикул</th><th>вид</th><th class="q">нал.</th></tr>${rowHtml(rows)}</table>
         <div class="note">Обновява се при отваряне. „?" = липсва отчет за склада.</div></div>`));
+    return;
+  }
+
+  // 2c) Цех лист (наличност + производство + поръчки) — четящ екран.
+  if (req.method === "GET" && view === "sheet") {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    const okV = [process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].some(t => t && q.k === t);
+    if (!okV) { res.status(403).send(sheetPage(`<div class="wrap"><h2>Няма достъп</h2></div>`)); return; }
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).send(sheetPage(`<div class="wrap">Не е конфигуриран достъп.</div>`)); return; }
+    let sm;
+    try { sm = await stockMap(user, pass); }
+    catch (e) { res.status(200).send(sheetPage(`<div class="wrap"><h2>Грешка</h2><p>Не мога да прочета наличностите сега.</p></div>`)); return; }
+    const nm = id => { const a = ARTS[String(id)]; return a ? a.name : ("#" + id); };
+    const q3 = v => (v == null ? null : Math.round(v * 1000) / 1000);
+    const prodRows = (arr) => arr.map(r => {
+      const nal = r.id != null ? sm[String(r.id)] : null;
+      const prod = nal == null ? null : Math.max(0, q3(r.preporuka - nal));
+      const name = r.id != null ? nm(r.id) : (r.name || "");
+      return `<tr class="${prod > 0 ? "low" : ""}"><td class="n">${esc(name)}</td><td>${r.срок || ""}</td><td>${nal == null ? "?" : nal}</td><td class="prod ${prod ? "" : "zero"}">${prod == null ? "?" : prod}</td><td>${r.preporuka} ${esc(r.ед || "")}</td></tr>`;
+    }).join("");
+    const orderRows = CEX_SHEET.order.map(r => {
+      const nal = r.id != null ? sm[String(r.id)] : null;
+      const zaqvka = nal == null ? null : Math.max(0, q3(r.preporuka - nal));
+      const name = r.id != null ? nm(r.id) : (r.name || "");
+      return `<tr class="${zaqvka > 0 ? "low" : ""}"><td class="n">${esc(name)}</td><td class="n">${esc(r.доставчик)}</td><td>${esc(r.дни)}</td><td>${nal == null ? "?" : nal}</td><td class="prod ${zaqvka ? "" : "zero"}">${zaqvka == null ? "?" : zaqvka}</td><td>${r.preporuka} ${esc(r.ед || "")}</td></tr>`;
+    }).join("");
+    const head3 = `<tr><th class="n">Артикул</th><th>срок</th><th>налич.</th><th>произв.</th><th>препор.</th></tr>`;
+    res.status(200).send(sheetPage(`
+      <header><h1>🍣 Цех лист</h1><div class="d">${esc(sofiaToday())} · обновено ${esc(sofiaTime())}</div></header>
+      <div class="wrap">
+        <div class="draft">ЧЕРНОВА — препоръчителните количества и доставчиците са от ръчния лист (за проверка/корекция). Наличността е реална от Barsy. „произв." = препоръчителна − наличност.</div>
+        <div class="card sushi"><h2>Суши — заготовки/суровини</h2><table>${head3}${prodRows(CEX_SHEET.sushi)}</table></div>
+        <div class="card poke"><h2>Поке — заготовки/суровини</h2><table>${head3}${prodRows(CEX_SHEET.poke)}</table></div>
+        <div class="card order"><h2>Поръчки към доставчик</h2><table><tr><th class="n">Продукт</th><th class="n">доставчик</th><th>дни</th><th>налич.</th><th>заявка</th><th>препор.</th></tr>${orderRows}</table></div>
+        <div class="note">Числата на червено/оранжево = има какво да се произведе/поръча.</div>
+      </div>`));
     return;
   }
 
