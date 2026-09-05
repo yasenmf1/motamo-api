@@ -102,33 +102,7 @@ const ALLOWED = new Set([
   "Suppliers_getlist",
   "Recipes_getlist",
   "Recipe_getlist",
-  "Warehouses_getlist",
-  // TEMP PROBE (S12): намиране на метод за СТОРНО на сметка. Викат се с фалшив
-  // account_id → „несъществува сметка" (методът е тук) или „действието не
-  // съществува". Нищо реално не се сторнира. Махни след пробата.
-  "Accounts_storno",
-  "Accounts_cancel",
-  "Accounts_delete",
-  "Accounts_anulate",
-  "Accounts_refuse",
-  "Accounts_void",
-  "Accounts_cancelaccount",
-  "Accounts_close",
-  "Orders_storno",
-  "Orders_cancel",
-  "Orders_refuse",
-  "Accounts_deleteaccount",
-  "Accounts_removeaccount",
-  "Accounts_reject",
-  "Accounts_refuseorder",
-  "Accounts_deleteorder",
-  "Accounts_removeorder",
-  "Accounts_setstatus",
-  "Accounts_clear",
-  "Accounts_abandon",
-  "Accounts_remove",
-  "Accounts_cancelorder",
-  "Accounts_deleteopen"
+  "Warehouses_getlist"
 ]);
 
 async function withTimeout(run) {
