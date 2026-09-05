@@ -435,7 +435,7 @@ module.exports = async function handler(req, res) {
   const hasInput = (Array.isArray(body.shops) && body.shops.length) || (body.orders && typeof body.orders === "object") || seedDate;
   if (!hasInput) { res.status(400).json({ ok: false, error: "no_input", hint: "подай shops:[] / orders:{} / seed_date:YYYY-MM-DD" }); return; }
   if (Array.isArray(body.shops) && body.shops.length) {
-    shops = body.shops.map(s => ({ client: s.client || null, rep: s.rep || null, account_id: s.account_id || null, order: s.order || {} }));
+    shops = body.shops.map(s => ({ client: s.client || null, rep: s.rep || null, client_id: s.client_id || null, person_id: s.person_id || null, account_id: s.account_id || null, order: s.order || {} }));
   } else if (body.orders && typeof body.orders === "object") {
     shops = [{ client: null, rep: null, order: body.orders }];
   } else {
@@ -455,7 +455,7 @@ module.exports = async function handler(req, res) {
   const { agg, rolls, zag } = compute(shops);
   res.status(200).json({
     ok: true, seed_date: seedDate || null, seeded_accounts: seededAccounts,
-    shops: shops.map(s => ({ client: s.client, rep: s.rep, account_id: s.account_id, order: sortObj(s.order || {}, 2) })),
+    shops: shops.map(s => ({ client: s.client, rep: s.rep, client_id: s.client_id, person_id: s.person_id, account_id: s.account_id, order: sortObj(s.order || {}, 2) })),
     order_total: sortObj(agg, 2), produce_rolls: sortObj(rolls, 2), produce_zagotovki: sortObj(zag, 3)
   });
 };
