@@ -73,6 +73,7 @@ const ALLOWED = new Set([
   // Правилните имена от каталога с методи на Barsy (S11, от доковете):
   "Storeproductions_getlist",
   "Storeproductions_get",
+  "Storeproductions_movements",
   "Storeouts_getlist",
   "Storeouts_get",
   "Storeouts_types_getlist",
