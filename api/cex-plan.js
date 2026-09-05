@@ -179,7 +179,8 @@ header .dlab{background:#fff;color:#b3121b;border-radius:5px;padding:3px 8px;fon
 @media (max-width:760px){
  body{font-size:16px}
  header{gap:8px;padding:10px}header h1{width:100%;margin:0 0 4px;font-size:18px}
- header .grp{flex:1 1 100%;justify-content:space-between}
+ header .grp{flex:1 1 100%;justify-content:flex-start;flex-wrap:wrap}
+ header .dlab{flex:0 0 auto}
  header input{font-size:16px;padding:9px 10px;flex:1}
  header button{font-size:16px;padding:11px 12px;flex:1}
  header label{min-width:64px}
