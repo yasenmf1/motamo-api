@@ -34,6 +34,7 @@ const ALLOWED = new Set([
   "Payments_getlist",
   // Каталог/цени/рецепти — само четене, за да мога да видя какво евентуално да сменя.
   "Articles_getlist",
+  "Articles_getlistobject",
   "Articles_get",
   "Articles_getdetails",
   "Articles_getrecipe",
