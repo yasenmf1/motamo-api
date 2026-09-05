@@ -38,16 +38,16 @@ function cexCall(action, params, user, pass) {
 async function seedShops(date, user, pass) {
   const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 400 }, user, pass);
   const accts = (list.data || []).filter(a => String(a.create_date || "").startsWith(date));
-  const shops = [];
-  for (const a of accts) {
+  // Паралелно по сметка — иначе ~13 последователни заявки надхвърлят лимита на функцията.
+  const shops = await Promise.all(accts.map(async (a) => {
     const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
     const order = {};
     for (const o of (rows.data || [])) {
       const art = byId(o.article_id) || resolve(o.article_name);
       if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + (Number(o.amount) || 0);
     }
-    shops.push({ account_id: a.account_id, client: a.client_name || null, rep: a.person_name || null, order });
-  }
+    return { account_id: a.account_id, client: a.client_name || null, rep: a.person_name || null, order };
+  }));
   return { shops, accounts: accts.length };
 }
 function explodeToRolls(order) {
