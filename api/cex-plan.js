@@ -120,7 +120,7 @@ $('tok').addEventListener('change',function(){try{localStorage.setItem('cex_tok'
 (function(){$('date').value=new Date().toISOString().slice(0,10)})();
 function msg(t,k){var m=$('msg');m.textContent=t;m.className='msg '+(k||'')}
 function api(p){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:$('tok').value},p))}).then(function(r){return r.json()})}
-function seed(){msg('Зареждам…');api({seed_date:$('date').value}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||'')+' '+(j.hint||''),'err');return}shops=j.shops||[];renderGrid();renderPlan(j);msg('Заредени '+(j.seeded_accounts||0)+' сметки. Коригирай и „Изчисли план".','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function seed(){msg('Зареждам…');api({seed_date:$('date').value}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||'')+' '+(j.hint||''),'err');return}shops=j.shops||[];renderGrid();renderPlan(j);if(j.note){msg(j.note,'err')}else{msg('Заредени '+(j.seeded_accounts||0)+' сметки. Коригирай и „Изчисли план".','ok')}}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function renderGrid(){var h='<tr><th class="shop">Магазин</th>';MENU.forEach(function(m){h+='<th class="'+(m.is_set?'set':'')+'">'+m.name.replace('НACHI','')+'</th>'});h+='</tr>';
 shops.forEach(function(s,i){var label=(s.client||'')+(s.rep?(' · '+s.rep):'');h+='<tr><td class="shop" title="'+esc(label)+'">'+esc(label)+'</td>';
@@ -177,17 +177,25 @@ module.exports = async function handler(req, res) {
 
   let shops = null, seededAccounts = null;
   const seedDate = body.seed_date || q.seed_date;
+  const hasInput = (Array.isArray(body.shops) && body.shops.length) || (body.orders && typeof body.orders === "object") || seedDate;
+  if (!hasInput) { res.status(400).json({ ok: false, error: "no_input", hint: "подай shops:[] / orders:{} / seed_date:YYYY-MM-DD" }); return; }
   if (Array.isArray(body.shops) && body.shops.length) {
     shops = body.shops.map(s => ({ client: s.client || null, rep: s.rep || null, account_id: s.account_id || null, order: s.order || {} }));
   } else if (body.orders && typeof body.orders === "object") {
     shops = [{ client: null, rep: null, order: body.orders }];
-  } else if (seedDate) {
+  } else {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     try { const s = await seedShops(String(seedDate), user, pass); shops = s.shops; seededAccounts = s.accounts; }
     catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    // Празна дата (бъдеща/неработна) — връщаме ok с празно, не грешка.
+    if (!shops.length) {
+      res.status(200).json({ ok: true, seed_date: seedDate, seeded_accounts: 0, empty: true,
+        note: "Няма сметки за тази дата (бъдеща или неработна). Избери минала работна дата.",
+        shops: [], order_total: {}, produce_rolls: {}, produce_zagotovki: {} });
+      return;
+    }
   }
-  if (!shops || !shops.length) { res.status(400).json({ ok: false, error: "no_orders", hint: "подай shops:[] / orders:{} / seed_date:YYYY-MM-DD" }); return; }
 
   const { agg, rolls, zag } = compute(shops);
   res.status(200).json({
