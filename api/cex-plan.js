@@ -175,6 +175,7 @@ header h1{font-size:16px;margin:0 12px 0 0}header input{font:13px system-ui;padd
 button{font:13px system-ui;padding:6px 12px;border:0;border-radius:6px;background:#111;color:#fff;cursor:pointer}button.alt{background:#fff;color:#111;border:1px solid #ccc}
 button.prod{background:#0a7d33}button.acc{background:#7a0c12}
 header .grp{display:flex;gap:6px;align-items:center}header label{font-size:12px;opacity:.9}
+header .dlab{background:#fff;color:#b3121b;border-radius:5px;padding:3px 8px;font-size:13px;white-space:nowrap}
 @media (max-width:760px){
  body{font-size:16px}
  header{gap:8px;padding:10px}header h1{width:100%;margin:0 0 4px;font-size:18px}
@@ -194,9 +195,9 @@ h2{font-size:15px;margin:18px 0 4px}.plan{display:flex;gap:24px;flex-wrap:wrap}.
 </style></head><body>
 <header><h1>MOTAMO цех</h1>
 <span id="tokwrap"><input id="tok" type="password" placeholder="токен" size="16"></span>
-<span class="grp"><label>Зареди</label><input id="date" type="date"><button onclick="seed()">Зареди</button></span>
+<span class="grp"><label>Зареди</label><input id="date" type="date"><b class="dlab" id="dlab"></b><button onclick="seed()">Зареди</button></span>
 <span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="window.print()">Печат</button></span>
-<span class="grp"><label>Партида</label><input id="pdate" type="date" title="Партида L.<тази дата>, срок +3 дни"></span>
+<span class="grp"><label>Партида</label><input id="pdate" type="date" title="Партида L.<тази дата>, срок +3 дни"><b class="dlab" id="plab"></b></span>
 <span class="grp"><button class="prod" onclick="doProduce()">① Производство</button><button class="acc" onclick="doAccounts()">② Сметки</button></span></header>
 <div class="wrap"><div id="msg" class="msg"></div><div class="scroll"><table id="grid"></table></div><div id="planbox"></div></div>
 <script>
@@ -208,6 +209,11 @@ var t=urlk||saved;$('tok').value=t;if(urlk){try{localStorage.setItem('cex_tok',u
 if(t){$('tokwrap').style.display='none'}})();
 $('tok').addEventListener('change',function(){try{localStorage.setItem('cex_tok',$('tok').value)}catch(e){}});
 (function(){var t=new Date().toISOString().slice(0,10);$('date').value=t;$('pdate').value=t})();
+var BGM=['янв.','февр.','март','апр.','май','юни','юли','авг.','септ.','окт.','ноем.','дек.'];
+function fmtBg(iso){if(!iso||iso.split('-').length<3)return '';var p=iso.split('-');return BGM[(+p[1])-1]+' '+p[2]}
+function updLabs(){$('dlab').textContent=fmtBg($('date').value);$('plab').textContent=$('pdate').value?('партида L.'+$('pdate').value.split('-').reverse().join('.')):''}
+$('date').addEventListener('change',updLabs);$('date').addEventListener('input',updLabs);
+$('pdate').addEventListener('change',updLabs);$('pdate').addEventListener('input',updLabs);updLabs();
 function msg(t,k){var m=$('msg');m.textContent=t;m.className='msg '+(k||'')}
 function api(p){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:$('tok').value},p))}).then(function(r){return r.json()})}
 function seed(){msg('Зареждам…');api({seed_date:$('date').value}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||'')+' '+(j.hint||''),'err');return}shops=j.shops||[];renderGrid();renderPlan(j);if(j.note){msg(j.note,'err')}else{msg('Заредени '+(j.seeded_accounts||0)+' сметки. Коригирай и „Изчисли план".','ok')}}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
