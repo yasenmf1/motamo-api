@@ -173,21 +173,39 @@ function toolPage() {
 header{background:#b3121b;color:#fff;padding:10px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:5}
 header h1{font-size:16px;margin:0 12px 0 0}header input{font:13px system-ui;padding:5px 7px;border:0;border-radius:5px}
 button{font:13px system-ui;padding:6px 12px;border:0;border-radius:6px;background:#111;color:#fff;cursor:pointer}button.alt{background:#fff;color:#111;border:1px solid #ccc}
+button.prod{background:#0a7d33}button.acc{background:#7a0c12}
+header .grp{display:flex;gap:6px;align-items:center}header label{font-size:12px;opacity:.9}
+@media (max-width:760px){
+ body{font-size:16px}
+ header{gap:8px;padding:10px}header h1{width:100%;margin:0 0 4px;font-size:18px}
+ header .grp{flex:1 1 100%;justify-content:space-between}
+ header input{font-size:16px;padding:9px 10px;flex:1}
+ header button{font-size:16px;padding:11px 12px;flex:1}
+ header label{min-width:64px}
+ th,td{font-size:14px;padding:6px}td input{width:44px;font-size:16px;padding:6px}
+ .plan{gap:12px}.plan table{min-width:100%}
+ h2{font-size:17px}
+}
 .wrap{padding:14px;max-width:1400px;margin:0 auto}.msg{padding:8px 12px;border-radius:6px;margin:8px 0;display:none}.msg.err{background:#fde8e8;color:#9b1c1c;display:block}.msg.ok{background:#e8f5e9;color:#1b5e20;display:block}
 table{border-collapse:collapse;background:#fff;width:100%;margin:6px 0}th,td{border:1px solid #e2e4e8;padding:4px 6px;text-align:center;font-size:13px}th{background:#f0f1f3;position:sticky;top:52px}
 th.shop,td.shop{text-align:left;white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}td input{width:52px;text-align:center;border:1px solid #d0d3d8;border-radius:4px;padding:3px}.set{background:#fff7e6}
 h2{font-size:15px;margin:18px 0 4px}.plan{display:flex;gap:24px;flex-wrap:wrap}.plan table{width:auto;min-width:280px}.plan td.q{font-weight:700;color:#b3121b}.scroll{overflow-x:auto}
 @media print{header,.noprint{display:none}.wrap{padding:0}}
 </style></head><body>
-<header><h1>MOTAMO цех · производство</h1>
-<input id="tok" type="password" placeholder="токен" size="20"><input id="date" type="date">
-<button onclick="seed()">Зареди от дата</button><button class="alt" onclick="calc()">Изчисли план</button><button class="alt" onclick="window.print()">Печат</button>
-<span style="flex:1"></span><span style="font-size:12px">Партида дата</span><input id="pdate" type="date" title="Партида L.<тази дата>, срок +3 дни">
-<button style="background:#0a7d33" onclick="doProduce()">① Направи производството</button><button style="background:#b3121b" onclick="doAccounts()">② Създай сметките</button></header>
+<header><h1>MOTAMO цех</h1>
+<span id="tokwrap"><input id="tok" type="password" placeholder="токен" size="16"></span>
+<span class="grp"><label>Зареди</label><input id="date" type="date"><button onclick="seed()">Зареди</button></span>
+<span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="window.print()">Печат</button></span>
+<span class="grp"><label>Партида</label><input id="pdate" type="date" title="Партида L.<тази дата>, срок +3 дни"></span>
+<span class="grp"><button class="prod" onclick="doProduce()">① Производство</button><button class="acc" onclick="doAccounts()">② Сметки</button></span></header>
 <div class="wrap"><div id="msg" class="msg"></div><div class="scroll"><table id="grid"></table></div><div id="planbox"></div></div>
 <script>
 var MENU=${JSON.stringify(MENU)};var shops=[];var $=function(id){return document.getElementById(id)};
-try{$('tok').value=localStorage.getItem('cex_tok')||''}catch(e){}
+(function(){var urlk='';try{urlk=new URLSearchParams(location.search).get('k')||new URLSearchParams(location.search).get('token')||''}catch(e){}
+var saved='';try{saved=localStorage.getItem('cex_tok')||''}catch(e){}
+var t=urlk||saved;$('tok').value=t;if(urlk){try{localStorage.setItem('cex_tok',urlk)}catch(e){}}
+// щом има токен от линк/памет — крием полето (телефон); иначе го показваме
+if(t){$('tokwrap').style.display='none'}})();
 $('tok').addEventListener('change',function(){try{localStorage.setItem('cex_tok',$('tok').value)}catch(e){}});
 (function(){var t=new Date().toISOString().slice(0,10);$('date').value=t;$('pdate').value=t})();
 function msg(t,k){var m=$('msg');m.textContent=t;m.className='msg '+(k||'')}
