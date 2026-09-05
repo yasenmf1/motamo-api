@@ -96,8 +96,12 @@ async function readStock(user, pass) {
   return rows;
 }
 async function seedShops(date, user, pass) {
-  const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 400 }, user, pass);
-  const accts = (list.data || []).filter(a => String(a.create_date || "").startsWith(date));
+  const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 900 }, user, pass);
+  let all = list.data || [];
+  if (!Array.isArray(all)) all = Object.values(all);
+  // Групираме по ДЕНЯ НА ДОСТАВКА = close_date (сметките се правят по-рано, но се
+  // затварят в деня на разноса; create_date размесва два дни). Fallback: ref_date.
+  const accts = all.filter(a => String(a.close_date || a.ref_date || "").startsWith(date));
   // Паралелно по сметка — иначе ~13 последователни заявки надхвърлят лимита на функцията.
   const shops = await Promise.all(accts.map(async (a) => {
     const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
