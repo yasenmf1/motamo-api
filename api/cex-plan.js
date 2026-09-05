@@ -300,11 +300,14 @@ module.exports = async function handler(req, res) {
       .filter(r => r && r.amount > 0);
     const zagRows = toRows(zag), rollRows = toRows(rolls);
     const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate };
+    // По подразбиране произвеждаме САМО роли/поке — те дърпат готовите заготовки от
+    // наличност. Заготовките се включват само с include_zag (някои нямат рецепта за
+    // производство в Barsy, напр. „заг. Марината за ориз", и чупят наведнъж).
     try {
-      if (zagRows.length) out.zagotovki = await createProduction(zagRows, { lot, lot_exp }, user, pass);
+      if (body.include_zag === true && zagRows.length) out.zagotovki = await createProduction(zagRows, { lot, lot_exp }, user, pass);
       if (rollRows.length) out.rolls = await createProduction(rollRows, { lot, lot_exp }, user, pass);
     } catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
-    out.ok = (!zagRows.length || (out.zagotovki && out.zagotovki.ok)) && (!rollRows.length || (out.rolls && out.rolls.ok));
+    out.ok = (!rollRows.length || (out.rolls && out.rolls.ok)) && (body.include_zag !== true || !zagRows.length || (out.zagotovki && out.zagotovki.ok));
     res.status(200).json(out);
     return;
   }
