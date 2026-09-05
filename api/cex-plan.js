@@ -67,7 +67,8 @@ async function createProduction(rows, opts, user, pass) {
     }))
   }};
   const r = await cexCallRoot(body, user, pass);
-  const id = r.data && (r.data.store_production_id || r.data.id || (r.data.data && r.data.data.store_production_id)) || null;
+  // Barsy връща новото id като СТОЙНОСТ на ключа: {"Storeproductions_save": <id>}.
+  const id = r.data && (r.data.Storeproductions_save || r.data.store_production_id || r.data.id || (r.data.data && r.data.data.store_production_id)) || null;
   return { ok: !!r.ok && !!id, status: r.status, store_production_id: id, data: r.data, error: r.ok && id ? undefined : String(r.raw || "").slice(0, 300) };
 }
 async function seedShops(date, user, pass) {
