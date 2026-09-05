@@ -103,20 +103,8 @@ const ALLOWED = new Set([
   "Recipes_getlist",
   "Recipe_getlist",
   "Warehouses_getlist",
-  // S12 разследване (само четене): наличност ПО ПАРТИДИ, за да намерим разминаването.
-  "Reports_lot_list_details",
-  "Reports_lot_list",
-  "Reports_lots",
-  "Reports_lot_details",
-  "Reports_lot_balance",
-  "Store_getlots",
-  "Store_getlotavailability",
-  "Articles_getlots",
-  "Articles_getlotavailability",
-  "Lots_getavailability",
-  "Storelots_getlist",
-  "Storelots_get",
-  "Lot_getavailability"
+  // Партиден регистър (само четене): движения по партиди (lot_value, amount, amount_sum).
+  "Reports_lot_list_details"
 ]);
 
 async function withTimeout(run) {
