@@ -102,7 +102,24 @@ const ALLOWED = new Set([
   "Suppliers_getlist",
   "Recipes_getlist",
   "Recipe_getlist",
-  "Warehouses_getlist"
+  "Warehouses_getlist",
+  // TEMP PROBE (S12): does a production-WRITE method exist? Called with empty
+  // params → either "действието не съществува" or "липсва <required field>".
+  // Remove after probing. Nothing is created (no valid payload).
+  "Storeproductions_create",
+  "Storeproductions_place",
+  "Storeproductions_save",
+  "Storeproductions_add",
+  "Storeproductions_produce",
+  "Storeproductions_new",
+  "Storeproductions_edit",
+  "Storeproductions_update",
+  "Storeproduction_create",
+  "Storeproduction_place",
+  "Production_create",
+  "Production_place",
+  "Productions_create",
+  "Productions_place"
 ]);
 
 async function withTimeout(run) {
