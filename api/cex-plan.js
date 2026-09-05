@@ -185,11 +185,26 @@ function todayPage(inner) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="180">
 <title>Цех · днес за производство</title><style>
-:root{color-scheme:light}*{box-sizing:border-box}body{font:16px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#fff;color:#111}
-header{background:#b3121b;color:#fff;padding:14px 18px}header h1{margin:0;font-size:22px}header .d{font-size:15px;opacity:.9;margin-top:2px}
-.wrap{padding:16px;max-width:900px;margin:0 auto}h2{font-size:20px;margin:20px 0 8px;border-bottom:3px solid #b3121b;padding-bottom:4px}
-table{border-collapse:collapse;width:100%}td{padding:10px 12px;border-bottom:1px solid #eee;font-size:20px}
-td.q{text-align:right;font-weight:800;font-size:24px;color:#b3121b;white-space:nowrap}.note{color:#666;font-size:13px;margin-top:18px}
+:root{color-scheme:light}*{box-sizing:border-box}
+body{font:17px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#eef0f3;color:#14171a}
+header{background:linear-gradient(135deg,#b3121b,#7a0c12);color:#fff;padding:18px 20px;position:sticky;top:0;z-index:5;box-shadow:0 2px 12px rgba(0,0,0,.18)}
+header h1{margin:0;font-size:26px;font-weight:800;letter-spacing:.3px}
+header .d{font-size:15px;opacity:.93;margin-top:4px}
+.wrap{padding:16px;max-width:860px;margin:0 auto;display:grid;gap:16px}
+.card{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(20,23,26,.08)}
+.card>h2{margin:0;font-size:16px;font-weight:800;color:#fff;padding:13px 18px;letter-spacing:.6px;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
+.card>h2 .cnt{font-size:13px;font-weight:600;opacity:.9;background:rgba(255,255,255,.22);padding:2px 10px;border-radius:20px}
+.card.sets>h2{background:#b8860b}.card.rolls>h2{background:#b3121b}.card.zag>h2{background:#2b7a78}
+.card table{width:100%;border-collapse:collapse}
+.card td{padding:13px 18px;font-size:21px;border-top:1px solid #f1f2f4}
+.card tr:first-child td{border-top:0}
+.card td.q{text-align:right;font-weight:800;font-size:27px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.card.sets td.q{color:#8a6608}.card.rolls td.q{color:#b3121b}.card.zag td.q{color:#1f5b59}
+.card tr:nth-child(even) td{background:#fafbfc}
+.empty{background:#fff;border-radius:16px;padding:34px 20px;text-align:center;color:#555;box-shadow:0 2px 8px rgba(20,23,26,.08)}
+.empty h2{margin:0 0 8px;font-size:23px;color:#14171a}
+.note{color:#7a8087;font-size:13px;text-align:center;margin:2px 0 20px}
+@media (max-width:520px){header h1{font-size:22px}.wrap{padding:12px;gap:13px}.card td{font-size:19px;padding:12px 15px}.card td.q{font-size:24px}}
 </style></head><body>${inner}</body></html>`;
 }
 
@@ -308,14 +323,15 @@ module.exports = async function handler(req, res) {
     catch (e) { res.status(200).send(todayPage(`<div class="wrap"><h2>Грешка</h2><p>Не мога да прочета сметките сега. Опитай пак след минута.</p></div>`)); return; }
     const { agg, rolls, zag } = compute(seed.shops);
     const sets = {}; for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set) sets[name] = qty; }
-    const tbl = (obj) => Object.keys(obj).sort().map(k => `<tr><td>${esc(k)}</td><td class="q">${round(obj[k])}</td></tr>`).join("") || `<tr><td colspan="2" style="color:#999">няма</td></tr>`;
-    const empty = !Object.keys(rolls).length;
+    const tbl = (obj) => Object.keys(obj).sort().map(k => `<tr><td>${esc(k)}</td><td class="q">${round(obj[k])}</td></tr>`).join("");
+    const card = (cls, title, obj) => { const n = Object.keys(obj).length; return n ? `<div class="card ${cls}"><h2>${title}<span class="cnt">${n} вида</span></h2><table>${tbl(obj)}</table></div>` : ""; };
+    const empty = !Object.keys(rolls).length && !Object.keys(sets).length;
     res.status(200).send(todayPage(`
-      <header><h1>Цех · за производство днес</h1><div class="d">${esc(date)} · ${seed.accounts} магазина · обновено ${esc(sofiaTime())}</div></header>
+      <header><h1>🍣 Цех · за днес</h1><div class="d">${esc(date)} · ${seed.accounts} магазина · обновено ${esc(sofiaTime())}</div></header>
       <div class="wrap">${empty
-        ? `<h2>Още няма заявки за днес</h2><p>Когато влязат сметките, тук ще се появи какво да се произведе. Страницата се обновява сама.</p>`
-        : `${Object.keys(sets).length ? `<h2>Сетове</h2><table>${tbl(sets)}</table>` : ""}<h2>Ролки / поке</h2><table>${tbl(rolls)}</table><h2>Заготовки</h2><table>${tbl(zag)}</table>`}
-        <div class="note">Обновява се автоматично на всеки 3 минути. Числата са общо за всички магазини.</div></div>`));
+        ? `<div class="empty"><h2>Още няма заявки за днес</h2><p>Когато влязат сметките, тук се показва какво да се произведе.<br>Страницата се обновява сама.</p></div>`
+        : `${card("sets", "Сетове", sets)}${card("rolls", "Ролки / поке", rolls)}${card("zag", "Заготовки", zag)}
+        <div class="note">Обновява се сам на всеки 3 минути · числата са общо за всички магазини</div>`}</div>`));
     return;
   }
 
