@@ -104,7 +104,15 @@ const ALLOWED = new Set([
   "Recipe_getlist",
   "Warehouses_getlist",
   // Партиден регистър (само четене): движения по партиди (lot_value, amount, amount_sum).
-  "Reports_lot_list_details"
+  "Reports_lot_list_details",
+  // TEMP PROBE (S12): метод за анулиране на производство. Махни след употреба.
+  "Storeproductions_anulate",
+  "Storeproductions_storno",
+  "Storeproductions_delete",
+  "Storeproductions_cancel",
+  "Storeproductions_remove",
+  "Storeproductions_setanulate",
+  "Storeproductions_anulate_flag"
 ]);
 
 async function withTimeout(run) {
