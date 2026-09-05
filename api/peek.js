@@ -102,7 +102,21 @@ const ALLOWED = new Set([
   "Suppliers_getlist",
   "Recipes_getlist",
   "Recipe_getlist",
-  "Warehouses_getlist"
+  "Warehouses_getlist",
+  // S12 разследване (само четене): наличност ПО ПАРТИДИ, за да намерим разминаването.
+  "Reports_lot_list_details",
+  "Reports_lot_list",
+  "Reports_lots",
+  "Reports_lot_details",
+  "Reports_lot_balance",
+  "Store_getlots",
+  "Store_getlotavailability",
+  "Articles_getlots",
+  "Articles_getlotavailability",
+  "Lots_getavailability",
+  "Storelots_getlist",
+  "Storelots_get",
+  "Lot_getavailability"
 ]);
 
 async function withTimeout(run) {
