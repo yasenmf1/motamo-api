@@ -17,7 +17,7 @@ const MENU = Object.values(ARTS).filter(a => a.is_menu)
   .sort((a, b) => (a.is_set - b.is_set) || (a.id - b.id))
   .map(a => ({ id: a.id, name: a.name, is_set: !!a.is_set }));
 
-const CEX_API = "https://motamo.barsy.online", CEX_BID = 1, TIMEOUT_MS = 9000;
+const CEX_API = "https://motamo.barsy.online", CEX_BID = 1, CEX_DEPOT = 1, TIMEOUT_MS = 9000;
 const byId = id => ARTS[String(id)] || null;
 const resolve = k => ARTS[String(k)] || (NAME2ID[k] != null ? ARTS[String(NAME2ID[k])] : null);
 
@@ -35,6 +35,40 @@ function cexCall(action, params, user, pass) {
     const text = await r.text(); let d = null; try { d = JSON.parse(text); } catch (e) {}
     return { ok: r.ok, status: r.status, data: d, raw: text };
   });
+}
+// Записът на производство е недокументиран вътрешен метод: праща се на
+// /endpoints/json?bid=1 (БЕЗ действие в пътя), а тялото е обвито под ключа
+// „Storeproductions_save". Затова обикновените извиквания не хващаха склада —
+// depot_id живее в values, вътре в обвивката. (Разбито живо, S12.)
+function cexCallRoot(bodyObj, user, pass) {
+  const auth = Buffer.from(`${user}:${pass}`).toString("base64");
+  return withTimeout(async (signal) => {
+    const r = await fetch(`${CEX_API}/endpoints/json?bid=${CEX_BID}`, {
+      method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify(bodyObj || {}), signal
+    });
+    const text = await r.text(); let d = null; try { d = JSON.parse(text); } catch (e) {}
+    return { ok: r.ok, status: r.status, data: d, raw: text };
+  });
+}
+// Създава ЕДНО производство (save_and_close → произведеното влиза в наличност).
+// rows: [{article_id, amount, lot?, lot_exp?}]. Числата се пращат като низове.
+async function createProduction(rows, opts, user, pass) {
+  const o = opts || {};
+  const body = { Storeproductions_save: {
+    id: null, action_type: "save_and_close",
+    values: { depot_id: String(o.depot_id || CEX_DEPOT), doc_date: o.doc_date || null, description: o.description || "", notes: o.notes || "" },
+    rows: (rows || []).map((r, i) => ({
+      row_id: "", article_id: r.article_id, article_name: r.article_name || "",
+      amount: String(r.amount), amount_prod: String(r.amount_prod != null ? r.amount_prod : r.amount),
+      prod_user: "", lot_value: r.lot != null ? String(r.lot) : (o.lot != null ? String(o.lot) : ""),
+      lot_exp_date: r.lot_exp || o.lot_exp || null, notes: "", requested_qty: "",
+      item_status: "0", prod_reason_id: "", sort_order: String(i)
+    }))
+  }};
+  const r = await cexCallRoot(body, user, pass);
+  const id = r.data && (r.data.store_production_id || r.data.id || (r.data.data && r.data.data.store_production_id)) || null;
+  return { ok: !!r.ok && !!id, status: r.status, store_production_id: id, data: r.data, error: r.ok && id ? undefined : String(r.raw || "").slice(0, 300) };
 }
 async function seedShops(date, user, pass) {
   const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 400 }, user, pass);
@@ -215,6 +249,29 @@ module.exports = async function handler(req, res) {
     const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
     const created = await createAccounts(shopsIn, date, user, pass);
     res.status(200).json({ ok: true, created });
+    return;
+  }
+
+  // ── СЪЗДАВАНЕ на ПРОИЗВОДСТВО в Barsy (ПИШЕ; произведеното влиза в наличност) ──
+  // rows: [{article_id, amount}]  или  produce: {"NACHI ORO":12, ...} (по име/ид).
+  if (body.action === "create_production") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    let rows = [];
+    if (Array.isArray(body.rows)) {
+      rows = body.rows.map(r => ({ article_id: r.article_id, amount: r.amount, amount_prod: r.amount_prod, article_name: r.article_name, lot: r.lot, lot_exp: r.lot_exp }))
+        .filter(r => r.article_id && Number(r.amount) > 0);
+    } else if (body.produce && typeof body.produce === "object") {
+      for (const [k, v] of Object.entries(body.produce)) {
+        const art = resolve(k); if (art && Number(v) > 0) rows.push({ article_id: art.id, article_name: art.name, amount: Number(v) });
+      }
+    }
+    if (!rows.length) { res.status(400).json({ ok: false, error: "no_rows", hint: "подай rows:[{article_id,amount}] или produce:{име:кол}" }); return; }
+    const opts = { doc_date: body.doc_date || null, lot: body.lot != null ? body.lot : "", lot_exp: body.lot_exp || null, description: body.description || "", notes: body.notes || "" };
+    let r;
+    try { r = await createProduction(rows, opts, user, pass); }
+    catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    res.status(200).json({ ok: r.ok, store_production_id: r.store_production_id, rows: rows.length, error: r.error });
     return;
   }
 
