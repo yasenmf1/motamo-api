@@ -79,16 +79,19 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 // Наличности на всички СУРОВИНИ + ЗАГОТОВКИ (за ежедневния репорт „кое е на изчерпване").
+// ЕДНА заявка: Articles_getlistobject с depots + extra_properties:["store_amount"]
+// връща store_amount за всеки артикул (~2 сек), вместо по една заявка на артикул.
 async function readStock(user, pass) {
-  const arts = Object.values(ARTS).filter(a => a.cat === "Суровини" || a.cat === "Заготовки");
-  const rows = await mapLimit(arts, 34, async (a) => {
-    let qty = null;
-    try {
-      const r = await cexCall("Articles_getavailability", { article_id: a.id, depots: [CEX_DEPOT] }, user, pass);
-      const d = r.data; qty = d && typeof d === "object" ? Number(d[String(CEX_DEPOT)] ?? Object.values(d)[0]) : null;
-    } catch (e) { qty = null; }
-    return { id: a.id, name: a.name, cat: a.cat, qty: (qty == null || isNaN(qty)) ? null : Math.round(qty * 1000) / 1000 };
-  });
+  const r = await cexCall("Articles_getlistobject", { filters: {}, depots: [CEX_DEPOT], extra_properties: ["store_amount"] }, user, pass);
+  const L = r.data && (r.data.list || r.data) || {};
+  const list = Array.isArray(L) ? L : Object.values(L);
+  const rows = [];
+  for (const a of list) {
+    const id = a && (a.article_id || a.id); if (id == null) continue;
+    const meta = ARTS[String(id)]; if (!meta || (meta.cat !== "Суровини" && meta.cat !== "Заготовки")) continue;
+    const q = Number(a.store_amount);
+    rows.push({ id: id, name: a.article_name || meta.name, cat: meta.cat, qty: isNaN(q) ? null : Math.round(q * 1000) / 1000 });
+  }
   rows.sort((x, y) => (x.qty == null ? 1 : y.qty == null ? -1 : x.qty - y.qty));
   return rows;
 }
