@@ -276,8 +276,8 @@ MENU.forEach(function(m){var v=(s.order&&s.order[m.name])||0;h+='<td class="'+(m
 function collect(){document.querySelectorAll('#grid input').forEach(function(inp){var i=+inp.getAttribute('data-i'),n=inp.getAttribute('data-n'),v=parseFloat(inp.value)||0;if(!shops[i].order)shops[i].order={};if(v)shops[i].order[n]=v;else delete shops[i].order[n]})}
 function calc(){collect();msg('Смятам…');api({shops:shops}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}renderPlan(j);msg('Планът е готов.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function tbl(t,o){var ks=Object.keys(o||{});if(!ks.length)return '';var h='<table><tr><th class="shop">'+t+'</th><th>кол.</th></tr>';ks.forEach(function(k){h+='<tr><td class="shop">'+esc(k)+'</td><td class="q">'+o[k]+'</td></tr>'});return h+'</table>'}
-function renderPlan(j){$('planbox').innerHTML='<h2>За производство</h2><div class="plan">'+tbl('Роли / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
-function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}collect();var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy:\\n• роли/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (роли → сетове)');api({action:'produce_plan',shops:shops,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||(j.zagotovki&&j.zagotovki.error)||j.error||j.message||''),'err');return}var ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;msg('✓ Производството е създадено. Партида '+j.lot+' · роли/поке №'+(ri||'—')+' · сетове №'+(si||'—')+'. Провери в касата и „Приключи", ако е ок.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function renderPlan(j){$('planbox').innerHTML='<h2>За производство</h2><div class="plan">'+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
+function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}collect();var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy:\\n• ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (ролки → сетове)');api({action:'produce_plan',shops:shops,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||(j.zagotovki&&j.zagotovki.error)||j.error||j.message||''),'err');return}var ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;msg('✓ Производството е създадено. Партида '+j.lot+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+'. Провери в касата и „Приключи", ако е ок.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}collect();if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy по магазин.\\nЦените ги слага Barsy по правилото на клиента (аз не подавам цена).\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:shops}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. Провери в касата.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function renderCreated(cr){var h='<h2>Създадени сметки</h2><table><tr><th class="shop">Магазин</th><th>сметка №</th><th>артикули</th><th>статус</th></tr>';cr.forEach(function(c){var full=(c.client||'')+(c.rep?(' · '+c.rep):'');h+='<tr><td class="shop" title="'+esc(full)+'">'+esc(shortName(c.client,c.rep))+'</td><td>'+(c.account_id||'—')+'</td><td>'+(c.items||0)+'</td><td>'+(c.ok?'✓':esc(c.skipped||'грешка'))+'</td></tr>'});$('planbox').innerHTML=h+'</table>'}
 </script></body></html>`;
@@ -313,7 +313,7 @@ module.exports = async function handler(req, res) {
       <header><h1>Цех · за производство днес</h1><div class="d">${esc(date)} · ${seed.accounts} магазина · обновено ${esc(sofiaTime())}</div></header>
       <div class="wrap">${empty
         ? `<h2>Още няма заявки за днес</h2><p>Когато влязат сметките, тук ще се появи какво да се произведе. Страницата се обновява сама.</p>`
-        : `<h2>Роли / поке</h2><table>${tbl(rolls)}</table><h2>Заготовки</h2><table>${tbl(zag)}</table>`}
+        : `<h2>Ролки / поке</h2><table>${tbl(rolls)}</table><h2>Заготовки</h2><table>${tbl(zag)}</table>`}
         <div class="note">Обновява се автоматично на всеки 3 минути. Числата са общо за всички магазини.</div></div>`));
     return;
   }
@@ -400,12 +400,12 @@ module.exports = async function handler(req, res) {
       .filter(r => r && r.amount > 0);
     const zagRows = toRows(zag), rollRows = toRows(rolls);
     // Сетовете (CET*) се продават като артикул в сметките, значи трябва да са в
-    // наличност → произвеждаме ги СЛЕД ролите (сетът тегли ролите си по рецепта).
+    // наличност → произвеждаме ги СЛЕД ролките (сетът тегли ролките си по рецепта).
     const setRows = Object.entries(agg)
       .map(([name, qty]) => { const a = resolve(name); return (a && a.is_set) ? { article_id: a.id, article_name: a.name, amount: round(Number(qty)) } : null; })
       .filter(r => r && r.amount > 0);
     const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate };
-    // Ред: (заготовки по избор →) роли → сетове. Ролите дърпат готовите заготовки от
+    // Ред: (заготовки по избор →) ролки → сетове. Ролките дърпат готовите заготовки от
     // наличност; заготовките се включват само с include_zag (някои нямат рецепта).
     try {
       if (body.include_zag === true && zagRows.length) out.zagotovki = await createProduction(zagRows, { lot, lot_exp }, user, pass);
