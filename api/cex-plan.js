@@ -339,7 +339,10 @@ module.exports = async function handler(req, res) {
   if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = null; } }
   if (!body || typeof body !== "object") body = {};
   const token = body.token != null ? body.token : q.token;
-  const okJson = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN].some(t => t && token === t);
+  // Пишещите действия искат силен токен; „stock" е само четене → и CEX_VIEW_TOKEN.
+  const strong = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN];
+  const allowed = body.action === "stock" ? strong.concat([process.env.CEX_VIEW_TOKEN]) : strong;
+  const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
   // ── СЪЗДАВАНЕ на отворени сметки-чернови в Barsy (ПИШЕ; зад силен токен) ──
