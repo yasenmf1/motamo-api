@@ -92,9 +92,13 @@ module.exports = async function handler(req, res) {
   if (!body || typeof body !== "object") body = {};
 
   const token = body.token != null ? body.token : q.token;
+  // Отделен ключ за крона (RECONCILE_TOKEN) — стои в третата услуга (cron-job.org),
+  // затова е изолиран: изтече ли, дава достъп само до този безопасен endpoint, не
+  // до подписа на плащанията. PAY_HMAC_SECRET/PREVIEW_TOKEN се приемат за ръчни тестове.
+  const RECON = process.env.RECONCILE_TOKEN || "";
   const HMAC = process.env.PAY_HMAC_SECRET || "";
   const PREVIEW_TOKEN = process.env.PREVIEW_TOKEN || "";
-  if (!((HMAC && token === HMAC) || (PREVIEW_TOKEN && token === PREVIEW_TOKEN))) {
+  if (!((RECON && token === RECON) || (HMAC && token === HMAC) || (PREVIEW_TOKEN && token === PREVIEW_TOKEN))) {
     res.status(403).json({ ok: false, error: "forbidden" });
     return;
   }
