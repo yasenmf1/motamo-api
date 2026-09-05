@@ -48,22 +48,27 @@ function cexCall(action, params, user, pass) {
   });
 }
 
-// Събиране на дневната заявка от сметките на цеха за seed_date.
+// Събиране на заявката от сметките на цеха за seed_date, ПО МАГАЗИН.
+// 1 сметка = 1 магазин (клиент + представител). Връща списък магазини със заявка.
 async function seedFromDate(date, user, pass) {
   const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 400 }, user, pass);
   const accts = (list.data || []).filter(a => String(a.create_date || "").startsWith(date));
-  const order = {};
+  const shops = [];
   for (const a of accts) {
     const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
+    const order = {};
     for (const o of (rows.data || [])) {
       const art = byId(o.article_id) || resolve(o.article_name);
-      if (art && art.is_menu) {
-        const amt = Number(o.amount) || 0;
-        order[art.name] = (order[art.name] || 0) + amt;
-      }
+      if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + (Number(o.amount) || 0);
     }
+    shops.push({
+      account_id: a.account_id,
+      client: a.client_name || null,
+      rep: a.person_name || null,          // представител = магазинът
+      order
+    });
   }
-  return { order, accounts: accts.length };
+  return { shops, accounts: accts.length };
 }
 
 // Разбиване: заявка (меню) → роли/поке за производство (разбива сетовете, рекурсивно).
@@ -124,35 +129,45 @@ module.exports = async function handler(req, res) {
     .some(t => t && token === t);
   if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
-  let order = body.orders || null;
+  // Нормализираме входа към списък магазини [{client,rep,order}].
+  let shops = null;
   let seededAccounts = null;
   const seedDate = body.seed_date || q.seed_date;
 
-  if (!order && seedDate) {
+  if (Array.isArray(body.shops) && body.shops.length) {
+    shops = body.shops.map(s => ({ client: s.client || null, rep: s.rep || null, account_id: s.account_id || null, order: s.order || {} }));
+  } else if (body.orders && typeof body.orders === "object") {
+    shops = [{ client: null, rep: null, order: body.orders }];   // общ вход, без магазин
+  } else if (seedDate) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     try {
       const s = await seedFromDate(String(seedDate), user, pass);
-      order = s.order; seededAccounts = s.accounts;
+      shops = s.shops; seededAccounts = s.accounts;
     } catch (e) {
       res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) });
       return;
     }
   }
-  if (!order || typeof order !== "object" || !Object.keys(order).length) {
-    res.status(400).json({ ok: false, error: "no_orders", hint: "подай orders:{} или seed_date:YYYY-MM-DD" });
+  if (!shops || !shops.length) {
+    res.status(400).json({ ok: false, error: "no_orders", hint: "подай shops:[{client,rep,order}] / orders:{} / seed_date:YYYY-MM-DD" });
     return;
   }
 
-  const rolls = explodeToRolls(order);
+  // Сборна заявка от всички магазини → производственият план е върху нея.
+  const agg = {};
+  for (const s of shops) for (const [k, v] of Object.entries(s.order || {})) agg[k] = (agg[k] || 0) + (Number(v) || 0);
+
+  const rolls = explodeToRolls(agg);
   const zag = rollsToZagotovki(rolls);
 
   res.status(200).json({
     ok: true,
     seed_date: seedDate || null,
     seeded_accounts: seededAccounts,
-    order: sortObj(order, 2),
-    produce_rolls: sortObj(rolls, 2),      // роли/поке за производство
-    produce_zagotovki: sortObj(zag, 3)     // заготовки за производство
+    shops: shops.map(s => ({ client: s.client, rep: s.rep, account_id: s.account_id, order: sortObj(s.order || {}, 2) })),
+    order_total: sortObj(agg, 2),
+    produce_rolls: sortObj(rolls, 2),      // роли/поке за производство (сборно)
+    produce_zagotovki: sortObj(zag, 3)     // заготовки за производство (сборно)
   });
 };
