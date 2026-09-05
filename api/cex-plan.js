@@ -71,6 +71,27 @@ async function createProduction(rows, opts, user, pass) {
   const id = r.data && (r.data.Storeproductions_save || r.data.store_production_id || r.data.id || (r.data.data && r.data.data.store_production_id)) || null;
   return { ok: !!r.ok && !!id, status: r.status, store_production_id: id, data: r.data, error: r.ok && id ? undefined : String(r.raw || "").slice(0, 300) };
 }
+// Паралелно с ограничение (за да не надхвърлим лимита при много заявки).
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length); let i = 0;
+  async function worker() { while (i < items.length) { const idx = i++; out[idx] = await fn(items[idx], idx); } }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+// Наличности на всички СУРОВИНИ + ЗАГОТОВКИ (за ежедневния репорт „кое е на изчерпване").
+async function readStock(user, pass) {
+  const arts = Object.values(ARTS).filter(a => a.cat === "Суровини" || a.cat === "Заготовки");
+  const rows = await mapLimit(arts, 18, async (a) => {
+    let qty = null;
+    try {
+      const r = await cexCall("Articles_getavailability", { article_id: a.id, depots: [CEX_DEPOT] }, user, pass);
+      const d = r.data; qty = d && typeof d === "object" ? Number(d[String(CEX_DEPOT)] ?? Object.values(d)[0]) : null;
+    } catch (e) { qty = null; }
+    return { id: a.id, name: a.name, cat: a.cat, qty: (qty == null || isNaN(qty)) ? null : Math.round(qty * 1000) / 1000 };
+  });
+  rows.sort((x, y) => (x.qty == null ? 1 : y.qty == null ? -1 : x.qty - y.qty));
+  return rows;
+}
 async function seedShops(date, user, pass) {
   const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 400 }, user, pass);
   const accts = (list.data || []).filter(a => String(a.create_date || "").startsWith(date));
@@ -162,6 +183,19 @@ header{background:#b3121b;color:#fff;padding:14px 18px}header h1{margin:0;font-s
 .wrap{padding:16px;max-width:900px;margin:0 auto}h2{font-size:20px;margin:20px 0 8px;border-bottom:3px solid #b3121b;padding-bottom:4px}
 table{border-collapse:collapse;width:100%}td{padding:10px 12px;border-bottom:1px solid #eee;font-size:20px}
 td.q{text-align:right;font-weight:800;font-size:24px;color:#b3121b;white-space:nowrap}.note{color:#666;font-size:13px;margin-top:18px}
+</style></head><body>${inner}</body></html>`;
+}
+
+// ── HTML: репорт за наличности (суровини+заготовки) ───────────────────────────
+function stockPage(inner) {
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Цех · наличности</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}body{font:16px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#fff;color:#111}
+header{background:#b3121b;color:#fff;padding:14px 18px}header h1{margin:0;font-size:22px}header .d{font-size:14px;opacity:.9;margin-top:2px}
+.wrap{padding:16px;max-width:760px;margin:0 auto}h2{font-size:18px;margin:20px 0 8px;border-bottom:3px solid #b3121b;padding-bottom:4px}
+table{border-collapse:collapse;width:100%}th,td{padding:9px 12px;border-bottom:1px solid #eee;text-align:left;font-size:16px}
+th{background:#f0f1f3}td.q,th.q{text-align:right;font-weight:800;white-space:nowrap}td.c{color:#888;font-size:13px;text-align:center}
+tr.lo td{background:#fde8e8}tr.lo td.q{color:#9b1c1c}.ok{color:#1b5e20;font-weight:600}.note{color:#666;font-size:13px;margin-top:18px}
 </style></head><body>${inner}</body></html>`;
 }
 
@@ -276,6 +310,27 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // 2b) Репорт за наличности (суровини+заготовки), четящ екран за собственика.
+  if (req.method === "GET" && view === "stock") {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    const okV = [process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].some(t => t && q.k === t);
+    if (!okV) { res.status(403).send(stockPage(`<div class="wrap"><h2>Няма достъп</h2><p>Липсва или грешен ключ.</p></div>`)); return; }
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).send(stockPage(`<div class="wrap">Не е конфигуриран достъп до цеха.</div>`)); return; }
+    let rows;
+    try { rows = await readStock(user, pass); }
+    catch (e) { res.status(200).send(stockPage(`<div class="wrap"><h2>Грешка</h2><p>Не мога да прочета наличностите сега. Опитай пак след минута.</p></div>`)); return; }
+    const low = rows.filter(r => r.qty != null && r.qty <= 1);
+    const rowHtml = (arr) => arr.map(r => `<tr class="${r.qty != null && r.qty <= 1 ? 'lo' : ''}"><td>${esc(r.name)}</td><td class="c">${esc(r.cat === "Заготовки" ? "заг." : "сур.")}</td><td class="q">${r.qty == null ? "?" : r.qty}</td></tr>`).join("");
+    res.status(200).send(stockPage(`
+      <header><h1>Цех · наличности</h1><div class="d">${esc(sofiaToday())} · обновено ${esc(sofiaTime())} · ${rows.length} артикула</div></header>
+      <div class="wrap">
+        ${low.length ? `<h2>⚠️ На изчерпване (≤1)</h2><table>${rowHtml(low)}</table>` : `<p class="ok">Няма критично ниски (всичко над 1).</p>`}
+        <h2>Всички (най-малко първо)</h2><table><tr><th>Артикул</th><th>вид</th><th class="q">нал.</th></tr>${rowHtml(rows)}</table>
+        <div class="note">Обновява се при отваряне. „?" = липсва отчет за склада.</div></div>`));
+    return;
+  }
+
   // 3) JSON изчисление (POST от страницата, или GET със seed_date). Токен-гейт.
   let body = req.body;
   if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = null; } }
@@ -343,6 +398,17 @@ module.exports = async function handler(req, res) {
     } catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
     out.ok = (!rollRows.length || (out.rolls && out.rolls.ok)) && (body.include_zag !== true || !zagRows.length || (out.zagotovki && out.zagotovki.ok));
     res.status(200).json(out);
+    return;
+  }
+
+  // ── Наличности суровини+заготовки (JSON) ──
+  if (body.action === "stock") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    let rows;
+    try { rows = await readStock(user, pass); }
+    catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    res.status(200).json({ ok: true, rows });
     return;
   }
 
