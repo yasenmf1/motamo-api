@@ -143,12 +143,16 @@ async function readResponse(barsyRes) {
   return { status: barsyRes.status, ok: barsyRes.ok, data: parsed, raw: text };
 }
 
-function authedCall(action, params, user, pass, host, bid) {
+function authedCall(action, params, user, pass, host, bid, query) {
   const auth = Buffer.from(`${user}:${pass}`).toString("base64");
   const base = host || BARSY_API;
   const id = bid || BARSY_ID;
+  let qs = `?bid=${id}`;
+  if (query && typeof query === "object") {
+    for (const k of Object.keys(query)) qs += `&${encodeURIComponent(k)}=${encodeURIComponent(query[k])}`;
+  }
   return withTimeout(async function (signal) {
-    const barsyRes = await fetch(`${base}/endpoints/json/${action}?bid=${id}`, {
+    const barsyRes = await fetch(`${base}/endpoints/json/${action}${qs}`, {
       method: "POST",
       headers: {
         Authorization: `Basic ${auth}`,
@@ -219,7 +223,7 @@ module.exports = async function handler(req, res) {
 
   let out;
   try {
-    out = await authedCall(action, params, user, pass, host, bid);
+    out = await authedCall(action, params, user, pass, host, bid, body.q || null);
   } catch (err) {
     fail(res, 504, "uncertain", "No response from Barsy");
     return;
