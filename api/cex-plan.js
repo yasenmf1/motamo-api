@@ -189,9 +189,18 @@ header .dlab{background:#fff;color:#b3121b;border-radius:5px;padding:3px 8px;fon
  h2{font-size:17px}
 }
 .wrap{padding:14px;max-width:1400px;margin:0 auto}.msg{padding:8px 12px;border-radius:6px;margin:8px 0;display:none}.msg.err{background:#fde8e8;color:#9b1c1c;display:block}.msg.ok{background:#e8f5e9;color:#1b5e20;display:block}
-table{border-collapse:collapse;background:#fff;width:100%;margin:6px 0}th,td{border:1px solid #e2e4e8;padding:4px 6px;text-align:center;font-size:13px}th{background:#f0f1f3;position:sticky;top:52px}
-th.shop,td.shop{text-align:left;white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}td input{width:52px;text-align:center;border:1px solid #d0d3d8;border-radius:4px;padding:3px}.set{background:#fff7e6}
-h2{font-size:15px;margin:18px 0 4px}.plan{display:flex;gap:24px;flex-wrap:wrap}.plan table{width:auto;min-width:280px}.plan td.q{font-weight:700;color:#b3121b}.scroll{overflow-x:auto}
+table{border-collapse:collapse;background:#fff}
+.scroll{overflow:auto;max-height:74vh;border:1px solid #d7dade;border-radius:8px;margin:8px 0}
+#grid{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+#grid th,#grid td{border-bottom:1px solid #eef0f2;border-right:1px solid #eef0f2;padding:7px 8px;text-align:center;white-space:nowrap}
+#grid th{background:#2b2f36;color:#fff;position:sticky;top:0;z-index:2;font-weight:600;font-size:12px;letter-spacing:.02em}
+#grid tr:nth-child(even) td{background:#fafbfc}
+#grid th.shop,#grid td.shop{position:sticky;left:0;text-align:left;min-width:210px;max-width:250px;overflow:hidden;text-overflow:ellipsis;background:#fff;box-shadow:1px 0 0 #d7dade}
+#grid td.shop{z-index:1;font-weight:500}#grid th.shop{z-index:3;background:#2b2f36}
+#grid td input{width:46px;text-align:center;border:1px solid #cfd3d8;border-radius:5px;padding:5px 3px;font-size:14px}
+#grid td input:focus{outline:2px solid #0a7d33;border-color:#0a7d33}
+#grid td.set input{background:#fff7e6}#grid th.set{background:#4a3d1a;color:#ffe6a3}
+h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.plan table{width:auto;min-width:260px}.plan table td,.plan table th{border:1px solid #e2e4e8;padding:7px 12px;text-align:left}.plan table th{background:#f0f1f3}.plan td.q{font-weight:700;color:#b3121b;text-align:right}
 @media print{header,.noprint{display:none}.wrap{padding:0}}
 </style></head><body>
 <header><h1>MOTAMO цех</h1>
