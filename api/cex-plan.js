@@ -213,6 +213,19 @@ function rollsToZag(rolls) {
   for (const [k, v] of Object.entries(rolls || {})) walk(k, Number(v) || 0);
   return zag;
 }
+// Пълна разбивка на дневната заявка до ВСЯКА заготовка+суровина (консумация по
+// рецепти, всички нива). Връща {article_id: количество}. Това е „произв. по
+// стокови разписки" за цех-листа.
+function fullBOM(orderMap) {
+  const need = {};
+  const add = (art, qty) => {
+    if (!art || !(qty > 0)) return;
+    if (art.cat === "Заготовки" || art.cat === "Суровини") need[art.id] = (need[art.id] || 0) + qty;
+    for (const c of (art.components || [])) { const ca = c.id != null ? byId(c.id) : resolve(c.name); if (ca) add(ca, qty * (Number(c.qty) || 0)); }
+  };
+  for (const [name, qty] of Object.entries(orderMap || {})) add(resolve(name), Number(qty) || 0);
+  return need;
+}
 const round = n => Math.round(n * 1000) / 1000;
 function sortObj(o, d) { const out = {}; Object.keys(o || {}).sort().forEach(k => out[k] = Math.round(o[k] * 10 ** d) / 10 ** d); return out; }
 const sofiaToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Sofia" }).format(new Date());
@@ -284,7 +297,8 @@ header h1{margin:0;font-size:22px;font-weight:800}header .d{font-size:14px;opaci
 table{border-collapse:collapse;width:100%}th,td{padding:9px 10px;font-size:15px;border-top:1px solid #f1f2f4;text-align:right;white-space:nowrap}
 th{background:#f7f8fa;color:#555;font-size:12px;text-transform:uppercase;letter-spacing:.3px;border-top:0}
 td.n,th.n{text-align:left;white-space:normal}
-td.prod{font-weight:800;color:#b3121b}td.prod.zero{color:#1b5e20}
+td.prod{font-weight:800;color:#b3121b}td.prod.zero{color:#9aa0a6}
+td.blank{background:#fbfcfd;min-width:52px;border-left:1px dashed #d7dade;border-right:1px dashed #d7dade}
 .low{background:#fff7ed}.draft{color:#9a6a00;font-size:12px;background:#fff8e1;padding:8px 14px;border-radius:8px;margin-top:4px}
 .note{color:#7a8087;font-size:12px;text-align:center;margin:4px 0 16px}
 </style></head><body>${inner}</body></html>`;
@@ -432,32 +446,30 @@ module.exports = async function handler(req, res) {
     if (!okV) { res.status(403).send(sheetPage(`<div class="wrap"><h2>Няма достъп</h2></div>`)); return; }
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).send(sheetPage(`<div class="wrap">Не е конфигуриран достъп.</div>`)); return; }
-    let sm;
-    try { sm = await stockMap(user, pass); }
-    catch (e) { res.status(200).send(sheetPage(`<div class="wrap"><h2>Грешка</h2><p>Не мога да прочета наличностите сега.</p></div>`)); return; }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(q.date || "") ? q.date : sofiaToday();
+    let need = {}, accounts = 0;
+    try { const s = await seedShops(date, user, pass); accounts = s.accounts; const agg = {}; for (const sh of s.shops) for (const [k, v] of Object.entries(sh.order || {})) agg[k] = (agg[k] || 0) + (Number(v) || 0); need = fullBOM(agg); }
+    catch (e) { res.status(200).send(sheetPage(`<div class="wrap"><h2>Грешка</h2><p>Не мога да прочета заявката сега.</p></div>`)); return; }
     const nm = id => { const a = ARTS[String(id)]; return a ? a.name : ("#" + id); };
-    const q3 = v => (v == null ? null : Math.round(v * 1000) / 1000);
+    // произв. = дневната консумация по стоковите (заявката); наличност = празно (ръчно).
     const prodRows = (arr) => arr.map(r => {
-      const nal = r.id != null ? sm[String(r.id)] : null;
-      const prod = nal == null ? null : Math.max(0, q3(r.preporuka - nal));
+      const prod = r.id != null ? round(need[String(r.id)] || 0) : null;
       const name = r.id != null ? nm(r.id) : (r.name || "");
-      return `<tr class="${prod > 0 ? "low" : ""}"><td class="n">${esc(name)}</td><td>${r.срок || ""}</td><td>${nal == null ? "?" : nal}</td><td class="prod ${prod ? "" : "zero"}">${prod == null ? "?" : prod}</td><td>${r.preporuka} ${esc(r.ед || "")}</td></tr>`;
+      return `<tr><td class="n">${esc(name)}</td><td>${r.срок || ""}</td><td class="prod ${prod ? "" : "zero"}">${prod == null ? "?" : prod}</td><td class="blank"></td><td>${r.preporuka} ${esc(r.ед || "")}</td></tr>`;
     }).join("");
     const orderRows = CEX_SHEET.order.map(r => {
-      const nal = r.id != null ? sm[String(r.id)] : null;
-      const zaqvka = nal == null ? null : Math.max(0, q3(r.preporuka - nal));
       const name = r.id != null ? nm(r.id) : (r.name || "");
-      return `<tr class="${zaqvka > 0 ? "low" : ""}"><td class="n">${esc(name)}</td><td class="n">${esc(r.доставчик)}</td><td>${esc(r.дни)}</td><td>${nal == null ? "?" : nal}</td><td class="prod ${zaqvka ? "" : "zero"}">${zaqvka == null ? "?" : zaqvka}</td><td>${r.preporuka} ${esc(r.ед || "")}</td></tr>`;
+      return `<tr><td class="n">${esc(name)}</td><td class="n">${esc(r.доставчик)}</td><td>${esc(r.дни)}</td><td class="blank"></td><td>${r.preporuka} ${esc(r.ед || "")}</td></tr>`;
     }).join("");
-    const head3 = `<tr><th class="n">Артикул</th><th>срок</th><th>налич.</th><th>произв.</th><th>препор.</th></tr>`;
+    const head3 = `<tr><th class="n">Артикул</th><th>срок</th><th>произв.</th><th>налич.</th><th>препор.</th></tr>`;
     res.status(200).send(sheetPage(`
-      <header><h1>🍣 Цех лист</h1><div class="d">${esc(sofiaToday())} · обновено ${esc(sofiaTime())}</div></header>
+      <header><h1>🍣 Цех лист</h1><div class="d">${esc(date)} · ${accounts} сметки · обновено ${esc(sofiaTime())}</div></header>
       <div class="wrap">
-        <div class="draft">ЧЕРНОВА — препоръчителните количества и доставчиците са от ръчния лист (за проверка/корекция). Наличността е реална от Barsy. „произв." = препоръчителна − наличност.</div>
+        <div class="draft">ЧЕРНОВА · „произв." = колко да произведете за деня (по стоковите разписки) · „налич." е празно — попълва се на ръка · „препор." = сутрешен целеви запас (числата/доставчиците за корекция).</div>
         <div class="card sushi"><h2>Суши — заготовки/суровини</h2><table>${head3}${prodRows(CEX_SHEET.sushi)}</table></div>
         <div class="card poke"><h2>Поке — заготовки/суровини</h2><table>${head3}${prodRows(CEX_SHEET.poke)}</table></div>
-        <div class="card order"><h2>Поръчки към доставчик</h2><table><tr><th class="n">Продукт</th><th class="n">доставчик</th><th>дни</th><th>налич.</th><th>заявка</th><th>препор.</th></tr>${orderRows}</table></div>
-        <div class="note">Числата на червено/оранжево = има какво да се произведе/поръча.</div>
+        <div class="card order"><h2>Поръчки към доставчик</h2><table><tr><th class="n">Продукт</th><th class="n">доставчик</th><th>дни</th><th>заявка</th><th>препор.</th></tr>${orderRows}</table></div>
+        <div class="note">„произв." е сметнато от заявката за деня · попълни „налич." и виж колко да догониш до „препор."</div>
       </div>`));
     return;
   }
