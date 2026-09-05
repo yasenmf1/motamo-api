@@ -116,7 +116,19 @@ const ALLOWED = new Set([
   "Accounts_close",
   "Orders_storno",
   "Orders_cancel",
-  "Orders_refuse"
+  "Orders_refuse",
+  "Accounts_deleteaccount",
+  "Accounts_removeaccount",
+  "Accounts_reject",
+  "Accounts_refuseorder",
+  "Accounts_deleteorder",
+  "Accounts_removeorder",
+  "Accounts_setstatus",
+  "Accounts_clear",
+  "Accounts_abandon",
+  "Accounts_remove",
+  "Accounts_cancelorder",
+  "Accounts_deleteopen"
 ]);
 
 async function withTimeout(run) {
