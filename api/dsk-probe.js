@@ -59,6 +59,40 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // Проба на равнителния път: статус по НАШИЯ orderNumber (реф), без orderId.
+  // Ако ДСК приема orderNumber, равнителната задача не се нуждае от база — вади
+  // реф-а от описанието на отворената сметка и пита ДСК.
+  const orderNumber = String(first(q.orderNumber) || "");
+  if (orderNumber) {
+    const form = new URLSearchParams({ userName: dskUser, password: dskPass, orderNumber: orderNumber });
+    try {
+      const out = await withTimeout(async function (signal) {
+        const r = await fetch(DSK_API + "getOrderStatusExtended.do", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: form.toString(),
+          signal: signal
+        });
+        const text = await r.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch (e) { data = null; }
+        return { httpStatus: r.status, data: data, text: text };
+      });
+      res.status(200).json({
+        ok: true,
+        by: "orderNumber",
+        orderNumber: orderNumber,
+        orderStatus: out.data ? out.data.orderStatus : null,
+        amount: out.data ? out.data.amount : null,
+        errorCode: out.data ? out.data.errorCode : null,
+        raw: typeof out.text === "string" ? out.text.slice(0, 700) : null
+      });
+    } catch (err) {
+      res.status(502).json({ ok: false, error: "dsk_unreachable", message: String(err && err.message) });
+    }
+    return;
+  }
+
   // Фиктивна поръчка: 1.00 EUR (100 цента), референция с времеви печат, за да е
   // уникална при повтаряне на пробата. returnUrl е точно този, който истинската
   // поръчка ще ползва — така пробата проверява реалния whitelist.
