@@ -42,6 +42,13 @@ const ALLOWED = new Set([
   "Categories_getalltree",
   "Paymentmethods_getlist",
   "Taxgroups_getlist",
+  // Състав/рецепта: комбо групи (сет→роли) и релации (роля→заготовки→суровини).
+  "Articlesupplements_get",
+  "Articlesupplements_getlist",
+  "Articledetails_get",
+  "Articledetails_getlist",
+  "Articlerelations_get",
+  "Articlerelations_getlist",
   // Склад / зареждане / производство / партиди — кандидати за четене (цех анализ).
   // Всички са *_getlist/_get (четене по конвенцията на Barsy). Несъществуващ метод
   // просто връща грешка — безвредно.
