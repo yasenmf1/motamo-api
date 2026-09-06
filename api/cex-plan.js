@@ -540,6 +540,14 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     try {
+      // Наличност на артикулите от МЕНЮТО (ролки/сетове/поке) — да видим кои са на минус.
+      if (q.stockmenu) {
+        const sm = await stockMap(user, pass);
+        const rows = MENU.map(m => ({ id: m.id, name: m.name, is_set: m.is_set, qty: sm[String(m.id)] != null ? sm[String(m.id)] : null }))
+          .sort((a, b) => (a.qty == null ? 1 : b.qty == null ? -1 : a.qty - b.qty));
+        res.status(200).json({ ok: true, menu_stock: rows });
+        return;
+      }
       // Прочит на последните ПРОИЗВОДСТВА (за проверка след „① Производство").
       if (q.prods) {
         const pr = await cexCall("Storeproductions_getlist", { filters: {}, length: 4000, extra_properties: ["all", "details"] }, user, pass);
