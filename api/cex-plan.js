@@ -543,6 +543,27 @@ module.exports = async function handler(req, res) {
   const allowed = writeActions.includes(body.action) ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+  // ── TEMP: тества дали Accounts_place приема lot_value на реда (партида в сметката) ──
+  if (body.action === "place_lots") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const from = Number(body.copy_from) || 2885;
+    // вземи client_id/person_id от съществуваща сметка
+    const gl = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 60 }, user, pass);
+    let all = gl.data || []; if (!Array.isArray(all)) all = Object.values(all);
+    const src = all.find(a => Number(a.account_id) === from) || {};
+    const lot = body.lot || "L.07.09.2026";
+    const arts = Array.isArray(body.articles) ? body.articles : [81, 80, 129, 76, 75];
+    const orders = arts.map(a => ({ article_id: Number(a), amount: 1, lot_value: lot }));
+    const account = { uuid: crypto.randomUUID(), account_alias: "LOTTEST " + lot };
+    if (src.client_id) account.client_id = src.client_id;
+    if (src.person_id) account.person_id = src.person_id;
+    const r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass);
+    const accId = typeof r.data === "number" ? r.data : (r.data && (r.data.account_id || r.data.id)) || null;
+    res.status(200).json({ ok: r.ok, new_account_id: accId, sent_orders: orders, raw: String(r.raw || "").slice(0, 300) });
+    return;
+  }
+
   // ── ЗАРЕЖДАНЕ ПО ГРАФИК (чете; връща обектите за деня + последните им количества) ──
   if (body.action === "schedule_seed") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
