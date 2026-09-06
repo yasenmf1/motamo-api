@@ -581,7 +581,9 @@ module.exports = async function handler(req, res) {
   const token = body.token != null ? body.token : q.token;
   // Пишещите действия искат силен токен; „stock" е само четене → и CEX_VIEW_TOKEN.
   const strong = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN];
-  const allowed = (body.action === "stock" || body.action === "schedule_seed") ? strong.concat([process.env.CEX_VIEW_TOKEN]) : strong;
+  // Само ПИШЕЩИТЕ действия искат силен токен; четенето/смятането приемат и четящия.
+  const writeActions = ["create_accounts", "produce_plan", "create_production"];
+  const allowed = writeActions.includes(body.action) ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
