@@ -546,6 +546,18 @@ module.exports = async function handler(req, res) {
   const allowed = writeActions.includes(body.action) ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+  // ── TEMP: провери партидите на най-новата сметка (или подадена id) ──
+  if (body.action === "acc_check") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    let acc = Number(body.id);
+    if (!acc) { const gl = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 5 }, user, pass); let all = gl.data || []; if (!Array.isArray(all)) all = Object.values(all); acc = all[0] && all[0].account_id; }
+    const og = await cexCall("Orders_getlist", { filters: { account_id: acc } }, user, pass);
+    let ords = og.data || []; if (!Array.isArray(ords)) ords = Object.values(ords);
+    res.status(200).json({ ok: true, account_id: acc, rows: ords.map(o => ({ article: o.article_name, amount: o.amount, lot: o.lot_value != null ? o.lot_value : (o.lot != null ? o.lot : null) })) });
+    return;
+  }
+
   // ── ЗАРЕЖДАНЕ ПО ГРАФИК (чете; връща обектите за деня + последните им количества) ──
   if (body.action === "schedule_seed") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
