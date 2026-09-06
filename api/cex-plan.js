@@ -544,6 +544,16 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
+  // ── TEMP (само зареждане, НЕ записва): дъмп на invoices_edit формата за сметка ──
+  if (body.action === "inv_load") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const acc = Number(body.id); if (!acc) { res.status(400).json({ ok: false, error: "no_id" }); return; }
+    const r = await cexCallRoot({ invoices_edit: { params: { bid: 1, doc_type: 11, gen_mode: 1, account_id: acc } } }, user, pass);
+    res.status(200).json({ ok: r.ok, status: r.status, data: r.data });
+    return;
+  }
+
   // ── ЗАРЕЖДАНЕ ПО ГРАФИК (чете; връща обектите за деня + последните им количества) ──
   if (body.action === "schedule_seed") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
