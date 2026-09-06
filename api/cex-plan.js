@@ -554,6 +554,15 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
+  // ── TEMP: най-новите сметки (за да намеря id-то за dry проба) ──
+  if (body.action === "acc_new") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 6 }, user, pass);
+    let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
+    res.status(200).json({ ok: true, accounts: all.slice(0, 6).map(a => ({ id: a.account_id, person: a.person_name, client: a.client_name, close: a.close_date })) });
+    return;
+  }
+
   // ── ③ СТОКОВА РАЗПИСКА: сглобява Invoices_create от формата на сметката ──
   // body: {account_id, date, dry?}. dry=true → връща сглобеното БЕЗ да записва.
   if (body.action === "create_stokova") {
