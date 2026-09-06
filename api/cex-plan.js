@@ -599,6 +599,25 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
+  // ── TEMP диагностика: опитва ЕДНА сметка (както ② Сметки) и връща суровия отговор ──
+  if (body.action === "probe_place") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    let s;
+    try { s = await scheduleSeed(date, user, pass); }
+    catch (e) { res.status(504).json({ ok: false, error: String(e && e.message) }); return; }
+    const one = s.shops.filter(x => x.scheduled && Object.keys(x.order || {}).length)[0];
+    if (!one) { res.status(200).json({ ok: false, error: "no scheduled shop with order" }); return; }
+    const orders = Object.entries(one.order).map(([name, qty]) => { const art = resolve(name); return art ? { article_id: art.id, amount: Number(qty) } : null; }).filter(o => o && o.amount > 0);
+    const account = { uuid: uuidFor(date, one), account_alias: "PROBE " + ([one.client, one.rep].filter(Boolean).join(" · ")) };
+    if (one.client_id) account.client_id = one.client_id;
+    if (one.person_id) account.person_id = one.person_id;
+    const r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass);
+    res.status(200).json({ ok: true, tried: { client: one.client, rep: one.rep, client_id: one.client_id, person_id: one.person_id, items: orders.length, orders: orders.slice(0, 3) }, barsy_status: r.status, barsy_ok: r.ok, barsy_data: r.data, barsy_raw: String(r.raw || "").slice(0, 600) });
+    return;
+  }
+
   // ── ЗАРЕЖДАНЕ ПО ГРАФИК (чете; връща обектите за деня + последните им количества) ──
   if (body.action === "schedule_seed") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
