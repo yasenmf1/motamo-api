@@ -219,11 +219,14 @@ function uuidFor(date, s) {
   return [h.slice(0, 8), h.slice(8, 12), v, a, h.slice(20, 32)].join("-");
 }
 // Създава ОТВОРЕНИ сметки-чернови по магазин (без затваряне → без фискален бон, без склад).
-async function createAccounts(shops, date, user, pass) {
+async function createAccounts(shops, date, user, pass, lotOverride) {
   const out = [];
+  // Партида на реда = същата като производството (L.<дата>), за да се роди сметката
+  // ВЕЧЕ с партида (Accounts_place приема lot_value на реда). Празна → без партида.
+  const lot = (typeof lotOverride === "string") ? lotOverride : lotFor(date).lot;
   for (const s of shops) {
     const orders = Object.entries(s.order || {})
-      .map(([name, qty]) => { const art = resolve(name); return art ? { article_id: art.id, amount: Number(qty) } : null; })
+      .map(([name, qty]) => { const art = resolve(name); return art ? (lot ? { article_id: art.id, amount: Number(qty), lot_value: lot } : { article_id: art.id, amount: Number(qty) }) : null; })
       .filter(o => o && o.amount > 0);   // цена НЕ подаваме → Barsy слага по ценово правило на клиента
     if (!orders.length) { out.push({ client: s.client, rep: s.rep, skipped: "празна" }); continue; }
     const account = {
@@ -433,7 +436,7 @@ function calc(){var sel=selShops();if(!sel.length){msg('Избери поне е
 function tbl(t,o){var ks=Object.keys(o||{});if(!ks.length)return '';var h='<table><tr><th class="shop">'+t+'</th><th>кол.</th></tr>';ks.forEach(function(k){h+='<tr><td class="shop">'+esc(k)+'</td><td class="q">'+o[k]+'</td></tr>'});return h+'</table>'}
 function renderPlan(j){$('planbox').innerHTML='<h2>За производство</h2><div class="plan">'+tbl('Сетове',j.produce_sets)+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
 function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy за '+sel.length+' магазина:\\n• ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (ролки → сетове)');api({action:'produce_plan',shops:sel,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||(j.zagotovki&&j.zagotovki.error)||j.error||j.message||''),'err');return}var ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;msg('✓ Производството е създадено. Партида '+j.lot+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+'. Провери в касата и „Приключи", ако е ок.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
-function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy за '+sel.length+' магазина.\\nЦените ги слага Barsy по правилото на клиента (аз не подавам цена).\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. Провери в касата.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value||$('date').value;var lot=pd?('L.'+pd.split('-').reverse().join('.')):'';if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy за '+sel.length+' магазина'+(lot?(', ВЕЧЕ с партида '+lot):'')+'.\\nЦените ги слага Barsy по правилото на клиента.\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. Провери в касата.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function renderCreated(cr){var h='<h2>Създадени сметки</h2><table><tr><th class="shop">Магазин</th><th>сметка №</th><th>артикули</th><th>статус</th></tr>';cr.forEach(function(c){var full=(c.client||'')+(c.rep?(' · '+c.rep):'');h+='<tr><td class="shop" title="'+esc(full)+'">'+esc(shortName(c.client,c.rep))+'</td><td>'+(c.account_id||'—')+'</td><td>'+(c.items||0)+'</td><td>'+(c.ok?'✓':esc(c.skipped||'грешка'))+'</td></tr>'});$('planbox').innerHTML=h+'</table>'}
 </script></body></html>`;
 }
@@ -543,27 +546,6 @@ module.exports = async function handler(req, res) {
   const allowed = writeActions.includes(body.action) ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
-  // ── TEMP: тества дали Accounts_place приема lot_value на реда (партида в сметката) ──
-  if (body.action === "place_lots") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
-    const from = Number(body.copy_from) || 2885;
-    // вземи client_id/person_id от съществуваща сметка
-    const gl = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 60 }, user, pass);
-    let all = gl.data || []; if (!Array.isArray(all)) all = Object.values(all);
-    const src = all.find(a => Number(a.account_id) === from) || {};
-    const lot = body.lot || "L.07.09.2026";
-    const arts = Array.isArray(body.articles) ? body.articles : [81, 80, 129, 76, 75];
-    const orders = arts.map(a => ({ article_id: Number(a), amount: 1, lot_value: lot }));
-    const account = { uuid: crypto.randomUUID(), account_alias: "LOTTEST " + lot };
-    if (src.client_id) account.client_id = src.client_id;
-    if (src.person_id) account.person_id = src.person_id;
-    const r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass);
-    const accId = typeof r.data === "number" ? r.data : (r.data && (r.data.account_id || r.data.id)) || null;
-    res.status(200).json({ ok: r.ok, new_account_id: accId, sent_orders: orders, raw: String(r.raw || "").slice(0, 300) });
-    return;
-  }
-
   // ── ЗАРЕЖДАНЕ ПО ГРАФИК (чете; връща обектите за деня + последните им количества) ──
   if (body.action === "schedule_seed") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
@@ -585,7 +567,9 @@ module.exports = async function handler(req, res) {
     const shopsIn = Array.isArray(body.shops) ? body.shops : [];
     if (!shopsIn.length) { res.status(400).json({ ok: false, error: "no_shops" }); return; }
     const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
-    const created = await createAccounts(shopsIn, date, user, pass);
+    // lot: изрична партида от клиента, или „" за без партида, иначе L.<дата>.
+    const lotOverride = (typeof body.lot === "string") ? body.lot : undefined;
+    const created = await createAccounts(shopsIn, date, user, pass, lotOverride);
     res.status(200).json({ ok: true, created });
     return;
   }
