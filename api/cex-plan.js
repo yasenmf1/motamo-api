@@ -491,8 +491,30 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     try {
-      const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 900 }, user, pass);
+      const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3000 }, user, pass);
       let all = list.data || []; if (!Array.isArray(all)) all = Object.values(all);
+      // Месечна справка по МОЕТО предложение: групиране по close_date (ден на доставка).
+      const summ = String(q.summary || ""); // YYYY-MM
+      if (/^\d{4}-\d{2}$/.test(summ)) {
+        const nmeOf = a => String(a.person_name || a.client_name || "?").trim();
+        const days = {}; const openRows = [];
+        for (const a of all) {
+          const cd = String(a.close_date || "");
+          if (cd.startsWith(summ)) {
+            const day = cd.slice(0, 10);
+            (days[day] = days[day] || { accounts: 0, shops: {} });
+            days[day].accounts++; days[day].shops[nmeOf(a)] = (days[day].shops[nmeOf(a)] || 0) + 1;
+          } else if (!a.close_date && String(a.create_date || "").startsWith(summ)) {
+            openRows.push({ account_id: a.account_id, shop: nmeOf(a), create_date: a.create_date, status: a.service_status_name });
+          }
+        }
+        const out = Object.keys(days).sort().map(day => ({
+          day, accounts: days[day].accounts, shops: Object.keys(days[day].shops).length,
+          names: Object.keys(days[day].shops).sort()
+        }));
+        res.status(200).json({ ok: true, month: summ, total_fetched: all.length, days: out, open_unclosed: openRows });
+        return;
+      }
       const qq = String(q.q || "").toLowerCase(), date = String(q.date || "");
       let rows = all;
       if (qq) rows = rows.filter(a => (String(a.client_name || "") + " " + String(a.person_name || "")).toLowerCase().includes(qq));
