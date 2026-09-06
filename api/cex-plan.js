@@ -557,24 +557,10 @@ module.exports = async function handler(req, res) {
   // Пишещите действия искат силен токен; „stock" е само четене → и CEX_VIEW_TOKEN.
   const strong = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN];
   // Само ПИШЕЩИТЕ действия искат силен токен; четенето/смятането приемат и четящия.
-  const writeActions = ["create_accounts", "produce_plan", "create_production"];
+  const writeActions = ["create_accounts", "produce_plan", "create_production", "create_stokova"];
   const allowed = writeActions.includes(body.action) ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
-
-  // ── TEMP: най-новите сметки + последните стокови (за диагноза) ──
-  if (body.action === "acc_new") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 8 }, user, pass);
-    let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
-    const iv = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 10 }, user, pass);
-    let ivl = iv.data || []; if (!Array.isArray(ivl)) ivl = Object.values(ivl);
-    ivl.sort((a, b) => (Number(b.inv_id || 0) - Number(a.inv_id || 0)));
-    res.status(200).json({ ok: true,
-      accounts: all.slice(0, 8).map(a => ({ id: a.account_id, person: a.person_name, client: a.client_name, close: a.close_date })),
-      invoices: ivl.slice(0, 10).map(x => ({ inv_id: x.inv_id, num: x.inv_num, type: x.type_id, client: x.receiver_company_name || x.client_name, date: x.create_date, accounts: x.account_ids || x.accounts })) });
-    return;
-  }
 
   // ── ③ СТОКОВА РАЗПИСКА: сглобява Invoices_create от формата на сметката ──
   // body: {account_id, date, dry?}. dry=true → връща сглобеното БЕЗ да записва.
