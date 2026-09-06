@@ -595,7 +595,7 @@ module.exports = async function handler(req, res) {
     values.create_date = date; values.term_date = date; values.payment_date = date;
     values.accounts = [acc];
     if (values.seller_company_id == null) values.seller_company_id = values.company_id != null ? values.company_id : 1;
-    if (values.paymethod_id == null) values.paymethod_id = "5";
+    if (body.paymethod_id !== undefined) values.paymethod_id = body.paymethod_id === null ? null : String(body.paymethod_id);
     // 3) редове: препрати грид data_source.target → вземи редовете
     let rows = [];
     let rowsRaw = null;
