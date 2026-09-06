@@ -544,14 +544,14 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
-  // ── TEMP: извиква Accounts_account_documents (стокова разписка) за сметка + суров отговор ──
-  if (body.action === "acct_docs") {
+  // ── TEMP: суров wrapped-извик към произволен Barsy метод (за да разбием стоковата) ──
+  if (body.action === "raw_call") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
-    const id = Number(body.id);
-    if (!id) { res.status(400).json({ ok: false, error: "no_id" }); return; }
-    const r = await cexCallRoot({ Accounts_account_documents: { id } }, user, pass);
-    res.status(200).json({ ok: r.ok, status: r.status, data: r.data, raw: String(r.raw || "").slice(0, 1500) });
+    const method = String(body.method || ""), params = body.params || {};
+    if (!method) { res.status(400).json({ ok: false, error: "no_method" }); return; }
+    const r = await cexCallRoot({ [method]: params }, user, pass);
+    res.status(200).json({ ok: r.ok, status: r.status, data: r.data, raw: String(r.raw || "").slice(0, 4000) });
     return;
   }
 
