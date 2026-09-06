@@ -482,6 +482,27 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // 2d) TEMP диагностика (само четене): суровите полета на сметките за ден/клиент,
+  // за да намерим кое поле носи датата на стоковата разписка. Маха се след това.
+  if (req.method === "GET" && view === "probe") {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    const okV = [process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].some(t => t && q.k === t);
+    if (!okV) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    try {
+      const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 900 }, user, pass);
+      let all = list.data || []; if (!Array.isArray(all)) all = Object.values(all);
+      const qq = String(q.q || "").toLowerCase(), date = String(q.date || "");
+      let rows = all;
+      if (qq) rows = rows.filter(a => String(a.client_name || "").toLowerCase().includes(qq));
+      if (date) rows = rows.filter(a => [a.create_date, a.close_date, a.ref_date].some(d => String(d || "").startsWith(date)));
+      const sample = rows.slice(0, 60).map(a => ({ account_id: a.account_id, client_name: a.client_name, create_date: a.create_date, close_date: a.close_date, ref_date: a.ref_date, service_status: a.service_status, account_num: a.account_num }));
+      res.status(200).json({ ok: true, total: all.length, matched: rows.length, keys: all[0] ? Object.keys(all[0]) : [], first_full: rows[0] || all[0] || null, sample });
+    } catch (e) { res.status(504).json({ ok: false, error: String(e && e.message) }); return; }
+    return;
+  }
+
   // 3) JSON изчисление (POST от страницата, или GET със seed_date). Токен-гейт.
   let body = req.body;
   if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = null; } }
