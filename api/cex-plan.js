@@ -554,12 +554,17 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
-  // ── TEMP: най-новите сметки (за да намеря id-то за dry проба) ──
+  // ── TEMP: най-новите сметки + последните стокови (за диагноза) ──
   if (body.action === "acc_new") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 6 }, user, pass);
+    const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 8 }, user, pass);
     let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
-    res.status(200).json({ ok: true, accounts: all.slice(0, 6).map(a => ({ id: a.account_id, person: a.person_name, client: a.client_name, close: a.close_date })) });
+    const iv = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 10 }, user, pass);
+    let ivl = iv.data || []; if (!Array.isArray(ivl)) ivl = Object.values(ivl);
+    ivl.sort((a, b) => (Number(b.inv_id || 0) - Number(a.inv_id || 0)));
+    res.status(200).json({ ok: true,
+      accounts: all.slice(0, 8).map(a => ({ id: a.account_id, person: a.person_name, client: a.client_name, close: a.close_date })),
+      invoices: ivl.slice(0, 10).map(x => ({ inv_id: x.inv_id, num: x.inv_num, type: x.type_id, client: x.receiver_company_name || x.client_name, date: x.create_date, accounts: x.account_ids || x.accounts })) });
     return;
   }
 
