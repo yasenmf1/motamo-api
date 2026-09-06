@@ -540,6 +540,17 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     try {
+      // Прочит на последните ПРОИЗВОДСТВА (за проверка след „① Производство").
+      if (q.prods) {
+        const pr = await cexCall("Storeproductions_getlist", { filters: {}, order_by: "id desc", length: 25, extra_properties: ["all", "details"] }, user, pass);
+        let pl = pr.data || []; if (!Array.isArray(pl)) pl = Object.values(pl);
+        const out = pl.slice(0, 25).map(p => ({
+          id: p.id || p.store_production_id, doc_date: p.doc_date || p.create_date, description: p.description,
+          items: (p.details || []).map(x => (x.article_name || x.article_id) + ":" + (x.amount_prod != null ? x.amount_prod : x.amount) + (x.lot_value ? " L=" + x.lot_value : ""))
+        }));
+        res.status(200).json({ ok: true, productions: out });
+        return;
+      }
       const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3000 }, user, pass);
       let all = list.data || []; if (!Array.isArray(all)) all = Object.values(all);
       // Месечна справка по МОЕТО предложение: групиране по close_date (ден на доставка).
