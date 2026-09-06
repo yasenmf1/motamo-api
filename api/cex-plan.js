@@ -196,6 +196,10 @@ async function scheduleSeed(dateIso, user, pass) {
     if (!seen[key]) seen[key] = a;
   }
   const entries = Object.values(seen);
+  // Тик само за АКТИВНИ обекти: с поръчка в последните 14 дни. Неактивните (напр.
+  // СИБИЕС, който не поръчва) остават нетикнати, макар групата да е дължима днес.
+  const cutoff = new Date(dateIso + "T00:00:00Z"); cutoff.setUTCDate(cutoff.getUTCDate() - 14);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
   const shops = await mapLimit(entries, 6, async (a) => {
     const g = cexGroupOf((a.person_name || "") + " " + (a.client_name || ""));
     const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
@@ -204,7 +208,9 @@ async function scheduleSeed(dateIso, user, pass) {
       const art = byId(o.article_id) || resolve(o.article_name);
       if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + (Number(o.amount) || 0);
     }
-    return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group: g, scheduled: cexDueOn(g, dow), order };
+    const lastStr = String(a.close_date || a.create_date || "").slice(0, 10);
+    const recent = lastStr >= cutoffStr;
+    return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group: g, scheduled: cexDueOn(g, dow) && recent, order };
   });
   // Подредба: първо дължимите днес, после по група, после по име.
   const grank = { sibies: 0, merkanto: 1, haskovo: 2, adhoc: 3 };
