@@ -543,6 +543,21 @@ module.exports = async function handler(req, res) {
   const allowed = writeActions.includes(body.action) ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+  // ── TEMP: „генериране на партиди" (Accounts_auto_set_lots) — уникални артикули ──
+  if (body.action === "set_lots") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const acc = Number(body.id); if (!acc) { res.status(400).json({ ok: false, error: "no_id" }); return; }
+    const og = await cexCall("Orders_getlist", { filters: { account_id: acc } }, user, pass);
+    let ords = og.data || []; if (!Array.isArray(ords)) ords = Object.values(ords);
+    const byArt = {};
+    for (const o of ords) { const a = Number(o.article_id), q = Number(o.amount); if (a && q > 0) byArt[a] = (byArt[a] || 0) + q; }
+    const rows = Object.keys(byArt).map((a, i) => ({ row_index: i, article_id: Number(a), amount: byArt[a], depot_id: 1 }));
+    const r = await cexCallRoot({ Accounts_auto_set_lots: { rows, ref_date: null, include_reserved: 1 } }, user, pass);
+    res.status(200).json({ ok: r.ok, status: r.status, sent_rows: rows, data: r.data });
+    return;
+  }
+
   // ── ЗАРЕЖДАНЕ ПО ГРАФИК (чете; връща обектите за деня + последните им количества) ──
   if (body.action === "schedule_seed") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
