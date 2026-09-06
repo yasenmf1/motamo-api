@@ -626,8 +626,10 @@ module.exports = async function handler(req, res) {
         }));
       }
     } catch (e) { rowsRaw = { error: String(e && e.message) }; }
+    let paymethodOpts = null;
+    (function w(n) { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(w); if (n.name === "paymethod_id" && n.data_source) paymethodOpts = n.data_source; for (const k in n) w(n[k]); })(inner);
     const payload = { Invoices_create: { id: null, action_type: "save", values, rows } };
-    if (body.dry === true) { res.status(200).json({ ok: true, dry: true, account_id: acc, rows_count: rows.length, payload, rows_raw_sample: JSON.stringify(rowsRaw).slice(0, 500) }); return; }
+    if (body.dry === true) { res.status(200).json({ ok: true, dry: true, account_id: acc, rows_count: rows.length, paymethod_options: paymethodOpts, payload, rows_raw_sample: JSON.stringify(rowsRaw).slice(0, 300) }); return; }
     const cr = await cexCallRoot(payload, user, pass);
     const invId = cr.data && (cr.data.Invoices_create || (cr.data.data && cr.data.data.inv_id)) || null;
     res.status(200).json({ ok: !!cr.ok, account_id: acc, rows_count: rows.length, inv_result: cr.data, error: cr.ok ? undefined : String(cr.raw || "").slice(0, 400) });
