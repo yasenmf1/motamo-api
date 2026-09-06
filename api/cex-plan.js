@@ -544,6 +544,19 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
+  // ── TEMP: „генериране на партиди" (Accounts_auto_set_lots) за сметка ──
+  if (body.action === "set_lots") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const acc = Number(body.id); if (!acc) { res.status(400).json({ ok: false, error: "no_id" }); return; }
+    const og = await cexCall("Orders_getlist", { filters: { account_id: acc } }, user, pass);
+    let ords = og.data || []; if (!Array.isArray(ords)) ords = Object.values(ords);
+    const rows = ords.map((o, i) => ({ row_index: i, article_id: Number(o.article_id), amount: Number(o.amount), depot_id: 1 })).filter(r => r.article_id && r.amount > 0);
+    const r = await cexCallRoot({ Accounts_auto_set_lots: { rows, ref_date: null, include_reserved: 1 } }, user, pass);
+    res.status(200).json({ ok: r.ok, status: r.status, sent_rows: rows, data: r.data, raw: String(r.raw || "").slice(0, 2000) });
+    return;
+  }
+
   // ── TEMP (четене): най-новите сметки, за да намеря id-то на току-що създадената ──
   if (body.action === "acc_new") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
