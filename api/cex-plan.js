@@ -688,13 +688,23 @@ module.exports = async function handler(req, res) {
     const toRows = (map) => Object.entries(map)
       .map(([name, qty]) => { const a = resolve(name); return a ? { article_id: a.id, article_name: a.name, amount: round(Number(qty)) } : null; })
       .filter(r => r && r.amount > 0);
-    const zagRows = toRows(zag), rollRows = toRows(rolls);
-    // Сетовете (CET*) се продават като артикул в сметките, значи трябва да са в
-    // наличност → произвеждаме ги СЛЕД ролките (сетът тегли ролките си по рецепта).
-    const setRows = Object.entries(agg)
-      .map(([name, qty]) => { const a = resolve(name); return (a && a.is_set) ? { article_id: a.id, article_name: a.name, amount: round(Number(qty)) } : null; })
-      .filter(r => r && r.amount > 0);
-    const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate };
+    // Наличността се чете, за да произведем НУЖНОТО + колкото ЛИПСВА (покрива минуси),
+    // та сметките после да минат (API потребителят не продава под нула).
+    let sm = {};
+    try { sm = await stockMap(user, pass); } catch (e) { sm = {}; }
+    const deficit = id => { const q = sm[String(id)]; const n = (q == null || isNaN(q)) ? 0 : q; return n < 0 ? -n : 0; };
+    // Сетове (CET*): поръчано + дефицит. Продават се като артикул → трябва да са в наличност.
+    const setProduce = {};
+    for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set && Number(qty) > 0) setProduce[name] = round(Number(qty) + deficit(a.id)); }
+    // Ролки/поке: директните поръчки + ролките за ПРОИЗВЕЖДАНИТЕ сетове, после + дефицит.
+    const rollNeed = {};
+    for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_menu && !a.is_set && Number(qty) > 0) rollNeed[name] = (rollNeed[name] || 0) + Number(qty); }
+    for (const [name, qty] of Object.entries(explodeToRolls(setProduce))) { const a = resolve(name); if (a && a.is_menu && !a.is_set) rollNeed[name] = (rollNeed[name] || 0) + qty; }
+    const rollProduce = {};
+    for (const [name, qty] of Object.entries(rollNeed)) { const a = resolve(name); if (a) rollProduce[name] = round(Number(qty) + deficit(a.id)); }
+    // Произвеждаме ролките СЛЕД заготовките и ПРЕДИ сетовете (сетът тегли ролките по рецепта).
+    const zagRows = toRows(zag), rollRows = toRows(rollProduce), setRows = toRows(setProduce);
+    const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate, produced_rolls: sortObj(rollProduce, 2), produced_sets: sortObj(setProduce, 2) };
     // Ред: (заготовки по избор →) ролки → сетове. Ролките дърпат готовите заготовки от
     // наличност; заготовките се включват само с include_zag (някои нямат рецепта).
     try {
