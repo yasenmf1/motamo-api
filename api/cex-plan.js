@@ -495,9 +495,9 @@ module.exports = async function handler(req, res) {
       let all = list.data || []; if (!Array.isArray(all)) all = Object.values(all);
       const qq = String(q.q || "").toLowerCase(), date = String(q.date || "");
       let rows = all;
-      if (qq) rows = rows.filter(a => String(a.client_name || "").toLowerCase().includes(qq));
-      if (date) rows = rows.filter(a => [a.create_date, a.close_date, a.ref_date].some(d => String(d || "").startsWith(date)));
-      const sample = rows.slice(0, 60).map(a => ({ account_id: a.account_id, client_name: a.client_name, create_date: a.create_date, close_date: a.close_date, ref_date: a.ref_date, service_status: a.service_status, account_num: a.account_num }));
+      if (qq) rows = rows.filter(a => (String(a.client_name || "") + " " + String(a.person_name || "")).toLowerCase().includes(qq));
+      if (date) rows = rows.filter(a => [a.create_date, a.close_date, a.ref_date, a.delivery_date].some(d => String(d || "").startsWith(date)));
+      const sample = rows.slice(0, 60).map(a => ({ account_id: a.account_id, client_name: a.client_name, person_name: a.person_name, create_date: a.create_date, close_date: a.close_date, ref_date: a.ref_date, delivery_date: a.delivery_date, status: a.status, service_status_name: a.service_status_name }));
       res.status(200).json({ ok: true, total: all.length, matched: rows.length, keys: all[0] ? Object.keys(all[0]) : [], first_full: rows[0] || all[0] || null, sample });
     } catch (e) { res.status(504).json({ ok: false, error: String(e && e.message) }); return; }
     return;
