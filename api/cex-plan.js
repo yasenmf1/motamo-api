@@ -576,9 +576,9 @@ module.exports = async function handler(req, res) {
     const inner = load.data && load.data.invoices_edit;
     if (!inner) { res.status(502).json({ ok: false, error: "load_failed", raw: String(load.raw || "").slice(0, 300) }); return; }
     const content = Array.isArray(inner.content) ? inner.content : [];
-    const headerBlock = content.find(c => c && c.type === "data") || content[0];
     const gridBlock = content.find(c => c && c.type === "eStructListForm");
-    // 2) хедър стойности: събери полетата (name→value), обектите ги разгъни
+    // 2) хедър стойности: обходи ЦЯЛАТА форма, събери полетата (name→value); обект-стойност
+    // (client_id={client_id,client_name}, seller_company_id={company_id,name}) го разгъвам.
     const values = {};
     (function walk(n) {
       if (!n || typeof n !== "object") return;
@@ -586,10 +586,11 @@ module.exports = async function handler(req, res) {
       if (typeof n.name === "string" && Object.prototype.hasOwnProperty.call(n, "value")) {
         const v = n.value;
         if (v && typeof v === "object" && !Array.isArray(v)) Object.assign(values, v);
-        else if (!(n.name in values)) values[n.name] = v;
+        else if (!(n.name in values) || values[n.name] == null) values[n.name] = v;
       }
-      for (const k in n) if (k !== "data_source" && k !== "elements" && k !== "extra_elements") walk(n[k]);
-    })(headerBlock);
+      // прескачаме тежките/референтни таблици (dropdown опции), не са полета-стойности
+      for (const k in n) if (k !== "data_source" && k !== "tax_groups_by_country" && k !== "all_tax_groups" && k !== "countries" && k !== "elements") walk(n[k]);
+    })(inner);
     values.type_id = String(DT);
     values.create_date = date; values.term_date = date; values.payment_date = date;
     values.accounts = [acc];
