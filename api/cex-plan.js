@@ -553,7 +553,7 @@ module.exports = async function handler(req, res) {
     const byArt = {};
     for (const o of ords) { const a = Number(o.article_id), q = Number(o.amount); if (a && q > 0) byArt[a] = (byArt[a] || 0) + q; }
     const rows = Object.keys(byArt).map((a, i) => ({ row_index: i, article_id: Number(a), amount: byArt[a], depot_id: 1 }));
-    const r = await cexCallRoot({ Accounts_auto_set_lots: { rows, ref_date: null, include_reserved: 1 } }, user, pass);
+    const r = await cexCallRoot({ Accounts_auto_set_lots: { account_id: acc, rows, ref_date: null, include_reserved: 1 } }, user, pass);
     res.status(200).json({ ok: r.ok, status: r.status, sent_rows: rows, data: r.data });
     return;
   }
