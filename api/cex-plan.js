@@ -163,6 +163,54 @@ async function seedShops(date, user, pass) {
   }));
   return { shops, accounts: accts.length };
 }
+
+// ── Зареждане ПО ГРАФИК (не по дата на затваряне, която закъснява). Разпознаваме
+// групата по името и решаваме дали е за деня; количествата = ПОСЛЕДНАТА реална
+// заявка на обекта. Графикът е на собственика (виж memory motamo-cex-delivery-schedule).
+function cexGroupOf(name) {
+  const s = String(name || "").toUpperCase();
+  if (s.includes("СИБИЕС")) return "sibies";
+  if (s.includes("МЕРКАНТО")) return "merkanto";
+  if (s.includes("ХАЙ ЛЕВЕЛ")) return "haskovo";
+  return "adhoc";
+}
+// dow: 0 нд .. 6 сб. Сибиес=всеки ден · Мерканто=вт(2)/пт(5) · Хасково=пн(1)/ср(3)/пт(5).
+function cexDueOn(group, dow) {
+  if (group === "sibies") return true;
+  if (group === "merkanto") return dow === 2 || dow === 5;
+  if (group === "haskovo") return dow === 1 || dow === 3 || dow === 5;
+  return false; // adhoc — само по заявка (нетикнато)
+}
+async function scheduleSeed(dateIso, user, pass) {
+  const dow = new Date(dateIso + "T12:00:00Z").getUTCDay();
+  const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 2000 }, user, pass);
+  let all = list.data || []; if (!Array.isArray(all)) all = Object.values(all);
+  // Най-скорошната сметка на всеки ОБЕКТ (desc → първата е най-новата). Пропускаме
+  // анонимни и тестовите (alias CLTEST), за да не се пълни от тест.
+  const seen = {};
+  for (const a of all) {
+    const pn = a.person_name, cn = a.client_name;
+    if (!pn && (!cn || cn === "Анонимен")) continue;
+    if (String(a.account_alias || "").includes("CLTEST")) continue;
+    const key = a.person_id ? ("p" + a.person_id) : ("c" + (a.client_id || "") + "|" + (pn || cn || ""));
+    if (!seen[key]) seen[key] = a;
+  }
+  const entries = Object.values(seen);
+  const shops = await mapLimit(entries, 6, async (a) => {
+    const g = cexGroupOf((a.person_name || "") + " " + (a.client_name || ""));
+    const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
+    const order = {};
+    for (const o of (rows.data || [])) {
+      const art = byId(o.article_id) || resolve(o.article_name);
+      if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + (Number(o.amount) || 0);
+    }
+    return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group: g, scheduled: cexDueOn(g, dow), order };
+  });
+  // Подредба: първо дължимите днес, после по група, после по име.
+  const grank = { sibies: 0, merkanto: 1, haskovo: 2, adhoc: 3 };
+  shops.sort((x, y) => (Number(y.scheduled) - Number(x.scheduled)) || ((grank[x.group] || 9) - (grank[y.group] || 9)) || String(x.rep || x.client || "").localeCompare(String(y.rep || y.client || ""), "bg"));
+  return { shops, dow };
+}
 // UUID за идемпотентност — един и същ за (ден+магазин), за да не се дублира сметка.
 function uuidFor(date, s) {
   const key = `${date}|${s.client_id || ""}|${s.person_id || ""}|${s.rep || ""}`;
@@ -347,7 +395,7 @@ h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.
 </style></head><body>
 <header><h1>MOTAMO цех</h1>
 <span id="tokwrap"><input id="tok" type="password" placeholder="токен" size="16"></span>
-<span class="grp"><label>Зареди</label><input id="date" type="date"><b class="dlab" id="dlab"></b><button onclick="seed()">Зареди</button></span>
+<span class="grp"><label>Зареди</label><input id="date" type="date"><b class="dlab" id="dlab"></b><button onclick="seed()">По ден</button><button class="alt" onclick="schedSeed()">По график</button></span>
 <span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="window.print()">Печат</button></span>
 <span class="grp"><label>Партида</label><input id="pdate" type="date" title="Партида L.<тази дата>, срок +3 дни"><b class="dlab" id="plab"></b></span>
 <span class="grp"><button class="prod" onclick="doProduce()">① Производство</button><button class="acc" onclick="doAccounts()">② Сметки</button></span></header>
@@ -369,10 +417,11 @@ $('pdate').addEventListener('change',updLabs);$('pdate').addEventListener('input
 function msg(t,k){var m=$('msg');m.textContent=t;m.className='msg '+(k||'')}
 function api(p){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:$('tok').value},p))}).then(function(r){return r.json()})}
 function seed(){msg('Зареждам…');api({seed_date:$('date').value}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||'')+' '+(j.hint||''),'err');return}shops=j.shops||[];renderGrid();renderPlan(j);if(j.note){msg(j.note,'err')}else{msg('Заредени '+(j.seeded_accounts||0)+' сметки. Коригирай и „Изчисли план".','ok')}}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function schedSeed(){msg('Зареждам по график…');api({action:'schedule_seed',date:$('date').value}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}shops=j.shops||[];renderGrid();$('planbox').innerHTML='';var dn=['нд','пн','вт','ср','чт','пт','сб'][j.dow];var adhoc=(j.seeded_accounts||0)-(j.scheduled_count||0);msg('График за '+dn+': '+(j.scheduled_count||0)+' по график (тикнати) + '+adhoc+' по заявка (нетикнати). Тикни каквото има заявка, коригирай и „Сметки".','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function shortName(client,rep){var r=(rep||client||'');r=r.replace(/[„“”"'']/g,'').replace(/^\\s*(ул\\.|бул\\.|ж\\.к\\.|жк|пл\\.)\\s*/i,'').replace(/\\s{2,}/g,' ').trim();return r||(client||'')}
 function renderGrid(){var h='<tr><th class="shop"><input type="checkbox" id="selall" checked title="Избери/махни всички"> Магазин</th>';MENU.forEach(function(m){h+='<th class="'+(m.is_set?'set':'')+'">'+m.name.replace('НACHI','')+'</th>'});h+='</tr>';
-shops.forEach(function(s,i){var full=(s.client||'')+(s.rep?(' · '+s.rep):'');var label=shortName(s.client,s.rep);h+='<tr><td class="shop" title="'+esc(full)+'"><input type="checkbox" class="selbox" data-i="'+i+'" checked> '+esc(label)+'</td>';
+shops.forEach(function(s,i){var full=(s.client||'')+(s.rep?(' · '+s.rep):'');var label=shortName(s.client,s.rep);h+='<tr><td class="shop" title="'+esc(full)+'"><input type="checkbox" class="selbox" data-i="'+i+'" '+(s.scheduled===false?'':'checked')+'> '+esc(label)+'</td>';
 MENU.forEach(function(m){var v=(s.order&&s.order[m.name])||0;h+='<td class="'+(m.is_set?'set':'')+'"><input data-i="'+i+'" data-n="'+esc(m.name)+'" value="'+v+'" inputmode="numeric"></td>'});h+='</tr>'});$('grid').innerHTML=h;
 var sa=$('selall');if(sa){sa.addEventListener('change',function(){document.querySelectorAll('#grid .selbox').forEach(function(cb){cb.checked=sa.checked});syncRows()})}
 document.querySelectorAll('#grid .selbox').forEach(function(cb){cb.addEventListener('change',syncRows)});syncRows()}
@@ -535,6 +584,20 @@ module.exports = async function handler(req, res) {
   const allowed = body.action === "stock" ? strong.concat([process.env.CEX_VIEW_TOKEN]) : strong;
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+
+  // ── ЗАРЕЖДАНЕ ПО ГРАФИК (чете; връща обектите за деня + последните им количества) ──
+  if (body.action === "schedule_seed") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    let s;
+    try { s = await scheduleSeed(date, user, pass); }
+    catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    const scheduled = s.shops.filter(x => x.scheduled).length;
+    res.status(200).json({ ok: true, date, dow: s.dow, seeded_accounts: s.shops.length, scheduled_count: scheduled,
+      shops: s.shops.map(x => ({ client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, scheduled: x.scheduled, order: sortObj(x.order || {}, 2) })) });
+    return;
+  }
 
   // ── СЪЗДАВАНЕ на отворени сметки-чернови в Barsy (ПИШЕ; зад силен токен) ──
   if (body.action === "create_accounts") {
