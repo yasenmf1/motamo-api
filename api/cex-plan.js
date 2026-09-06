@@ -542,8 +542,9 @@ module.exports = async function handler(req, res) {
     try {
       // Прочит на последните ПРОИЗВОДСТВА (за проверка след „① Производство").
       if (q.prods) {
-        const pr = await cexCall("Storeproductions_getlist", { filters: {}, order_by: "id desc", length: 25, extra_properties: ["all", "details"] }, user, pass);
+        const pr = await cexCall("Storeproductions_getlist", { filters: {}, length: 4000, extra_properties: ["all", "details"] }, user, pass);
         let pl = pr.data || []; if (!Array.isArray(pl)) pl = Object.values(pl);
+        pl.sort((a, b) => (Number(b.id || b.store_production_id || 0) - Number(a.id || a.store_production_id || 0)));
         const out = pl.slice(0, 25).map(p => ({
           id: p.id || p.store_production_id, doc_date: p.doc_date || p.create_date, description: p.description,
           items: (p.details || []).map(x => (x.article_name || x.article_id) + ":" + (x.amount_prod != null ? x.amount_prod : x.amount) + (x.lot_value ? " L=" + x.lot_value : ""))
