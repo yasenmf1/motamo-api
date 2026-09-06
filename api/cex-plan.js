@@ -543,40 +543,6 @@ module.exports = async function handler(req, res) {
   const allowed = writeActions.includes(body.action) ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
-
-  // ── TEMP: „генериране на партиди" (Accounts_auto_set_lots) за сметка ──
-  if (body.action === "set_lots") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
-    const acc = Number(body.id); if (!acc) { res.status(400).json({ ok: false, error: "no_id" }); return; }
-    const og = await cexCall("Orders_getlist", { filters: { account_id: acc } }, user, pass);
-    let ords = og.data || []; if (!Array.isArray(ords)) ords = Object.values(ords);
-    const rows = ords.map((o, i) => ({ row_index: i, article_id: Number(o.article_id), amount: Number(o.amount), depot_id: 1 })).filter(r => r.article_id && r.amount > 0);
-    const r = await cexCallRoot({ Accounts_auto_set_lots: { rows, ref_date: null, include_reserved: 1 } }, user, pass);
-    res.status(200).json({ ok: r.ok, status: r.status, sent_rows: rows, data: r.data, raw: String(r.raw || "").slice(0, 2000) });
-    return;
-  }
-
-  // ── TEMP (четене): най-новите сметки, за да намеря id-то на току-що създадената ──
-  if (body.action === "acc_new") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
-    const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 15 }, user, pass);
-    let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
-    res.status(200).json({ ok: true, accounts: all.slice(0, 15).map(a => ({ id: a.account_id, person: a.person_name, client: a.client_name, create: a.create_date, close: a.close_date })) });
-    return;
-  }
-
-  // ── TEMP (само зареждане, НЕ записва): дъмп на invoices_edit формата за сметка ──
-  if (body.action === "inv_load") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
-    const acc = Number(body.id); if (!acc) { res.status(400).json({ ok: false, error: "no_id" }); return; }
-    const r = await cexCallRoot({ invoices_edit: { params: { bid: 1, doc_type: 11, gen_mode: 1, account_id: acc } } }, user, pass);
-    res.status(200).json({ ok: r.ok, status: r.status, data: r.data });
-    return;
-  }
-
   // ── ЗАРЕЖДАНЕ ПО ГРАФИК (чете; връща обектите за деня + последните им количества) ──
   if (body.action === "schedule_seed") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
