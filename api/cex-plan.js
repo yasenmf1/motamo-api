@@ -531,69 +531,6 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // 2d) TEMP диагностика (само четене): суровите полета на сметките за ден/клиент,
-  // за да намерим кое поле носи датата на стоковата разписка. Маха се след това.
-  if (req.method === "GET" && view === "probe") {
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    const okV = [process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].some(t => t && q.k === t);
-    if (!okV) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
-    try {
-      // Наличност на артикулите от МЕНЮТО (ролки/сетове/поке) — да видим кои са на минус.
-      if (q.stockmenu) {
-        const sm = await stockMap(user, pass);
-        const rows = MENU.map(m => ({ id: m.id, name: m.name, is_set: m.is_set, qty: sm[String(m.id)] != null ? sm[String(m.id)] : null }))
-          .sort((a, b) => (a.qty == null ? 1 : b.qty == null ? -1 : a.qty - b.qty));
-        res.status(200).json({ ok: true, menu_stock: rows });
-        return;
-      }
-      // Прочит на последните ПРОИЗВОДСТВА (за проверка след „① Производство").
-      if (q.prods) {
-        const pr = await cexCall("Storeproductions_getlist", { filters: {}, length: 4000, extra_properties: ["all", "details"] }, user, pass);
-        let pl = pr.data || []; if (!Array.isArray(pl)) pl = Object.values(pl);
-        pl.sort((a, b) => (Number(b.id || b.store_production_id || 0) - Number(a.id || a.store_production_id || 0)));
-        const out = pl.slice(0, 25).map(p => ({
-          id: p.id || p.store_production_id, doc_date: p.doc_date || p.create_date, description: p.description,
-          items: (p.details || []).map(x => (x.article_name || x.article_id) + ":" + (x.amount_prod != null ? x.amount_prod : x.amount) + (x.lot_value ? " L=" + x.lot_value : ""))
-        }));
-        res.status(200).json({ ok: true, productions: out });
-        return;
-      }
-      const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3000 }, user, pass);
-      let all = list.data || []; if (!Array.isArray(all)) all = Object.values(all);
-      // Месечна справка по МОЕТО предложение: групиране по close_date (ден на доставка).
-      const summ = String(q.summary || ""); // YYYY-MM
-      if (/^\d{4}-\d{2}$/.test(summ)) {
-        const nmeOf = a => String(a.person_name || a.client_name || "?").trim();
-        const days = {}; const openRows = [];
-        for (const a of all) {
-          const cd = String(a.close_date || "");
-          if (cd.startsWith(summ)) {
-            const day = cd.slice(0, 10);
-            (days[day] = days[day] || { accounts: 0, shops: {} });
-            days[day].accounts++; days[day].shops[nmeOf(a)] = (days[day].shops[nmeOf(a)] || 0) + 1;
-          } else if (!a.close_date && String(a.create_date || "").startsWith(summ)) {
-            openRows.push({ account_id: a.account_id, shop: nmeOf(a), create_date: a.create_date, status: a.service_status_name });
-          }
-        }
-        const out = Object.keys(days).sort().map(day => ({
-          day, accounts: days[day].accounts, shops: Object.keys(days[day].shops).length,
-          names: Object.keys(days[day].shops).sort()
-        }));
-        res.status(200).json({ ok: true, month: summ, total_fetched: all.length, days: out, open_unclosed: openRows });
-        return;
-      }
-      const qq = String(q.q || "").toLowerCase(), date = String(q.date || "");
-      let rows = all;
-      if (qq) rows = rows.filter(a => (String(a.client_name || "") + " " + String(a.person_name || "")).toLowerCase().includes(qq));
-      if (date) rows = rows.filter(a => [a.create_date, a.close_date, a.ref_date, a.delivery_date].some(d => String(d || "").startsWith(date)));
-      const sample = rows.slice(0, 60).map(a => ({ account_id: a.account_id, client_name: a.client_name, person_name: a.person_name, create_date: a.create_date, close_date: a.close_date, ref_date: a.ref_date, delivery_date: a.delivery_date, status: a.status, service_status_name: a.service_status_name }));
-      res.status(200).json({ ok: true, total: all.length, matched: rows.length, keys: all[0] ? Object.keys(all[0]) : [], first_full: rows[0] || all[0] || null, sample });
-    } catch (e) { res.status(504).json({ ok: false, error: String(e && e.message) }); return; }
-    return;
-  }
-
   // 3) JSON изчисление (POST от страницата, или GET със seed_date). Токен-гейт.
   let body = req.body;
   if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = null; } }
@@ -606,25 +543,6 @@ module.exports = async function handler(req, res) {
   const allowed = writeActions.includes(body.action) ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
-
-  // ── TEMP диагностика: опитва ЕДНА сметка (както ② Сметки) и връща суровия отговор ──
-  if (body.action === "probe_place") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
-    let s;
-    try { s = await scheduleSeed(date, user, pass); }
-    catch (e) { res.status(504).json({ ok: false, error: String(e && e.message) }); return; }
-    const one = s.shops.filter(x => x.scheduled && Object.keys(x.order || {}).length)[0];
-    if (!one) { res.status(200).json({ ok: false, error: "no scheduled shop with order" }); return; }
-    const orders = Object.entries(one.order).map(([name, qty]) => { const art = resolve(name); return art ? { article_id: art.id, amount: Number(qty) } : null; }).filter(o => o && o.amount > 0);
-    const account = { uuid: uuidFor(date, one), account_alias: "PROBE " + ([one.client, one.rep].filter(Boolean).join(" · ")) };
-    if (one.client_id) account.client_id = one.client_id;
-    if (one.person_id) account.person_id = one.person_id;
-    const r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass);
-    res.status(200).json({ ok: true, tried: { client: one.client, rep: one.rep, client_id: one.client_id, person_id: one.person_id, items: orders.length, orders: orders.slice(0, 3) }, barsy_status: r.status, barsy_ok: r.ok, barsy_data: r.data, barsy_raw: String(r.raw || "").slice(0, 600) });
-    return;
-  }
 
   // ── ЗАРЕЖДАНЕ ПО ГРАФИК (чете; връща обектите за деня + последните им количества) ──
   if (body.action === "schedule_seed") {
