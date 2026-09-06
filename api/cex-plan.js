@@ -401,10 +401,10 @@ h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.
 <span class="grp"><label>Зареди</label><input id="date" type="date"><b class="dlab" id="dlab"></b><button onclick="seed()">По ден</button><button class="alt" onclick="schedSeed()">По график</button></span>
 <span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="window.print()">Печат</button></span>
 <span class="grp"><label>Партида</label><input id="pdate" type="date" title="Партида L.<тази дата>, срок +3 дни"><b class="dlab" id="plab"></b></span>
-<span class="grp"><button class="prod" onclick="doProduce()">① Производство</button><button class="acc" onclick="doAccounts()">② Сметки</button></span></header>
+<span class="grp"><button class="prod" onclick="doProduce()">① Производство</button><button class="acc" onclick="doAccounts()">② Сметки</button><button class="acc" onclick="doStokova()">③ Стокова</button></span></header>
 <div class="wrap"><div id="msg" class="msg"></div><div class="scroll"><table id="grid"></table></div><div id="planbox"></div></div>
 <script>
-var MENU=${JSON.stringify(MENU)};var shops=[];var $=function(id){return document.getElementById(id)};
+var MENU=${JSON.stringify(MENU)};var shops=[];var LASTACC=[];var $=function(id){return document.getElementById(id)};
 (function(){var urlk='';try{urlk=new URLSearchParams(location.search).get('k')||new URLSearchParams(location.search).get('token')||''}catch(e){}
 var saved='';try{saved=localStorage.getItem('cex_tok')||''}catch(e){}
 var t=urlk||saved;$('tok').value=t;if(urlk){try{localStorage.setItem('cex_tok',urlk)}catch(e){}}
@@ -436,7 +436,8 @@ function calc(){var sel=selShops();if(!sel.length){msg('Избери поне е
 function tbl(t,o){var ks=Object.keys(o||{});if(!ks.length)return '';var h='<table><tr><th class="shop">'+t+'</th><th>кол.</th></tr>';ks.forEach(function(k){h+='<tr><td class="shop">'+esc(k)+'</td><td class="q">'+o[k]+'</td></tr>'});return h+'</table>'}
 function renderPlan(j){$('planbox').innerHTML='<h2>За производство</h2><div class="plan">'+tbl('Сетове',j.produce_sets)+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
 function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy за '+sel.length+' магазина:\\n• ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (ролки → сетове)');api({action:'produce_plan',shops:sel,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||(j.zagotovki&&j.zagotovki.error)||j.error||j.message||''),'err');return}var ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;msg('✓ Производството е създадено. Партида '+j.lot+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+'. Провери в касата и „Приключи", ако е ок.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
-function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value||$('date').value;var lot=pd?('L.'+pd.split('-').reverse().join('.')):'';if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy за '+sel.length+' магазина'+(lot?(', ВЕЧЕ с партида '+lot):'')+'.\\nЦените ги слага Barsy по правилото на клиента.\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. Провери в касата.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value||$('date').value;var lot=pd?('L.'+pd.split('-').reverse().join('.')):'';if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy за '+sel.length+' магазина'+(lot?(', ВЕЧЕ с партида '+lot):'')+'.\\nЦените ги слага Barsy по правилото на клиента.\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;LASTACC=cr.filter(function(c){return c.ok&&c.account_id}).map(function(c){return c.account_id});msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. После натисни ③ Стокова.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function doStokova(){if(!LASTACC.length){msg('Първо ② Сметки (нямам номера на сметки за стокова).','err');return}var pd=$('pdate').value||$('date').value;if(!confirm('Ще СЪЗДАМ стокови разписки за '+LASTACC.length+' сметки, с дата '+pd+'.\\nПродължавам?'))return;msg('Правя стоковите…');var done=0,okc=0,errs=[];LASTACC.forEach(function(id){api({action:'create_stokova',account_id:id,date:pd}).then(function(j){done++;if(j.ok)okc++;else errs.push('#'+id+': '+(j.error||''));if(done===LASTACC.length){msg('✓ Стокови: '+okc+' готови'+(errs.length?(' · грешки: '+errs.join(' | ')):''),errs.length?'err':'ok')}}).catch(function(e){done++;errs.push('#'+id+': мрежа');if(done===LASTACC.length)msg('Грешки: '+errs.join(' | '),'err')})})}
 function renderCreated(cr){var h='<h2>Създадени сметки</h2><table><tr><th class="shop">Магазин</th><th>сметка №</th><th>артикули</th><th>статус</th></tr>';cr.forEach(function(c){var full=(c.client||'')+(c.rep?(' · '+c.rep):'');h+='<tr><td class="shop" title="'+esc(full)+'">'+esc(shortName(c.client,c.rep))+'</td><td>'+(c.account_id||'—')+'</td><td>'+(c.items||0)+'</td><td>'+(c.ok?'✓':esc(c.skipped||'грешка'))+'</td></tr>'});$('planbox').innerHTML=h+'</table>'}
 </script></body></html>`;
 }
@@ -546,6 +547,75 @@ module.exports = async function handler(req, res) {
   const allowed = writeActions.includes(body.action) ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+
+  // ── ③ СТОКОВА РАЗПИСКА: сглобява Invoices_create от формата на сметката ──
+  // body: {account_id, date, dry?}. dry=true → връща сглобеното БЕЗ да записва.
+  if (body.action === "create_stokova") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const acc = Number(body.account_id); if (!acc) { res.status(400).json({ ok: false, error: "no_account_id" }); return; }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    const DT = 11; // стокова разписка
+    // 1) зареди формата (хедър полета + грид с редовете, вече с партида)
+    const load = await cexCallRoot({ invoices_edit: { params: { bid: 1, doc_type: DT, gen_mode: 1, account_id: acc } } }, user, pass);
+    const inner = load.data && load.data.invoices_edit;
+    if (!inner) { res.status(502).json({ ok: false, error: "load_failed", raw: String(load.raw || "").slice(0, 300) }); return; }
+    const content = Array.isArray(inner.content) ? inner.content : [];
+    const headerBlock = content.find(c => c && c.type === "data") || content[0];
+    const gridBlock = content.find(c => c && c.type === "eStructListForm");
+    // 2) хедър стойности: събери полетата (name→value), обектите ги разгъни
+    const values = {};
+    (function walk(n) {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) return n.forEach(walk);
+      if (typeof n.name === "string" && Object.prototype.hasOwnProperty.call(n, "value")) {
+        const v = n.value;
+        if (v && typeof v === "object" && !Array.isArray(v)) Object.assign(values, v);
+        else if (!(n.name in values)) values[n.name] = v;
+      }
+      for (const k in n) if (k !== "data_source" && k !== "elements" && k !== "extra_elements") walk(n[k]);
+    })(headerBlock);
+    values.type_id = String(DT);
+    values.create_date = date; values.term_date = date; values.payment_date = date;
+    values.accounts = [acc];
+    // 3) редове: препрати грид data_source.target → вземи редовете
+    let rows = [];
+    let rowsRaw = null;
+    try {
+      let tgt = gridBlock && gridBlock.data && gridBlock.data.data_source && gridBlock.data.data_source.target;
+      if (tgt) {
+        const rr = await cexCallRoot(tgt, user, pass);
+        rowsRaw = rr.data;
+        // намери списъка с редове в отговора
+        const findRows = (node) => {
+          let best = null;
+          (function w(x) {
+            if (!x || typeof x !== "object") return;
+            if (Array.isArray(x)) { if (x.length && x[0] && typeof x[0] === "object" && (x[0].article_id != null || x[0].item_id != null)) { if (!best || x.length > best.length) best = x; } return x.forEach(w); }
+            for (const k in x) w(x[k]);
+          })(node);
+          return best || [];
+        };
+        rows = findRows(rr.data).map(r => ({
+          item_id: r.item_id != null ? String(r.item_id) : "", inv_ref_num: r.inv_ref_num != null ? String(r.inv_ref_num) : String(r.article_id || ""),
+          item_name: r.item_name || r.article_name || "", quantity: String(r.quantity != null ? r.quantity : r.amount),
+          measure: r.measure || "бр", original_single_price: String(r.original_single_price != null ? r.original_single_price : (r.single_price != null ? r.single_price : "")),
+          original_single_price_with_tax: String(r.original_single_price_with_tax != null ? r.original_single_price_with_tax : (r.single_price_with_tax != null ? r.single_price_with_tax : "")),
+          discount: String(r.discount != null ? r.discount : 0), tax: String(r.tax != null ? r.tax : 20), tax_id: String(r.tax_id != null ? r.tax_id : 2), tax_reason: r.tax_reason || "",
+          lot_value: r.lot_value || "", total_for_tax_2: String(r.total_for_tax_2 != null ? r.total_for_tax_2 : (r.total_price != null ? r.total_price : "0.00")),
+          total_for_tax_1: "0.00", total_for_tax_3: "0.00", total_for_tax_4: "0.00", total_for_tax_12: "0.00", total_for_tax_100: "0.00",
+          total_price: String(r.total_price != null ? r.total_price : ""), chooser: 0, article_id: String(r.article_id || "")
+        }));
+      }
+    } catch (e) { rowsRaw = { error: String(e && e.message) }; }
+    const payload = { Invoices_create: { id: null, action_type: "save", values, rows } };
+    if (body.dry === true) { res.status(200).json({ ok: true, dry: true, account_id: acc, rows_count: rows.length, payload, rows_raw_sample: JSON.stringify(rowsRaw).slice(0, 500) }); return; }
+    const cr = await cexCallRoot(payload, user, pass);
+    const invId = cr.data && (cr.data.Invoices_create || (cr.data.data && cr.data.data.inv_id)) || null;
+    res.status(200).json({ ok: !!cr.ok, account_id: acc, rows_count: rows.length, inv_result: cr.data, error: cr.ok ? undefined : String(cr.raw || "").slice(0, 400) });
+    return;
+  }
+
   // ── ЗАРЕЖДАНЕ ПО ГРАФИК (чете; връща обектите за деня + последните им количества) ──
   if (body.action === "schedule_seed") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
