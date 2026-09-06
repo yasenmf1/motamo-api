@@ -359,16 +359,22 @@ td.blank{background:#fbfcfd;min-width:52px;border-left:1px dashed #d7dade;border
 function toolPage() {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MOTAMO цех — производствен калкулатор</title><style>
-:root{color-scheme:light}*{box-sizing:border-box}body{font:14px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#f4f5f7;color:#1a1a1a}
-header{background:#b3121b;color:#fff;padding:10px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:5}
-header h1{font-size:16px;margin:0 12px 0 0}header input{font:13px system-ui;padding:5px 7px;border:0;border-radius:5px}
-button{font:13px system-ui;padding:6px 12px;border:0;border-radius:6px;background:#111;color:#fff;cursor:pointer}button.alt{background:#fff;color:#111;border:1px solid #ccc}
-button.prod{background:#0a7d33}button.acc{background:#7a0c12}
+:root{color-scheme:light}*{box-sizing:border-box}body{font:14px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#eef0f3;color:#1a1a1a}
+header{background:linear-gradient(135deg,#c8151f,#7a0c12);color:#fff;padding:9px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:5;box-shadow:0 2px 12px rgba(122,12,18,.35)}
+header .brand{display:flex;align-items:center;gap:10px;margin-right:6px}
+header .brand img{width:36px;height:36px;border-radius:9px;background:#fff;padding:3px;box-shadow:0 2px 6px rgba(0,0,0,.25);flex:0 0 auto}
+header h1{font-size:16px;margin:0;font-weight:800;letter-spacing:.4px;line-height:1.1}
+header h1 small{display:block;font-size:10px;font-weight:600;opacity:.82;letter-spacing:1px;text-transform:uppercase;margin-top:2px}
+header input{font:13px system-ui;padding:6px 8px;border:0;border-radius:6px;box-shadow:inset 0 1px 2px rgba(0,0,0,.12)}
+button{font:13px system-ui;font-weight:600;padding:7px 13px;border:0;border-radius:7px;background:#111;color:#fff;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.18);transition:transform .05s ease,filter .15s ease}
+button:hover{filter:brightness(1.09)}button:active{transform:translateY(1px)}
+button.alt{background:#fff;color:#1a1a1a;border:1px solid rgba(0,0,0,.12)}
+button.prod{background:linear-gradient(135deg,#12a244,#0a7d33)}button.acc{background:linear-gradient(135deg,#a01019,#7a0c12)}
 header .grp{display:flex;gap:6px;align-items:center}header label{font-size:12px;opacity:.9}
 header .dlab{background:#fff;color:#b3121b;border-radius:5px;padding:3px 8px;font-size:13px;white-space:nowrap}
 @media (max-width:760px){
  body{font-size:16px}
- header{gap:8px;padding:10px}header h1{width:100%;margin:0 0 4px;font-size:18px}
+ header{gap:8px;padding:10px}header .brand{flex:1 1 100%;margin:0 0 2px}header h1{font-size:18px}header .brand img{width:40px;height:40px}
  header .grp{flex:1 1 100%;justify-content:flex-start;flex-wrap:wrap}
  header .dlab{flex:0 0 auto}
  header input{font-size:16px;padding:9px 10px;flex:1}
@@ -396,7 +402,7 @@ table{border-collapse:collapse;background:#fff}
 h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.plan table{width:auto;min-width:260px}.plan table td,.plan table th{border:1px solid #e2e4e8;padding:7px 12px;text-align:left}.plan table th{background:#f0f1f3}.plan td.q{font-weight:700;color:#b3121b;text-align:right}
 @media print{header,.noprint{display:none}.wrap{padding:0}}
 </style></head><body>
-<header><h1>MOTAMO цех</h1>
+<header><div class="brand"><img src="https://motamo.bg/icons/icon-192.png" alt="MOTAMO" onerror="this.style.display='none'"><h1>MOTAMO цех<small>производство · сметки · стокова</small></h1></div>
 <span id="tokwrap"><input id="tok" type="password" placeholder="токен" size="16"></span>
 <span class="grp"><label>Зареди</label><input id="date" type="date"><b class="dlab" id="dlab"></b><button onclick="seed()">По ден</button><button class="alt" onclick="schedSeed()">По график</button></span>
 <span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="window.print()">Печат</button></span>
