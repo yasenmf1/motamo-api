@@ -544,6 +544,25 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
+  // ── TEMP: сглобява стокова разписка (invoices_edit doc_type 11) за сметка, с дата ──
+  if (body.action === "make_stokova") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const acc = Number(body.id); const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    if (!acc) { res.status(400).json({ ok: false, error: "no_id" }); return; }
+    // 1) зареди формата → tax_groups_by_country + брой редове
+    const load = await cexCallRoot({ invoices_edit: { params: { bid: 1, doc_type: 11, gen_mode: 1, account_id: acc } } }, user, pass);
+    let taxg = null; try { taxg = load.data.invoices_edit.content[0].data.tax_groups_by_country; } catch (e) {}
+    // 2) последен номер
+    const ln = await cexCallRoot({ Invoices_getLastNum: { type_id: "11", seller_company_id: 1 } }, user, pass);
+    const lastNum = (ln.data && (ln.data.Invoices_getLastNum != null ? ln.data.Invoices_getLastNum : ln.data)) ;
+    // 3) запис
+    const saveParams = { bid: 1, doc_type: 11, gen_mode: 1, account_id: acc, last_num: lastNum, tax_groups_by_country: taxg, create_date: date, term_date: date, payment_date: date, action_type: "values" };
+    const save = await cexCallRoot({ invoices_edit: { params: saveParams } }, user, pass);
+    res.status(200).json({ ok: save.ok, status: save.status, last_num_from_api: lastNum, save_data: save.data, save_raw: String(save.raw || "").slice(0, 1200) });
+    return;
+  }
+
   // ── TEMP: суров wrapped-извик към произволен Barsy метод (за да разбием стоковата) ──
   if (body.action === "raw_call") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
