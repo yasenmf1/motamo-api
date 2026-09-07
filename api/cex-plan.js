@@ -196,6 +196,25 @@ async function seedRazos(razosDate, user, pass, includeSameDay) {
   return { shops, accounts: accts.length };
 }
 
+// Barsy справка „Продажби по артикули" (Reports_sales_by_articles) — ЕДНА заявка връща
+// на артикул: cnt (бройки), total_no_dds (оборот без ДДС) и delivery_total (себестойност
+// без ДДС, от AVG_DELIVERY_PRICE). Заменя крехкото Orders-страниране за COGS/маржин.
+// Данните идват през „values" извикване (action_type:values + active_struct_id).
+async function reportSalesByArticles(from, to, user, pass) {
+  const body = { active_struct_id: "eStructList_1", action_type: "values", filters: { ref_date: [from, to] } };
+  const r = await cexCall("Reports_sales_by_articles", body, user, pass);
+  const rows = (r && r.data && Array.isArray(r.data.rows)) ? r.data.rows : [];
+  const by = {};   // article_id → { name, units, revenue, cost }
+  for (const x of rows) {
+    const id = String(x.article_id);
+    const a = by[id] || (by[id] = { article_id: Number(x.article_id), name: x.article_name || ("#" + id), units: 0, revenue: 0, cost: 0 });
+    a.units += Number(x.cnt) || 0;
+    a.revenue += Number(x.total_no_dds) || 0;         // без ДДС
+    a.cost += Number(x.delivery_total) || 0;          // себестойност без ДДС
+  }
+  return { ok: !!(r && r.ok), articles: Object.values(by) };
+}
+
 // ── ДАШБОРД агрегатор (Фаза 1): оборот по ден + по клиент, издадени фактури, разлика.
 // Оборот = сумата на ЗАТВОРЕНИТЕ сметки (`total_sum` е с ДДС → нето = /1.2), групиран по
 // ден на затваряне и по клиент. Фактури = Invoices type_id 1 (не стокови 11), неанулирани.
@@ -946,6 +965,17 @@ module.exports = async function handler(req, res) {
       const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3 }, user, pass);
       const a = Array.isArray(r.data) ? r.data : Object.values(r.data || {});
       res.status(200).send(JSON.stringify({ keys: a[0] ? Object.keys(a[0]) : [], sample: a.slice(0, 1) }, null, 2));
+      return;
+    }
+    if (q.debug === "repsum") {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      const from = q.from || "2026-01-01", to = q.to || "2026-09-07";
+      const sb = await reportSalesByArticles(from, to, user, pass);
+      let rev = 0, cost = 0, units = 0;
+      sb.articles.forEach(a => { rev += a.revenue; cost += a.cost; units += a.units; });
+      res.status(200).send(JSON.stringify({ from, to, ok: sb.ok, articles: sb.articles.length,
+        revenue_no_dds: Math.round(rev * 100) / 100, cost_no_dds: Math.round(cost * 100) / 100,
+        units: Math.round(units), margin_pct: rev ? Math.round((rev - cost) / rev * 1000) / 10 : null }, null, 2));
       return;
     }
     if (q.debug === "rep") {
