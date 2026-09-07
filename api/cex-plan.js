@@ -788,11 +788,11 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     let out = {};
     const tries = [
-      ["Paymentmethods_getlist", {}],
-      ["Paymentmethods_getlist", { filters: {} }],
-      ["Paymentmethods_getlist", { seller_company_id: 1 }],
-      ["Paymethods_getlist", {}],
-      ["Paymentmethods_getlistobject", { filters: {} }]
+      ["Clients_get", { id: 11 }],
+      ["Clients_getlist", { filters: { client_id: 11 } }],
+      ["Paymentmethods_getlist", { company_id: 1 }],
+      ["Companies_getpaymethods", { company_id: 1 }],
+      ["Paymentmethods_getlist", { active: 1 }]
     ];
     for (const [m, p] of tries) {
       try { const r = await cexCall(m, p, user, pass); out[m + " " + JSON.stringify(p)] = JSON.stringify(r.data).slice(0, 500); }
