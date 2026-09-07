@@ -907,13 +907,22 @@ module.exports = async function handler(req, res) {
     if (!okV) { res.status(403).send(dashboardPage({ error: "Липсва или грешен ключ в линка." }, "")); return; }
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).send(dashboardPage({ error: "Не е конфигуриран достъп до цеха." }, q.k)); return; }
+    if (q.debug === "cids") {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 8000 }, user, pass);
+      const a = Array.isArray(r.data) ? r.data : Object.values(r.data || {});
+      const m = {}; for (const x of a) { if (x.client_id != null) m[x.client_id] = x.client_name; }
+      res.status(200).send(JSON.stringify(m, null, 2)); return;
+    }
     if (q.debug === "rep") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       const m = String(q.m || "");
       if (!/^Reports_[a-z_]+$/.test(m)) { res.status(400).send(JSON.stringify({ error: "bad method" })); return; }
       const f = q.from || "2026-08-01", t2 = q.to || "2026-08-31";
       const sid = q.sid || "eStructList_1";
-      const body = { active_struct_id: sid, action_type: "values", page_num: Number(q.page) || 1, filters: { ref_date: [f, t2] } };
+      const filters = { ref_date: [f, t2] };
+      if (q.cid) { const c = Number(q.cid); filters[q.fk || "client_id"] = q.arr ? [c] : c; }
+      const body = { active_struct_id: sid, action_type: "values", page_num: Number(q.page) || 1, filters };
       const r = await cexCall(m, body, user, pass);
       const d = r.data || {};
       const rows = Array.isArray(d.rows) ? d.rows : null;
