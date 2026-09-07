@@ -159,22 +159,16 @@ async function seedShops(date, user, pass) {
       const art = byId(o.article_id) || resolve(o.article_name);
       if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + (Number(o.amount) || 0);
     }
-    const group = cexGroupOf((a.client_name || "") + " " + (a.person_name || ""));
+    const group = (cexObj(a) || {}).group || "adhoc";
     return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group, order };
   }));
   return { shops, accounts: accts.length };
 }
 
-// ── Зареждане ПО ГРАФИК (не по дата на затваряне, която закъснява). Разпознаваме
-// групата по името и решаваме дали е за деня; количествата = ПОСЛЕДНАТА реална
-// заявка на обекта. Графикът е на собственика (виж memory motamo-cex-delivery-schedule).
-function cexGroupOf(name) {
-  const s = String(name || "").toUpperCase();
-  if (s.includes("СИБИЕС")) return "sibies";
-  if (s.includes("МЕРКАНТО")) return "merkanto";
-  if (s.includes("ХАЙ ЛЕВЕЛ")) return "haskovo";
-  return "adhoc";
-}
+// ── Зареждане ПО ГРАФИК (не по дата на затваряне, която закъснява). Обектът и
+// групата се разпознават ПО ID от регистъра CEX_OBJECTS (виж по-долу), не по име;
+// количествата = ПОСЛЕДНАТА реална заявка на обекта към датата. Графикът е на
+// собственика (виж memory motamo-cex-delivery-schedule).
 // dow: 0 нд .. 6 сб. Сибиес=всеки ден · Мерканто=вт(2)/пт(5) · Хасково=пн(1)/ср(3)/пт(5).
 function cexDueOn(group, dow) {
   if (group === "sibies") return true;
@@ -182,6 +176,34 @@ function cexDueOn(group, dow) {
   if (group === "haskovo") return dow === 1 || dow === 3 || dow === 5;
   return false; // adhoc — само по заявка (нетикнато)
 }
+
+// ── РЕГИСТЪР НА ОБЕКТИТЕ ПО ID (ключ „client_id:person_id"; празен person = клиент
+// без под-обект). „По график" хваща обектите ОТ ТУК — по id, не по име, за да няма
+// никога грешка. Обект извън регистъра НЕ се показва (клиентският ред „СИБИЕС ООД"
+// без обект, тестови/непознати обекти). group sibies/merkanto/haskovo имат график;
+// adhoc се показва, но не се тика (излиза само при реална поръчка). Собственикът
+// потвърди списъка 2026-09-07 (без СИБИЕС „Три чучура 13а" pid 7 — не се зарежда).
+const CEX_OBJECTS = {
+  // Хасково — ХАЙ ЛЕВЕЛ ЛИМИТЕД (клиент 9, без под-обект)
+  "9:": { group: "haskovo" },
+  // Стара Загора и региона — СИБИЕС ООД (клиент 2)
+  "2:1": { group: "sibies" },  "2:2": { group: "sibies" },  "2:3": { group: "sibies" },
+  "2:4": { group: "sibies" },  "2:5": { group: "sibies" },  "2:6": { group: "sibies" },
+  "2:8": { group: "sibies" },  "2:9": { group: "sibies" },  "2:10": { group: "sibies" },
+  "2:11": { group: "sibies" }, "2:12": { group: "sibies" }, "2:13": { group: "sibies" },
+  "2:14": { group: "sibies" }, "2:15": { group: "sibies" },
+  // Сливен — Мерканто / АНТОНИЙ ЕООД (клиент 11)
+  "11:23": { group: "merkanto" }, "11:25": { group: "merkanto" }, "11:26": { group: "merkanto" },
+  "11:27": { group: "merkanto" }, "11:28": { group: "merkanto" }, "11:29": { group: "merkanto" },
+  "11:30": { group: "merkanto" }, "11:31": { group: "merkanto" }, "11:32": { group: "merkanto" },
+  // Ад-хок / по заявка (показват се, но не се тикат)
+  "4:": { group: "adhoc" }, "8:": { group: "adhoc" }, "8:21": { group: "adhoc" }, "8:22": { group: "adhoc" },
+  "5:": { group: "adhoc" }, "5:16": { group: "adhoc" }, "5:17": { group: "adhoc" }, "5:18": { group: "adhoc" },
+  "12:": { group: "adhoc" }, "7:": { group: "adhoc" }, "10:": { group: "adhoc" }, "13:": { group: "adhoc" }, "3:": { group: "adhoc" }
+};
+function cexKey(a) { return (a.client_id != null ? a.client_id : "") + ":" + (a.person_id != null ? a.person_id : ""); }
+function cexObj(a) { return CEX_OBJECTS[cexKey(a)] || null; }
+
 async function scheduleSeed(dateIso, user, pass) {
   const dow = new Date(dateIso + "T12:00:00Z").getUTCDay();
   const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 2000 }, user, pass);
@@ -195,12 +217,13 @@ async function scheduleSeed(dateIso, user, pass) {
   // Най-скорошната сметка (към датата) на всеки ОБЕКТ по ДАТА (не по account_id, който
   // при преномерирани/тестови сметки може да е по-голям от по-нов реален разнос).
   // Пропускаме анонимни и тестовите (alias CLTEST), за да не се пълни от тест.
+  // Показваме САМО обекти от регистъра (по id). Клиентският ред без обект, тестови
+  // и непознати обекти отпадат сами — няма как да сгрешим по име.
   const seen = {};
   for (const a of all) {
-    const pn = a.person_name, cn = a.client_name;
-    if (!pn && (!cn || cn === "Анонимен")) continue;
     if (String(a.account_alias || "").includes("CLTEST")) continue;
-    const key = a.person_id ? ("p" + a.person_id) : ("c" + (a.client_id || "") + "|" + (pn || cn || ""));
+    const key = cexKey(a);
+    if (!CEX_OBJECTS[key]) continue;
     if (!seen[key] || dateOf(a) > dateOf(seen[key])) seen[key] = a;
   }
   const entries = Object.values(seen);
@@ -209,7 +232,7 @@ async function scheduleSeed(dateIso, user, pass) {
   const cutoff = new Date(dateIso + "T00:00:00Z"); cutoff.setUTCDate(cutoff.getUTCDate() - 14);
   const cutoffStr = cutoff.toISOString().slice(0, 10);
   const shops = await mapLimit(entries, 6, async (a) => {
-    const g = cexGroupOf((a.person_name || "") + " " + (a.client_name || ""));
+    const g = (cexObj(a) || {}).group || "adhoc";
     const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
     const order = {};
     for (const o of (rows.data || [])) {
