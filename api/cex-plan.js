@@ -254,48 +254,6 @@ async function reportMarginByClient(from, to, clientIds, user, pass) {
 }
 const VAT_CONST = 1.2;
 
-// Партиди (движения): справка Reports_lot_list_details. amount>0 = зареждане/производство,
-// amount<0 = изписване. Групираме по lot_value. Обемно е (ден≈366 реда) → таван на страниците;
-// при по-дълъг период показваме „частично" и подканваме за по-кратък период.
-async function reportLots(from, to, user, pass) {
-  const PAGE = 50, MAXPG = 16;   // до 800 движения (≈2 дни пълни)
-  const lots = {};
-  let records = 0, seen = 0, truncated = false, ok = false;
-  for (let pg = 1; pg <= MAXPG; pg++) {
-    let d = null;
-    for (let t = 0; t < 3 && d === null; t++) {
-      try {
-        const r = await cexCall("Reports_lot_list_details",
-          { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { ref_date: [from, to] } }, user, pass);
-        if (r && r.ok && r.data) { d = r.data; ok = true; }
-      } catch (e) {}
-      if (d === null) await new Promise(res => setTimeout(res, 200 * (t + 1)));
-    }
-    if (!d) { truncated = true; break; }
-    records = Number(d.records) || records;
-    const rows = Array.isArray(d.rows) ? d.rows : [];
-    for (const x of rows) {
-      const key = x.lot_value || "(без партида)";
-      const L = lots[key] || (lots[key] = { lot: key, inn: 0, out: 0, arts: {}, last: "" });
-      const amt = Number(x.amount) || 0;
-      if (amt >= 0) L.inn += amt; else L.out += -amt;
-      const an = x.article_name || ("#" + x.article_id);
-      L.arts[an] = (L.arts[an] || 0) + amt;
-      const dt = String(x.operation_doc_date || x.create_date || "").slice(0, 10);
-      if (dt > L.last) L.last = dt;
-    }
-    seen += rows.length;
-    if (rows.length < PAGE) break;
-    if (pg === MAXPG && seen < records) truncated = true;
-  }
-  const list = Object.values(lots).map(L => ({
-    lot: L.lot, inn: Math.round(L.inn * 1000) / 1000, out: Math.round(L.out * 1000) / 1000,
-    net: Math.round((L.inn - L.out) * 1000) / 1000, last: L.last,
-    articles: Object.keys(L.arts).length
-  })).sort((a, b) => (b.last || "").localeCompare(a.last || "") || b.inn - a.inn);
-  return { ok, truncated, records, shown: seen, lots: list };
-}
-
 // ── ДАШБОРД агрегатор (Фаза 1): оборот по ден + по клиент, издадени фактури, разлика.
 // Оборот = сумата на ЗАТВОРЕНИТЕ сметки (`total_sum` е с ДДС → нето = /1.2), групиран по
 // ден на затваряне и по клиент. Фактури = Invoices type_id 1 (не стокови 11), неанулирани.
@@ -312,7 +270,6 @@ async function dashData(from, to, expenses, user, pass) {
     cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["avg_delivery_price", "store_amount"] }, user, pass).catch(() => ({ data: [] })),
     cexCall("Storeloads_getlist", { order_by: "store_load_id desc", length: 2000, extra_properties: ["all"] }, user, pass).catch(() => ({ data: [] })),
     reportSalesByArticles(from, to, user, pass).catch(() => ({ ok: false, incomplete: true, articles: [] })),
-    reportLots(from, to, user, pass).catch(() => ({ ok: false, truncated: true, records: 0, lots: [] })),
   ]);
   let all = arrOf(accR);
   const byDay = {};        // "YYYY-MM-DD" → нето оборот
@@ -455,8 +412,7 @@ async function dashData(from, to, expenses, user, pass) {
   return { from, to, total_neto: totalNeto, accounts: accountsN, by_day: byDay, invoiced_neto: invTotalNeto, clients,
     gap_neto: gapNeto, stock_value: stockValue, stock_items: stockItems, avg_check: avgCheck,
     cogs, expenses: exp, result, products, units_truncated: unitsTrunc, insights,
-    loads_neto: loadsNeto, loads_count: loadsN, suppliers, loads_by_month: loadsByMonth,
-    lots: (lotsRep && lotsRep.lots) || [], lots_truncated: !!(lotsRep && lotsRep.truncated), lots_records: (lotsRep && lotsRep.records) || 0 };
+    loads_neto: loadsNeto, loads_count: loadsN, suppliers, loads_by_month: loadsByMonth };
 }
 
 // ── Зареждане ПО ГРАФИК (не по дата на затваряне, която закъснява). Обектът и
@@ -676,7 +632,6 @@ function dashboardPage(data, k) {
   const err = data && data.error;
   const mcol = c => c.margin != null ? `<td class="q" style="color:${c.margin >= 45 ? "#0a6b2e" : c.margin >= 30 ? "#b06a00" : "#b3121b"};font-weight:800">${c.margin.toLocaleString("bg-BG", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</td>` : `<td class="c">—</td>`;
   const rows = err ? "" : (data.clients || []).map(c => `<tr><td class="n">${esc(c.name)}${c.exempt ? ' <span class="tag">не се фактурира</span>' : ""}</td><td class="q">${bg(c.turnover)}</td>${mcol(c)}<td class="q inv">${bg(c.invoiced)}</td><td class="q gap${!c.exempt && c.gap > 0.5 ? " bad" : ""}">${c.exempt ? "—" : bg(c.gap)}</td><td class="c">${c.accounts}</td></tr>`).join("");
-  const lotRows = err ? "" : (data.lots || []).slice(0, 60).map(l => `<tr><td class="n">${esc(l.lot)}</td><td class="c">${l.last || ""}</td><td class="q" style="color:#0a6b2e">${bg(l.inn)}</td><td class="q" style="color:#b3121b">${bg(l.out)}</td><td class="q">${bg(l.net)}</td></tr>`).join("");
   const tips = err ? "" : (data.insights || []).map(x => `<li class="${x.t}"><span class="ic">${x.t === "good" ? "✅" : x.t === "warn" ? "⚠️" : x.t === "bad" ? "🔴" : "💡"}</span><span>${esc(x.text)}</span></li>`).join("");
   const gapNeto = err ? 0 : (data.gap_neto != null ? data.gap_neto : (data.total_neto - data.invoiced_neto));
   const waiting = err ? [] : (data.clients || []).filter(c => !c.exempt && c.gap > 0.5).sort((a, b) => b.gap - a.gap);
@@ -782,10 +737,7 @@ ${tips ? `<div class="card"><h2>💡 Съвети / Наблюдения</h2><ul
   <details class="tbl" open><summary>по доставчик</summary>
   <table><thead><tr><th>Доставчик</th><th class="q">Сума без ДДС</th></tr></thead>
   <tbody>${(data.suppliers || []).map(s => `<tr><td class="n">${esc(s.name)}</td><td class="q">${bg(s.neto)}</td></tr>`).join("") || '<tr><td colspan="2" class="note">Няма зареждания в периода.</td></tr>'}</tbody></table></details></div>
-<div class="card"><h2>📦 Партиди (движения)<span>${(data.lots || []).length} партиди${data.lots_truncated ? " · ⚠ частично (" + (data.lots_records || 0) + " движения — скъси периода)" : ""}</span></h2>
-  <table><thead><tr><th>Партида</th><th>Последно</th><th class="q">Заредено +</th><th class="q">Изписано −</th><th class="q">Остатък</th></tr></thead>
-  <tbody>${lotRows || '<tr><td colspan="5" class="note">Няма движения по партиди в периода.</td></tr>'}</tbody></table></div>
-<div class="note">Всичко е <b>без ДДС</b>. Оборот = затворените сметки (total_sum/1.2). Маржин по клиент = справка „Продажби по сметки" (себест. без ДДС). Партиди: „Заредено +" = производство/зареждане, „Изписано −" = вложено/продадено; за дълъг период са много — <b>скъси периода за пълен списък</b>. Себестойност и печалба по артикул идват от Barsy справка „Продажби по артикули" (историческа себестойност). „Без фактура" = оборот − фактури (тип 1), <b>без клиенти които не се фактурират (ИТТ)</b>; стоковите (тип 11) не са фактури. <b>Внимание:</b> фактурите не са календарен месец (част от края на месеца влизат в следващия). Склад = наличност × средна себестойност/бр (само положителни). Резултат = оборот − себестойност − разходи.${data.units_truncated ? " ⚠ Справката не се зареди докрай — числата може да са частични, презареди." : ""}</div>
+<div class="note">Всичко е <b>без ДДС</b>. Оборот = затворените сметки (total_sum/1.2). Маржин по клиент = справка „Продажби по сметки" (себест. без ДДС). Себестойност и печалба по артикул идват от Barsy справка „Продажби по артикули" (историческа себестойност). „Без фактура" = оборот − фактури (тип 1), <b>без клиенти които не се фактурират (ИТТ)</b>; стоковите (тип 11) не са фактури. <b>Внимание:</b> фактурите не са календарен месец (част от края на месеца влизат в следващия). Склад = наличност × средна себестойност/бр (само положителни). Резултат = оборот − себестойност − разходи.${data.units_truncated ? " ⚠ Справката не се зареди докрай — числата може да са частични, презареди." : ""}</div>
 <script>
 var BYDAY=${err ? "{}" : JSON.stringify(data.by_day || {})};
 var CLIENTS=${err ? "[]" : JSON.stringify((data.clients || []).map(c => ({ name: c.name, t: c.turnover, last: c.last, n: c.accounts })))};
