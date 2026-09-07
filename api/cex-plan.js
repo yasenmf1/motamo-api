@@ -650,7 +650,9 @@ module.exports = async function handler(req, res) {
   const strong = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN];
   // Само ПИШЕЩИТЕ действия искат силен токен; четенето/смятането приемат и четящия.
   const writeActions = ["create_accounts", "produce_plan", "create_production", "create_stokova"];
-  const allowed = writeActions.includes(body.action) ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
+  // create_stokova с dry:true само СГЛОБЯВА (не записва) → приема и четящия токен.
+  const isWrite = writeActions.includes(body.action) && !(body.action === "create_stokova" && body.dry === true);
+  const allowed = isWrite ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
@@ -756,13 +758,17 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // ── ВРЕМЕНЕН: проби на Invoices_getlist (да видя дали носи връзка към сметка) ──
+  // ── ВРЕМЕНЕН: документите на сметка (има ли стокова?) ──
   if (body.action === "inv_probe") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     let out = {};
-    for (const p of [{ filters: {} }, { filters: { type_id: 11 } }, { order_by: "inv_id desc", length: 20 }]) {
-      try { const r = await cexCall("Invoices_getlist", p, user, pass); const data = Array.isArray(r.data) ? r.data : (r.data && (r.data.list || Object.values(r.data))) || []; out[JSON.stringify(p)] = { n: (data || []).length, sample: (data || []).slice(0, 2) }; }
-      catch (e) { out[JSON.stringify(p)] = { err: String(e && e.message) }; }
+    // 1) полетата на сметка от Accounts_getlist (дали има флаг за фактура/стокова)
+    try { const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3 }, user, pass); let a = r.data; a = Array.isArray(a) ? a : Object.values(a || {}); out.acct_keys = a[0] ? Object.keys(a[0]) : []; out.acct_sample = a[0] || null; }
+    catch (e) { out.acct_err = String(e && e.message); }
+    // 2) документите на конкретни сметки (2888 имаше стокова, 2937 вероятно няма)
+    for (const id of [Number(body.a1) || 2888, Number(body.a2) || 2937]) {
+      try { const r = await cexCall("Accounts_account_documents", { id }, user, pass); out["docs_" + id] = JSON.stringify(r.data).slice(0, 900); }
+      catch (e) { out["docs_" + id] = "ERR " + String(e && e.message); }
     }
     res.status(200).json({ ok: true, out });
     return;
