@@ -677,11 +677,7 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     const acc = Number(body.account_id); if (!acc) { res.status(400).json({ ok: false, error: "no_account_id" }); return; }
-    // Стоковата е документ за деня на изписване → НЕ бъдеща дата (Barsy отказва бъдеща
-    // дата с обща „непредвидена грешка"). Затова я ограничаваме най-късно до ДНЕС.
-    const today = sofiaToday();
-    let date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : today;
-    if (date > today) date = today;
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
     const DT = 11; // стокова разписка
     // 1) зареди формата (хедър полета + грид с редовете, вече с партида)
     const load = await cexCallRoot({ invoices_edit: { params: { bid: 1, doc_type: DT, gen_mode: 1, account_id: acc } } }, user, pass);
@@ -704,10 +700,27 @@ module.exports = async function handler(req, res) {
       for (const k in n) if (k !== "data_source" && k !== "tax_groups_by_country" && k !== "all_tax_groups" && k !== "countries" && k !== "elements") walk(n[k]);
     })(inner);
     values.type_id = String(DT);
-    values.create_date = date; values.term_date = date; values.payment_date = date;
+    values.create_date = date;
+    // term_date = create_date + 30 дни (както UI-ят: 08.09 → 08.10); payment_date = create_date.
+    values.term_date = isoPlusDays(date, 30); values.payment_date = date;
     values.accounts = [acc];
     if (values.seller_company_id == null) values.seller_company_id = values.company_id != null ? values.company_id : 1;
     if (body.paymethod_id !== undefined) values.paymethod_id = body.paymethod_id === null ? null : String(body.paymethod_id);
+    // ★ Barsy Invoices_create гърми с обща „непредвидена грешка", ако ЛИПСВА ключ, който
+    // очаква. UI-ят винаги праща пълния набор. Затова гарантираме, че всички ключове
+    // съществуват (null/"" по подразбиране), без да презаписваме взетите от формата.
+    const defaults = {
+      client_id: null, client_name: "", company_id: 1, name: "", seller_company_id: 1,
+      receiver_company_name: "", seller_company_name: "", receiver_address: "", inv_id: null,
+      inv_num: "", parent_inv_id: null, seller_address: "", receiver_town: "", seller_town: "",
+      receiver_identity_num: null, seller_identity_num: null, receiver_vat_num: null, seller_vat_num: null,
+      receiver_mol: null, discount: "0", seller_mol: null, receiver_country_id: "BG", deal_id: null,
+      deal_title: "", seller_country_id: "BG", person_id: null, person_name: "", with_tax: 0,
+      currency_id: "1", bank_name: null, bic: null, iban: null, is_anulate: "0",
+      client_paid_period: null, currency_rate: "1", bank_account_id: null, paymethod_id: null,
+      receiver_name: null, seller_name: "", additional_text: "", free_text: ""
+    };
+    for (const k in defaults) if (!(k in values) || values[k] === undefined) values[k] = defaults[k];
     // 3) редове: препрати грид data_source.target → вземи редовете
     let rows = [];
     let rowsRaw = null;
