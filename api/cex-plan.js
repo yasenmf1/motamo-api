@@ -612,6 +612,21 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
+  // ── ДИАГНОСТИК (само четене): затворени сметки на дата (реалният разнос) ──
+  if (body.action === "closed_on") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 2000 }, user, pass);
+    let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
+    const closed = all
+      .filter(a => String(a.close_date || "").slice(0, 10) === date)
+      .map(a => ({ account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, close_date: a.close_date, create_date: a.create_date }))
+      .sort((x, y) => (x.client_id || 0) - (y.client_id || 0) || (x.person_id || 0) - (y.person_id || 0));
+    res.status(200).json({ ok: true, date, count: closed.length, closed });
+    return;
+  }
+
   // ── ③ СТОКОВА РАЗПИСКА: сглобява Invoices_create от формата на сметката ──
   // body: {account_id, date, dry?}. dry=true → връща сглобеното БЕЗ да записва.
   if (body.action === "create_stokova") {
