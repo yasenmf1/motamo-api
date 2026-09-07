@@ -953,12 +953,15 @@ module.exports = async function handler(req, res) {
     if (q.debug === "lotchk") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       const lv = q.lv || "L.03.09.2026";
-      const r = await cexCall("Reports_lot_list_details",
-        { active_struct_id: "eStructList_1", action_type: "values", page_num: 1, filters: { ref_date: ["2026-08-01", "2026-09-30"], lot_value: lv } }, user, pass);
-      const d = r.data || {}; const rows = Array.isArray(d.rows) ? d.rows : [];
-      const byType = {}; for (const x of rows) byType[x.operation_ref_type] = (byType[x.operation_ref_type] || 0) + 1;
-      const outs = rows.filter(x => (Number(x.amount) || 0) < 0).slice(0, 5).map(x => ({ art: x.article_name, amt: x.amount, ref_type: x.operation_ref_type, ref_id: x.ref_id, doc: x.operation_doc_date }));
-      res.status(200).send(JSON.stringify({ lot: lv, ok: r.ok, records: d.records, page_rows: rows.length, byType, outSamples: outs }, null, 2));
+      const byType = {}; const perType = {}; let recs = 0;
+      for (let pg = 1; pg <= 6; pg++) {
+        const r = await cexCall("Reports_lot_list_details",
+          { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { ref_date: ["2026-08-01", "2026-09-30"], lot_value: lv } }, user, pass);
+        const d = r.data || {}; const rows = Array.isArray(d.rows) ? d.rows : []; recs = Number(d.records) || recs;
+        for (const x of rows) { const tp = x.operation_ref_type; byType[tp] = (byType[tp] || 0) + 1; if (!perType[tp]) perType[tp] = { art: x.article_name, amt: x.amount, ref_id: x.ref_id, doc: x.operation_doc_date, ref_type_title: x.operation_ref_type_title }; }
+        if (rows.length < 50) break;
+      }
+      res.status(200).send(JSON.stringify({ lot: lv, records: recs, byType, perTypeSample: perType }, null, 2));
       return;
     }
     const today = sofiaToday();
