@@ -798,14 +798,17 @@ module.exports = async function handler(req, res) {
     // Без same-day: сметка, направена в деня D, е за разноса D+1 → не влиза в разнос D.
     try { s = await seedRazos(date, user, pass); }
     catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
-    // издадени стокови (doc_type 11, неанулирани) за тази дата → списък суми по клиент.
+    // издадени стокови (doc_type 11, неанулирани) около тази дата → суми по клиент.
+    // Прозорец ±2 дни, защото датата на стоковата може да се разминава с деня на
+    // затваряне на сметката (напр. сметка затворена 07.09, стокова издадена 08.09).
+    const okDates = {}; for (let k = -2; k <= 2; k++) okDates[isoPlusDays(date, k)] = 1;
     let stok = {}; // client_id → [total_all,…]
     try {
       const r = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 400 }, user, pass);
       let inv = r.data; inv = Array.isArray(inv) ? inv : Object.values(inv || {});
       for (const x of inv) {
         if (String(x.type_id) !== "11" || String(x.is_anulate) === "1") continue;
-        if (String(x.create_date || "").slice(0, 10) !== date) continue;
+        if (!okDates[String(x.create_date || "").slice(0, 10)]) continue;
         (stok[x.client_id] = stok[x.client_id] || []).push(Number(x.total_all) || 0);
       }
     } catch (e) { stok = {}; }
@@ -817,7 +820,6 @@ module.exports = async function handler(req, res) {
       if (i < 0) return false; arr.splice(i, 1); return true;
     };
     res.status(200).json({ ok: true, date, seeded_accounts: s.shops.length,
-      _stok_totals: stok,
       shops: s.shops.map(x => { const hs = hasStok(x); return { account_id: x.account_id, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, total: x.total, has_stokova: hs, scheduled: !hs, order: sortObj(x.order || {}, 2) }; }) });
     return;
   }
