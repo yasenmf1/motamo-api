@@ -941,6 +941,13 @@ module.exports = async function handler(req, res) {
       res.status(200).send(JSON.stringify({ keys: a[0] ? Object.keys(a[0]) : [], sample: a.slice(0, 2) }, null, 2));
       return;
     }
+    if (q.debug === "acc") {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3 }, user, pass);
+      const a = Array.isArray(r.data) ? r.data : Object.values(r.data || {});
+      res.status(200).send(JSON.stringify({ keys: a[0] ? Object.keys(a[0]) : [], sample: a.slice(0, 1) }, null, 2));
+      return;
+    }
     const today = sofiaToday();
     const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 4) + "-01-01"; // по подразбиране от 1 януари
     const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
