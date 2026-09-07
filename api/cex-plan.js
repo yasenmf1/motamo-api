@@ -705,7 +705,9 @@ module.exports = async function handler(req, res) {
     values.term_date = isoPlusDays(date, 30); values.payment_date = date;
     values.accounts = [acc];
     if (values.seller_company_id == null) values.seller_company_id = values.company_id != null ? values.company_id : 1;
-    if (body.paymethod_id !== undefined) values.paymethod_id = body.paymethod_id === null ? null : String(body.paymethod_id);
+    // Начин на плащане „По банка" = 5 по подразбиране (потр. Claude вече има правото).
+    // Може да се подмени с body.paymethod_id (или null за без).
+    values.paymethod_id = body.paymethod_id !== undefined ? (body.paymethod_id === null ? null : String(body.paymethod_id)) : "5";
     // ★ Barsy Invoices_create гърми с обща „непредвидена грешка", ако ЛИПСВА ключ, който
     // очаква. UI-ят винаги праща пълния набор. Затова гарантираме, че всички ключове
     // съществуват (null/"" по подразбиране), без да презаписваме взетите от формата.
