@@ -272,7 +272,11 @@ async function dashData(from, to, expenses, user, pass) {
     if (q > 0 && c > 0) { stockValue += q * c; stockItems++; }
   }
   stockValue = Math.round(stockValue * 100) / 100;
-  const units = {};  // article_id → { name, units }
+  // account_id → client_id (за себестойност/маржин по клиент)
+  const accClient = {};
+  for (const a of all) if (a.account_id != null) accClient[String(a.account_id)] = a.client_id != null ? a.client_id : 0;
+  const units = {};       // article_id → { name, units, rev }  (rev = оборот без ДДС)
+  const clientCogs = {};  // client_id → себестойност (без ДДС)
   let cogs = 0, unitsTrunc = false;
   {
     const ord = arrOf(ordR);
@@ -282,17 +286,34 @@ async function dashData(from, to, expenses, user, pass) {
       if (!inRange(day)) continue;
       const id = o.article_id; if (id == null) continue;
       const amt = Number(o.amount) || 0; if (!amt) continue;
-      const u = units[String(id)] || (units[String(id)] = { name: o.article_name || ("#" + id), units: 0 });
+      const u = units[String(id)] || (units[String(id)] = { name: o.article_name || ("#" + id), units: 0, rev: 0 });
       u.units += amt;
-      cogs += amt * (cost[String(id)] || 0);
+      const price = Number(o.current_price) || 0;         // на бройка, С ДДС → нето /1.2
+      u.rev += amt * price / VAT;
+      const lineCost = amt * (cost[String(id)] || 0);
+      cogs += lineCost;
+      const cid = o.account_id != null ? accClient[String(o.account_id)] : undefined;
+      if (cid !== undefined) clientCogs[cid] = (clientCogs[cid] || 0) + lineCost;
     }
     if (ord.length && oldest > from) unitsTrunc = true;   // не сме стигнали началото → частично
   }
   const products = Object.entries(units).map(([id, u]) => {
     const c = cost[id] || 0; const un = Math.round(u.units * 1000) / 1000;
-    return { article_id: Number(id), name: u.name, units: un, unit_cost: Math.round(c * 100) / 100, total_cost: Math.round(un * c * 100) / 100 };
-  }).filter(p => p.units > 0).sort((a, b) => b.total_cost - a.total_cost);
+    const tc = Math.round(un * c * 100) / 100; const rev = Math.round(u.rev * 100) / 100;
+    return { article_id: Number(id), name: u.name, units: un, unit_cost: Math.round(c * 100) / 100,
+      total_cost: tc, revenue: rev, profit: Math.round((rev - tc) * 100) / 100 };
+  }).filter(p => p.units > 0).sort((a, b) => b.revenue - a.revenue);
   cogs = Math.round(cogs * 100) / 100;
+  // маржин по клиент (себестойността е приблизителна — по дата на поръчката)
+  const haveClientCogs = Object.keys(clientCogs).length > 0;
+  for (const c of clients) {
+    const cc = clientCogs[c.client_id];
+    if (haveClientCogs && cc != null && c.turnover > 0) {
+      c.cost = Math.round(cc * 100) / 100;
+      c.profit = Math.round((c.turnover - cc) * 100) / 100;
+      c.margin = Math.round((c.profit / c.turnover) * 1000) / 10;   // %
+    }
+  }
   const exp = Math.round((Number(expenses) || 0) * 100) / 100;
   const result = Math.round((totalNeto - cogs - exp) * 100) / 100;
 
@@ -537,7 +558,8 @@ header .d{font-size:15px;opacity:.93;margin-top:4px}
 function dashboardPage(data, k) {
   const bg = n => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("bg-BG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const err = data && data.error;
-  const rows = err ? "" : (data.clients || []).map(c => `<tr><td class="n">${esc(c.name)}${c.exempt ? ' <span class="tag">не се фактурира</span>' : ""}</td><td class="q">${bg(c.turnover)}</td><td class="q inv">${bg(c.invoiced)}</td><td class="q gap${!c.exempt && c.gap > 0.5 ? " bad" : ""}">${c.exempt ? "—" : bg(c.gap)}</td><td class="c">${c.accounts}</td></tr>`).join("");
+  const mcol = c => c.margin != null ? `<td class="q" style="color:${c.margin >= 30 ? "#0a6b2e" : c.margin >= 15 ? "#b06a00" : "#b3121b"};font-weight:800">${c.margin.toLocaleString("bg-BG", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</td>` : `<td class="c">—</td>`;
+  const rows = err ? "" : (data.clients || []).map(c => `<tr><td class="n">${esc(c.name)}${c.exempt ? ' <span class="tag">не се фактурира</span>' : ""}</td><td class="q">${bg(c.turnover)}</td>${mcol(c)}<td class="q inv">${bg(c.invoiced)}</td><td class="q gap${!c.exempt && c.gap > 0.5 ? " bad" : ""}">${c.exempt ? "—" : bg(c.gap)}</td><td class="c">${c.accounts}</td></tr>`).join("");
   const gapNeto = err ? 0 : (data.gap_neto != null ? data.gap_neto : (data.total_neto - data.invoiced_neto));
   const waiting = err ? [] : (data.clients || []).filter(c => !c.exempt && c.gap > 0.5).sort((a, b) => b.gap - a.gap);
   const waitRows = waiting.map(c => `<tr><td class="n">${esc(c.name)}</td><td class="q">${bg(c.turnover)}</td><td class="q inv">${bg(c.invoiced)}</td><td class="q gap bad">${bg(c.gap)}</td></tr>`).join("");
@@ -621,16 +643,16 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
 <div class="card"><h2>Оборот по клиент<span>дял от оборота</span></h2>
   <div class="chartbox donut"><canvas id="cClients" height="260" style="max-width:420px"></canvas></div>
   <details class="tbl" open><summary>таблица</summary>
-  <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Фактурирано</th><th class="q">Без фактура</th><th class="q">Сметки</th></tr></thead>
-  <tbody>${rows || '<tr><td colspan="5" class="note">Няма затворени сметки в периода.</td></tr>'}</tbody></table></details></div>
+  <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Маржин</th><th class="q">Фактурирано</th><th class="q">Без фактура</th><th class="q">Сметки</th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="6" class="note">Няма затворени сметки в периода.</td></tr>'}</tbody></table></details></div>
 <div class="card"><h2>📄 Чакат фактура<span>${waiting.length} клиента · общо ${bg(gapNeto)} €</span></h2>
   <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Фактурирано</th><th class="q">Без фактура</th></tr></thead>
   <tbody>${waitRows || '<tr><td colspan="4" class="note">Всичко е фактурирано 🎉</td></tr>'}</tbody></table></div>
 <div class="card"><h2>⚠️ Спрели клиенти<span class="seg" id="stopseg">от <input id="stopdays" type="number" value="14" min="1" style="width:52px;font:12px system-ui;border:0;border-radius:6px;padding:3px 6px;text-align:center"> дни</span></h2>
   <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Последна</th><th class="q">Преди</th></tr></thead><tbody id="stoprows"></tbody></table></div>
-<div class="card"><h2>Продадени артикули · себестойност<span>${(data.products || []).length} вида${data.units_truncated ? " · ⚠ частично" : ""}</span></h2>
-  <table><thead><tr><th>Артикул</th><th class="q">Бройки</th><th class="q">Себест./бр</th><th class="q">Обща себест.</th></tr></thead>
-  <tbody>${(data.products || []).map(p => `<tr><td class="n">${esc(p.name)}</td><td class="c">${bg(p.units)}</td><td class="q inv">${bg(p.unit_cost)}</td><td class="q">${bg(p.total_cost)}</td></tr>`).join("") || '<tr><td colspan="4" class="note">Няма продажби в периода.</td></tr>'}</tbody></table></div>
+<div class="card"><h2>🏆 Топ артикули · оборот · печалба<span class="seg" id="prodseg"><button data-s="revenue" class="on">по оборот</button><button data-s="profit">по печалба</button></span></h2>
+  <table><thead><tr><th>Артикул</th><th class="q">Бройки</th><th class="q">Оборот</th><th class="q">Себест.</th><th class="q">Печалба</th><th class="q">Маржин</th></tr></thead>
+  <tbody id="prodrows"></tbody></table></div>
 <div class="card"><h2>🚚 Зареждания<span>${(data.suppliers || []).length} доставчика · ${data.loads_count || 0} документа · ${bg(data.loads_neto)} €</span></h2>
   <div class="chartbox"><canvas id="cLoads" height="130"></canvas></div>
   <details class="tbl" open><summary>по доставчик</summary>
@@ -641,6 +663,7 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
 var BYDAY=${err ? "{}" : JSON.stringify(data.by_day || {})};
 var CLIENTS=${err ? "[]" : JSON.stringify((data.clients || []).map(c => ({ name: c.name, t: c.turnover, last: c.last, n: c.accounts })))};
 var LOADSM=${err ? "{}" : JSON.stringify(data.loads_by_month || {})};
+var PRODUCTS=${err ? "[]" : JSON.stringify(data.products || [])};
 var TO="${err ? "" : esc(data.to || "")}";
 function bgn(n){return (Math.round((n||0)*100)/100).toLocaleString('bg-BG',{minimumFractionDigits:2,maximumFractionDigits:2})}
 function wk(iso){var d=new Date(iso+'T12:00:00Z');var day=(d.getUTCDay()+6)%7;d.setUTCDate(d.getUTCDate()-day);return d.toISOString().slice(0,10)}
@@ -662,6 +685,15 @@ if(window.Chart){var top=CLIENTS.slice().sort(function(a,b){return b.t-a.t});var
   var cols=['#1f5b59','#2b6ca3','#b06a00','#7a4b8a','#0a6b2e','#b3121b','#8a6608','#9aa0a6'];
   new Chart(document.getElementById('cClients'),{type:'doughnut',data:{labels:labels,datasets:[{data:vals,backgroundColor:cols,borderWidth:2,borderColor:'#fff'}]},
     options:{responsive:true,maintainAspectRatio:false,cutout:'58%',plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}},tooltip:{callbacks:{label:function(c){var s=c.dataset.data.reduce(function(a,b){return a+b},0);return c.label+': '+bgn(c.parsed)+' € ('+(s?Math.round(c.parsed/s*100):0)+'%)'}}}}});}
+// топ артикули по оборот/печалба (#5)
+function renderProducts(s){var body=document.getElementById('prodrows');if(!body)return;
+  var arr=PRODUCTS.slice().sort(function(a,b){return (b[s]||0)-(a[s]||0)});
+  var h=arr.map(function(p){var m=p.revenue>0?Math.round(p.profit/p.revenue*1000)/10:0;
+    var mc=m>=40?'#0a6b2e':m>=25?'#b06a00':'#b3121b';
+    return '<tr><td class="n">'+p.name+'</td><td class="c">'+bgn(p.units)+'</td><td class="q">'+bgn(p.revenue)+' €</td><td class="q inv">'+bgn(p.total_cost)+' €</td><td class="q" style="color:#0a6b2e">'+bgn(p.profit)+' €</td><td class="q" style="color:'+mc+';font-weight:800">'+m.toLocaleString('bg-BG',{minimumFractionDigits:1,maximumFractionDigits:1})+'%</td></tr>'}).join('');
+  body.innerHTML=h||'<tr><td colspan="6" class="note">Няма продажби в периода.</td></tr>'}
+document.querySelectorAll('#prodseg button').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('#prodseg button').forEach(function(x){x.className=''});b.className='on';renderProducts(b.getAttribute('data-s'))})});
+renderProducts('revenue');
 // спрели клиенти (#7)
 function renderStopped(){var inp=document.getElementById('stopdays');var body=document.getElementById('stoprows');if(!body)return;
   var days=Math.max(1,parseInt(inp&&inp.value,10)||14);var to=TO?new Date(TO+'T12:00:00Z'):new Date();
