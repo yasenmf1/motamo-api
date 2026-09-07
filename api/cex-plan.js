@@ -948,6 +948,20 @@ module.exports = async function handler(req, res) {
       res.status(200).send(JSON.stringify({ keys: a[0] ? Object.keys(a[0]) : [], sample: a.slice(0, 1) }, null, 2));
       return;
     }
+    if (q.debug === "recon") {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      const ar = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 40 }, user, pass);
+      const accs = (Array.isArray(ar.data) ? ar.data : Object.values(ar.data || {})).filter(a => Number(a.total_sum) > 0 && a.close_date);
+      const acc = accs[0]; let out = { note: "no account" };
+      if (acc) {
+        const or = await cexCall("Orders_getlist", { filters: { account_id: acc.account_id }, length: 500 }, user, pass);
+        const os = Array.isArray(or.data) ? or.data : Object.values(or.data || {});
+        let sc = 0, sa = 0; os.forEach(o => { sc += (Number(o.amount) || 0) * (Number(o.current_price) || 0); sa += (Number(o.amount) || 0) * (Number(o.actual_price) || 0); });
+        out = { account_id: acc.account_id, client: acc.client_name, total_sum: acc.total_sum, sum_current: Math.round(sc * 100) / 100, sum_actual: Math.round(sa * 100) / 100, orders: os.length };
+      }
+      res.status(200).send(JSON.stringify(out, null, 2));
+      return;
+    }
     const today = sofiaToday();
     const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 4) + "-01-01"; // по подразбиране от 1 януари
     const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
