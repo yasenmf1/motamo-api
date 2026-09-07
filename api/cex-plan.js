@@ -227,6 +227,75 @@ async function reportSalesByArticles(from, to, user, pass) {
   return { ok, incomplete, articles: Object.values(by) };
 }
 
+// Маржин по клиент: справка „Продажби по сметки" (Reports_sales_by_accounts) приема
+// filters.client = client_id и връща сборен ред totals за този клиент (без страниране!).
+// Викаме по веднъж за всеки клиент (≤13). cost = delivery_total_dds/1.2 (то е С ДДС).
+async function reportMarginByClient(from, to, clientIds, user, pass) {
+  const out = {};
+  const one = async cid => {
+    for (let t = 0; t < 3; t++) {
+      try {
+        const r = await cexCall("Reports_sales_by_accounts",
+          { active_struct_id: "eStructList_1", action_type: "values", page_num: 1, filters: { ref_date: [from, to], client: cid } }, user, pass);
+        if (r && r.ok && r.data && r.data.totals && r.data.totals.total) {
+          const tt = r.data.totals.total;
+          const rev = Number(tt.total_no_dds) || 0;
+          const cost = (Number(tt.delivery_total_dds) || 0) / VAT_CONST;
+          return { rev: Math.round(rev * 100) / 100, cost: Math.round(cost * 100) / 100 };
+        }
+      } catch (e) {}
+      await new Promise(res => setTimeout(res, 200 * (t + 1)));
+    }
+    return null;
+  };
+  // последователно (≤13 клиента) — да не претоварваме Barsy паралелно
+  for (const cid of clientIds) { const v = await one(cid); if (v) out[cid] = v; }
+  return out;
+}
+const VAT_CONST = 1.2;
+
+// Партиди (движения): справка Reports_lot_list_details. amount>0 = зареждане/производство,
+// amount<0 = изписване. Групираме по lot_value. Обемно е (ден≈366 реда) → таван на страниците;
+// при по-дълъг период показваме „частично" и подканваме за по-кратък период.
+async function reportLots(from, to, user, pass) {
+  const PAGE = 50, MAXPG = 16;   // до 800 движения (≈2 дни пълни)
+  const lots = {};
+  let records = 0, seen = 0, truncated = false, ok = false;
+  for (let pg = 1; pg <= MAXPG; pg++) {
+    let d = null;
+    for (let t = 0; t < 3 && d === null; t++) {
+      try {
+        const r = await cexCall("Reports_lot_list_details",
+          { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { ref_date: [from, to] } }, user, pass);
+        if (r && r.ok && r.data) { d = r.data; ok = true; }
+      } catch (e) {}
+      if (d === null) await new Promise(res => setTimeout(res, 200 * (t + 1)));
+    }
+    if (!d) { truncated = true; break; }
+    records = Number(d.records) || records;
+    const rows = Array.isArray(d.rows) ? d.rows : [];
+    for (const x of rows) {
+      const key = x.lot_value || "(без партида)";
+      const L = lots[key] || (lots[key] = { lot: key, inn: 0, out: 0, arts: {}, last: "" });
+      const amt = Number(x.amount) || 0;
+      if (amt >= 0) L.inn += amt; else L.out += -amt;
+      const an = x.article_name || ("#" + x.article_id);
+      L.arts[an] = (L.arts[an] || 0) + amt;
+      const dt = String(x.operation_doc_date || x.create_date || "").slice(0, 10);
+      if (dt > L.last) L.last = dt;
+    }
+    seen += rows.length;
+    if (rows.length < PAGE) break;
+    if (pg === MAXPG && seen < records) truncated = true;
+  }
+  const list = Object.values(lots).map(L => ({
+    lot: L.lot, inn: Math.round(L.inn * 1000) / 1000, out: Math.round(L.out * 1000) / 1000,
+    net: Math.round((L.inn - L.out) * 1000) / 1000, last: L.last,
+    articles: Object.keys(L.arts).length
+  })).sort((a, b) => (b.last || "").localeCompare(a.last || "") || b.inn - a.inn);
+  return { ok, truncated, records, shown: seen, lots: list };
+}
+
 // ── ДАШБОРД агрегатор (Фаза 1): оборот по ден + по клиент, издадени фактури, разлика.
 // Оборот = сумата на ЗАТВОРЕНИТЕ сметки (`total_sum` е с ДДС → нето = /1.2), групиран по
 // ден на затваряне и по клиент. Фактури = Invoices type_id 1 (не стокови 11), неанулирани.
@@ -237,12 +306,13 @@ async function dashData(from, to, expenses, user, pass) {
   // Оборотът и COGS по артикул идват от Barsy справката „Продажби по артикули"
   // (reportSalesByArticles) — авторитетна: оборотът ѝ съвпада със затворените сметки, а
   // себестойността е историческата (не крехкото Orders-страниране). Всичко паралелно.
-  const [accR, invR, artR, stoR, salesRep] = await Promise.all([
+  const [accR, invR, artR, stoR, salesRep, lotsRep] = await Promise.all([
     cexCall("Accounts_getlist", { order_by: "account_id desc", length: 8000 }, user, pass),
     cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 5000 }, user, pass).catch(() => ({ data: [] })),
     cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["avg_delivery_price", "store_amount"] }, user, pass).catch(() => ({ data: [] })),
     cexCall("Storeloads_getlist", { order_by: "store_load_id desc", length: 2000, extra_properties: ["all"] }, user, pass).catch(() => ({ data: [] })),
     reportSalesByArticles(from, to, user, pass).catch(() => ({ ok: false, incomplete: true, articles: [] })),
+    reportLots(from, to, user, pass).catch(() => ({ ok: false, truncated: true, records: 0, lots: [] })),
   ]);
   let all = arrOf(accR);
   const byDay = {};        // "YYYY-MM-DD" → нето оборот
@@ -285,6 +355,15 @@ async function dashData(from, to, expenses, user, pass) {
   }).sort((a, b) => b.turnover - a.turnover);
   // общо „без фактура" = сумата на разликите БЕЗ освободените клиенти (ИТТ)
   const gapNeto = Math.round(clients.reduce((s, c) => s + c.gap, 0) * 100) / 100;
+  // МАРЖИН ПО КЛИЕНТ (от справка „Продажби по сметки", filters.client) — реален
+  const marginRep = await reportMarginByClient(from, to, clients.map(c => c.client_id), user, pass).catch(() => ({}));
+  for (const c of clients) {
+    const mr = marginRep[c.client_id];
+    if (mr && mr.rev > 0) {
+      c.cost = mr.cost; c.profit = Math.round((mr.rev - mr.cost) * 100) / 100;
+      c.margin = Math.round((c.profit / mr.rev) * 1000) / 10;   // %
+    }
+  }
 
   // ── ФАЗА 2: себестойност + печалба по артикул (от справка „Продажби по артикули") ──
   // СКЛАД в пари: наличност (store_amount) × средна себестойност/бр, само положителните
@@ -357,7 +436,13 @@ async function dashData(from, to, expenses, user, pass) {
   const toDate = new Date(to + "T12:00:00Z");
   const stopped = clients.filter(c => c.last).map(c => ({ c, ago: Math.round((toDate - new Date(c.last + "T12:00:00Z")) / 864e5) })).filter(o => o.ago >= 14).sort((a, b) => b.ago - a.ago);
   if (stopped.length) insights.push({ t: "bad", text: `${stopped.length} клиента не са поръчвали ≥14 дни. Най-дълго: ${stopped[0].c.name} (${stopped[0].ago} дни, оборот ${money(stopped[0].c.turnover)}) — струва си обаждане.` });
-  // 5) най-голям клиент по оборот
+  // 5) най-печеливш / най-нисък маржин клиент (реален, от справката)
+  const withM = clients.filter(c => c.margin != null && c.turnover > 100);
+  if (withM.length >= 2) {
+    const best = withM.slice().sort((a, b) => b.margin - a.margin)[0];
+    const worst = withM.slice().sort((a, b) => a.margin - b.margin)[0];
+    insights.push({ t: "info", text: `Най-печеливш клиент: ${best.name} (${best.margin.toFixed(1)}% маржин). Най-нисък: ${worst.name} (${worst.margin.toFixed(1)}%) — виж цените му.` });
+  }
   const bigC = clients.filter(c => !c.exempt).sort((a, b) => b.turnover - a.turnover)[0];
   if (bigC) insights.push({ t: "info", text: `Най-голям клиент: ${bigC.name} — ${money(bigC.turnover)} (${totalNeto ? Math.round(bigC.turnover / totalNeto * 100) : 0}% от оборота).` });
   // 6) артикул с най-нисък и най-висок маржин
@@ -370,7 +455,8 @@ async function dashData(from, to, expenses, user, pass) {
   return { from, to, total_neto: totalNeto, accounts: accountsN, by_day: byDay, invoiced_neto: invTotalNeto, clients,
     gap_neto: gapNeto, stock_value: stockValue, stock_items: stockItems, avg_check: avgCheck,
     cogs, expenses: exp, result, products, units_truncated: unitsTrunc, insights,
-    loads_neto: loadsNeto, loads_count: loadsN, suppliers, loads_by_month: loadsByMonth };
+    loads_neto: loadsNeto, loads_count: loadsN, suppliers, loads_by_month: loadsByMonth,
+    lots: (lotsRep && lotsRep.lots) || [], lots_truncated: !!(lotsRep && lotsRep.truncated), lots_records: (lotsRep && lotsRep.records) || 0 };
 }
 
 // ── Зареждане ПО ГРАФИК (не по дата на затваряне, която закъснява). Обектът и
@@ -588,7 +674,9 @@ header .d{font-size:15px;opacity:.93;margin-top:4px}
 function dashboardPage(data, k) {
   const bg = n => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("bg-BG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const err = data && data.error;
-  const rows = err ? "" : (data.clients || []).map(c => `<tr><td class="n">${esc(c.name)}${c.exempt ? ' <span class="tag">не се фактурира</span>' : ""}</td><td class="q">${bg(c.turnover)}</td><td class="q inv">${bg(c.invoiced)}</td><td class="q gap${!c.exempt && c.gap > 0.5 ? " bad" : ""}">${c.exempt ? "—" : bg(c.gap)}</td><td class="c">${c.accounts}</td></tr>`).join("");
+  const mcol = c => c.margin != null ? `<td class="q" style="color:${c.margin >= 45 ? "#0a6b2e" : c.margin >= 30 ? "#b06a00" : "#b3121b"};font-weight:800">${c.margin.toLocaleString("bg-BG", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</td>` : `<td class="c">—</td>`;
+  const rows = err ? "" : (data.clients || []).map(c => `<tr><td class="n">${esc(c.name)}${c.exempt ? ' <span class="tag">не се фактурира</span>' : ""}</td><td class="q">${bg(c.turnover)}</td>${mcol(c)}<td class="q inv">${bg(c.invoiced)}</td><td class="q gap${!c.exempt && c.gap > 0.5 ? " bad" : ""}">${c.exempt ? "—" : bg(c.gap)}</td><td class="c">${c.accounts}</td></tr>`).join("");
+  const lotRows = err ? "" : (data.lots || []).slice(0, 60).map(l => `<tr><td class="n">${esc(l.lot)}</td><td class="c">${l.last || ""}</td><td class="q" style="color:#0a6b2e">${bg(l.inn)}</td><td class="q" style="color:#b3121b">${bg(l.out)}</td><td class="q">${bg(l.net)}</td></tr>`).join("");
   const tips = err ? "" : (data.insights || []).map(x => `<li class="${x.t}"><span class="ic">${x.t === "good" ? "✅" : x.t === "warn" ? "⚠️" : x.t === "bad" ? "🔴" : "💡"}</span><span>${esc(x.text)}</span></li>`).join("");
   const gapNeto = err ? 0 : (data.gap_neto != null ? data.gap_neto : (data.total_neto - data.invoiced_neto));
   const waiting = err ? [] : (data.clients || []).filter(c => !c.exempt && c.gap > 0.5).sort((a, b) => b.gap - a.gap);
@@ -679,8 +767,8 @@ ${tips ? `<div class="card"><h2>💡 Съвети / Наблюдения</h2><ul
 <div class="card"><h2>Оборот по клиент<span>дял от оборота</span></h2>
   <div class="chartbox donut"><canvas id="cClients" height="260" style="max-width:420px"></canvas></div>
   <details class="tbl" open><summary>таблица</summary>
-  <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Фактурирано</th><th class="q">Без фактура</th><th class="q">Сметки</th></tr></thead>
-  <tbody>${rows || '<tr><td colspan="5" class="note">Няма затворени сметки в периода.</td></tr>'}</tbody></table></details></div>
+  <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Маржин</th><th class="q">Фактурирано</th><th class="q">Без фактура</th><th class="q">Сметки</th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="6" class="note">Няма затворени сметки в периода.</td></tr>'}</tbody></table></details></div>
 <div class="card"><h2>📄 Чакат фактура<span>${waiting.length} клиента · общо ${bg(gapNeto)} €</span></h2>
   <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Фактурирано</th><th class="q">Без фактура</th></tr></thead>
   <tbody>${waitRows || '<tr><td colspan="4" class="note">Всичко е фактурирано 🎉</td></tr>'}</tbody></table></div>
@@ -694,7 +782,10 @@ ${tips ? `<div class="card"><h2>💡 Съвети / Наблюдения</h2><ul
   <details class="tbl" open><summary>по доставчик</summary>
   <table><thead><tr><th>Доставчик</th><th class="q">Сума без ДДС</th></tr></thead>
   <tbody>${(data.suppliers || []).map(s => `<tr><td class="n">${esc(s.name)}</td><td class="q">${bg(s.neto)}</td></tr>`).join("") || '<tr><td colspan="2" class="note">Няма зареждания в периода.</td></tr>'}</tbody></table></details></div>
-<div class="note">Всичко е <b>без ДДС</b>. Оборот = затворените сметки (total_sum/1.2). Себестойност и печалба по артикул идват от Barsy справка „Продажби по артикули" (историческа себестойност). „Без фактура" = оборот − фактури (тип 1), <b>без клиенти които не се фактурират (ИТТ)</b>; стоковите (тип 11) не са фактури. <b>Внимание:</b> фактурите не са календарен месец (част от края на месеца влизат в следващия). Склад = наличност × средна себестойност/бр (само положителни). Резултат = оборот − себестойност − разходи.${data.units_truncated ? " ⚠ Справката не се зареди докрай — числата може да са частични, презареди." : ""}</div>
+<div class="card"><h2>📦 Партиди (движения)<span>${(data.lots || []).length} партиди${data.lots_truncated ? " · ⚠ частично (" + (data.lots_records || 0) + " движения — скъси периода)" : ""}</span></h2>
+  <table><thead><tr><th>Партида</th><th>Последно</th><th class="q">Заредено +</th><th class="q">Изписано −</th><th class="q">Остатък</th></tr></thead>
+  <tbody>${lotRows || '<tr><td colspan="5" class="note">Няма движения по партиди в периода.</td></tr>'}</tbody></table></div>
+<div class="note">Всичко е <b>без ДДС</b>. Оборот = затворените сметки (total_sum/1.2). Маржин по клиент = справка „Продажби по сметки" (себест. без ДДС). Партиди: „Заредено +" = производство/зареждане, „Изписано −" = вложено/продадено; за дълъг период са много — <b>скъси периода за пълен списък</b>. Себестойност и печалба по артикул идват от Barsy справка „Продажби по артикули" (историческа себестойност). „Без фактура" = оборот − фактури (тип 1), <b>без клиенти които не се фактурират (ИТТ)</b>; стоковите (тип 11) не са фактури. <b>Внимание:</b> фактурите не са календарен месец (част от края на месеца влизат в следващия). Склад = наличност × средна себестойност/бр (само положителни). Резултат = оборот − себестойност − разходи.${data.units_truncated ? " ⚠ Справката не се зареди докрай — числата може да са частични, презареди." : ""}</div>
 <script>
 var BYDAY=${err ? "{}" : JSON.stringify(data.by_day || {})};
 var CLIENTS=${err ? "[]" : JSON.stringify((data.clients || []).map(c => ({ name: c.name, t: c.turnover, last: c.last, n: c.accounts })))};
@@ -907,31 +998,6 @@ module.exports = async function handler(req, res) {
     if (!okV) { res.status(403).send(dashboardPage({ error: "Липсва или грешен ключ в линка." }, "")); return; }
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).send(dashboardPage({ error: "Не е конфигуриран достъп до цеха." }, q.k)); return; }
-    if (q.debug === "cids") {
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 8000 }, user, pass);
-      const a = Array.isArray(r.data) ? r.data : Object.values(r.data || {});
-      const m = {}; for (const x of a) { if (x.client_id != null) m[x.client_id] = x.client_name; }
-      res.status(200).send(JSON.stringify(m, null, 2)); return;
-    }
-    if (q.debug === "rep") {
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      const m = String(q.m || "");
-      if (!/^Reports_[a-z_]+$/.test(m)) { res.status(400).send(JSON.stringify({ error: "bad method" })); return; }
-      const f = q.from || "2026-08-01", t2 = q.to || "2026-08-31";
-      const sid = q.sid || "eStructList_1";
-      const filters = { ref_date: [f, t2] };
-      if (q.cid) { const c = Number(q.cid); filters[q.fk || "client_id"] = q.arr ? [c] : c; }
-      const body = { active_struct_id: sid, action_type: "values", page_num: Number(q.page) || 1, filters };
-      const r = await cexCall(m, body, user, pass);
-      const d = r.data || {};
-      const rows = Array.isArray(d.rows) ? d.rows : null;
-      res.status(200).send(JSON.stringify({ method: m, ok: r.ok, topKeys: Object.keys(d).slice(0, 12),
-        total: d.total, records: d.records, rowCount: rows ? rows.length : null,
-        rowKeys: rows && rows[0] ? Object.keys(rows[0]) : null, sample: rows ? rows.slice(0, 3) : (r.raw || "").slice(0, 300),
-        totals: d.totals }, null, 2));
-      return;
-    }
     const today = sofiaToday();
     const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 4) + "-01-01"; // по подразбиране от 1 януари
     const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
