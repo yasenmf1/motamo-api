@@ -861,6 +861,22 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
+  // ── ВРЕМЕНЕН: търсене на агрегат „продажби по артикул за период" ──
+  if (body.action === "sales_probe") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    const out = {};
+    const t = async (label, m, p) => { try { const r = await cexCall(m, p, user, pass); out[label] = JSON.stringify(r.data).slice(0, 500); } catch (e) { out[label] = "ERR " + String(e && e.message); } };
+    // артикул + продадено количество за период?
+    await t("art_sold", "Articles_getlistobject", { filters: {}, depots: [1], date_from: "2026-09-01", date_to: "2026-09-07", extra_properties: ["sold_amount", "sold_qty", "turnover"] });
+    await t("art_sold2", "Articles_getlistobject", { filters: { date_from: "2026-09-01", date_to: "2026-09-07" }, extra_properties: ["all"] });
+    // отчети
+    await t("reports_list", "Reports_getlist", {});
+    await t("rep_art_sales", "Reports_articles_sales", { date_from: "2026-09-01", date_to: "2026-09-07" });
+    await t("orders_agg", "Orders_getlist", { filters: {}, group_by: "article_id", date_from: "2026-09-01", date_to: "2026-09-07" });
+    res.status(200).json({ ok: true, out });
+    return;
+  }
+
   // ── ДИАГНОСТИК (само четене): затворени сметки на дата (реалният разнос) ──
   if (body.action === "closed_on") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
