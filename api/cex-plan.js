@@ -186,15 +186,22 @@ async function scheduleSeed(dateIso, user, pass) {
   const dow = new Date(dateIso + "T12:00:00Z").getUTCDay();
   const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 2000 }, user, pass);
   let all = list.data || []; if (!Array.isArray(all)) all = Object.values(all);
-  // Най-скорошната сметка на всеки ОБЕКТ (desc → първата е най-новата). Пропускаме
-  // анонимни и тестовите (alias CLTEST), за да не се пълни от тест.
+  // „По график <дата>" гледа историята КЪМ тази дата: броим само сметки от/преди нея.
+  // Така обект без сметка до тази дата НЕ се показва (напр. по-късни тестови сметки не
+  // изкарват обекти, които никога не сме зареждали), а количествата са последната
+  // реална поръчка на обекта към деня.
+  const dateOf = a => String(a.close_date || a.ref_date || a.create_date || "").slice(0, 10);
+  all = all.filter(a => { const dt = dateOf(a); return dt && dt <= dateIso; });
+  // Най-скорошната сметка (към датата) на всеки ОБЕКТ по ДАТА (не по account_id, който
+  // при преномерирани/тестови сметки може да е по-голям от по-нов реален разнос).
+  // Пропускаме анонимни и тестовите (alias CLTEST), за да не се пълни от тест.
   const seen = {};
   for (const a of all) {
     const pn = a.person_name, cn = a.client_name;
     if (!pn && (!cn || cn === "Анонимен")) continue;
     if (String(a.account_alias || "").includes("CLTEST")) continue;
     const key = a.person_id ? ("p" + a.person_id) : ("c" + (a.client_id || "") + "|" + (pn || cn || ""));
-    if (!seen[key]) seen[key] = a;
+    if (!seen[key] || dateOf(a) > dateOf(seen[key])) seen[key] = a;
   }
   const entries = Object.values(seen);
   // Тик само за АКТИВНИ обекти: с поръчка в последните 14 дни. Неактивните (напр.
@@ -209,9 +216,10 @@ async function scheduleSeed(dateIso, user, pass) {
       const art = byId(o.article_id) || resolve(o.article_name);
       if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + (Number(o.amount) || 0);
     }
-    const lastStr = String(a.close_date || a.create_date || "").slice(0, 10);
+    const lastStr = dateOf(a);
     const recent = lastStr >= cutoffStr;
-    return { account_id: a.account_id, last_date: lastStr, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group: g, scheduled: cexDueOn(g, dow) && recent, order };
+    const hasOrder = Object.values(order).some(v => v > 0);
+    return { account_id: a.account_id, last_date: lastStr, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group: g, scheduled: cexDueOn(g, dow) && recent && hasOrder, order };
   });
   // Подредба: първо дължимите днес, после по група, после по име.
   const grank = { sibies: 0, merkanto: 1, haskovo: 2, adhoc: 3 };
