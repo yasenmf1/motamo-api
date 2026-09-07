@@ -210,7 +210,7 @@ async function scheduleSeed(dateIso, user, pass) {
     }
     const lastStr = String(a.close_date || a.create_date || "").slice(0, 10);
     const recent = lastStr >= cutoffStr;
-    return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group: g, scheduled: cexDueOn(g, dow) && recent, order };
+    return { account_id: a.account_id, last_date: lastStr, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group: g, scheduled: cexDueOn(g, dow) && recent, order };
   });
   // Подредба: първо дължимите днес, после по група, после по име.
   const grank = { sibies: 0, merkanto: 1, haskovo: 2, adhoc: 3 };
@@ -657,7 +657,7 @@ module.exports = async function handler(req, res) {
     catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
     const scheduled = s.shops.filter(x => x.scheduled).length;
     res.status(200).json({ ok: true, date, dow: s.dow, seeded_accounts: s.shops.length, scheduled_count: scheduled,
-      shops: s.shops.map(x => ({ client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, scheduled: x.scheduled, order: sortObj(x.order || {}, 2) })) });
+      shops: s.shops.map(x => ({ account_id: x.account_id, last_date: x.last_date, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, scheduled: x.scheduled, order: sortObj(x.order || {}, 2) })) });
     return;
   }
 
