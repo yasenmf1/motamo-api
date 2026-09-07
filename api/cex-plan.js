@@ -963,14 +963,11 @@ module.exports = async function handler(req, res) {
       const d = r.data || {};
       const c0 = (d.content && d.content[0]) || {};
       const dat = c0.data || {};
-      // намери масив с редове някъде в data
-      let rows = null, rowsKey = null;
-      for (const k in dat) { if (Array.isArray(dat[k]) && dat[k].length && typeof dat[k][0] === "object") { rows = dat[k]; rowsKey = k; break; } }
+      const els = (dat.elements || []).map(e => ({ name: e.name, title: e.title, type: e.type, total: e.col_total }));
       res.status(200).send(JSON.stringify({
-        method: m, ok: r.ok, contentTypes: (d.content || []).map(x => x.type),
-        dataKeys: Object.keys(dat), rowsKey, rowCount: rows ? rows.length : null,
-        rowKeys: rows && rows[0] ? Object.keys(rows[0]) : null, sampleRows: rows ? rows.slice(0, 3) : null,
-        columns: dat.columns || dat.fields || dat.head || null
+        method: m, columns: els,
+        initial_data_load: dat.initial_data_load, data_source: dat.data_source,
+        totals: dat.totals, order_by: dat.order_by, filters_type: dat.filters_type
       }, null, 2));
       return;
     }
