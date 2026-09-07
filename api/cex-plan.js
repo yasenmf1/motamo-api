@@ -660,6 +660,18 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
+  // ── ВРЕМЕНЕН: проби на източниците за дашборда (полета/структура) ──
+  if (body.action === "dash_probe") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    const out = {};
+    const one = async (m, p) => { try { const r = await cexCall(m, p, user, pass); let d = r.data; d = Array.isArray(d) ? d : (d && (d.list || (typeof d === "object" ? Object.values(d) : d))); const arr = Array.isArray(d) ? d : []; out[m] = { n: arr.length, keys: arr[0] ? Object.keys(arr[0]) : Object.keys(r.data || {}), sample: arr[0] || r.data }; } catch (e) { out[m] = "ERR " + String(e && e.message); } };
+    await one("Accounts_getlist", { order_by: "account_id desc", length: 3 });
+    await one("Invoices_getlist", { order_by: "inv_id desc", length: 3 });
+    await one("Storeloads_getlist", { order_by: "store_load_id desc", length: 3 });
+    res.status(200).json({ ok: true, out: JSON.parse(JSON.stringify(out).slice(0, 4000)) });
+    return;
+  }
+
   // ── ДИАГНОСТИК (само четене): затворени сметки на дата (реалният разнос) ──
   if (body.action === "closed_on") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
