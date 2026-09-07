@@ -959,16 +959,19 @@ module.exports = async function handler(req, res) {
         { filters: { date_from: from, date_to: to } },
         { ref_date: [from, to] },
       ];
-      const out = [];
-      for (const body of shapes) {
-        try {
-          const r = await cexCall(m, body, user, pass);
-          const d = r.data;
-          let rows = Array.isArray(d) ? d : (d && d.list) ? d.list : (d && d.rows) ? d.rows : null;
-          out.push({ body, ok: r.ok, status: r.status, topType: Array.isArray(d) ? "array" : typeof d, topKeys: d && !Array.isArray(d) ? Object.keys(d).slice(0, 20) : null, rowCount: rows ? rows.length : null, rowKeys: rows && rows[0] ? Object.keys(rows[0]) : null, sample: rows ? rows.slice(0, 2) : (r.raw ? r.raw.slice(0, 400) : null) });
-        } catch (e) { out.push({ body, error: String(e && e.message) }); }
-      }
-      res.status(200).send(JSON.stringify({ method: m, tries: out }, null, 2));
+      const r = await cexCall(m, shapes[0], user, pass);
+      const d = r.data || {};
+      const c0 = (d.content && d.content[0]) || {};
+      const dat = c0.data || {};
+      // намери масив с редове някъде в data
+      let rows = null, rowsKey = null;
+      for (const k in dat) { if (Array.isArray(dat[k]) && dat[k].length && typeof dat[k][0] === "object") { rows = dat[k]; rowsKey = k; break; } }
+      res.status(200).send(JSON.stringify({
+        method: m, ok: r.ok, contentTypes: (d.content || []).map(x => x.type),
+        dataKeys: Object.keys(dat), rowsKey, rowCount: rows ? rows.length : null,
+        rowKeys: rows && rows[0] ? Object.keys(rows[0]) : null, sampleRows: rows ? rows.slice(0, 3) : null,
+        columns: dat.columns || dat.fields || dat.head || null
+      }, null, 2));
       return;
     }
     if (q.debug === "recon") {
