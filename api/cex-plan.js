@@ -959,15 +959,16 @@ module.exports = async function handler(req, res) {
         { filters: { date_from: from, date_to: to } },
         { ref_date: [from, to] },
       ];
-      const r = await cexCall(m, shapes[0], user, pass);
+      const body = { active_struct_id: "eStructList_1", action_type: "values", filters: { ref_date: [from, to] } };
+      const r = await cexCall(m, body, user, pass);
       const d = r.data || {};
-      const c0 = (d.content && d.content[0]) || {};
-      const dat = c0.data || {};
-      const els = (dat.elements || []).map(e => ({ name: e.name, title: e.title, type: e.type, total: e.col_total }));
+      // намери масив с редове-данни
+      const findRows = o => { let best = null; (function w(x, depth) { if (!x || depth > 6) return; if (Array.isArray(x)) { if (x.length && typeof x[0] === "object" && !Array.isArray(x[0]) && ("article_id" in x[0] || "cnt" in x[0] || "oborot" in x[0] || "total_no_dds" in x[0] || "client_id" in x[0])) { if (!best || x.length > best.length) best = x; } x.forEach(e => w(e, depth + 1)); } else if (typeof x === "object") { for (const k in x) w(x[k], depth + 1); } })(o, 0); return best; };
+      const rows = findRows(d);
       res.status(200).send(JSON.stringify({
-        method: m, columns: els,
-        initial_data_load: dat.initial_data_load, data_source: dat.data_source,
-        totals: dat.totals, order_by: dat.order_by, filters_type: dat.filters_type
+        method: m, ok: r.ok, topKeys: Object.keys(d).slice(0, 15),
+        rowCount: rows ? rows.length : null, rowKeys: rows && rows[0] ? Object.keys(rows[0]) : null,
+        sampleRows: rows ? rows.slice(0, 3) : (r.raw || "").slice(0, 500)
       }, null, 2));
       return;
     }
