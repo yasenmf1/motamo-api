@@ -201,18 +201,30 @@ async function seedRazos(razosDate, user, pass, includeSameDay) {
 // без ДДС, от AVG_DELIVERY_PRICE). Заменя крехкото Orders-страниране за COGS/маржин.
 // Данните идват през „values" извикване (action_type:values + active_struct_id).
 async function reportSalesByArticles(from, to, user, pass) {
-  const body = { active_struct_id: "eStructList_1", action_type: "values", filters: { ref_date: [from, to] } };
-  const r = await cexCall("Reports_sales_by_articles", body, user, pass);
-  const rows = (r && r.data && Array.isArray(r.data.rows)) ? r.data.rows : [];
   const by = {};   // article_id → { name, units, revenue, cost }
-  for (const x of rows) {
-    const id = String(x.article_id);
-    const a = by[id] || (by[id] = { article_id: Number(x.article_id), name: x.article_name || ("#" + id), units: 0, revenue: 0, cost: 0 });
-    a.units += Number(x.cnt) || 0;
-    a.revenue += Number(x.total_no_dds) || 0;         // без ДДС
-    a.cost += Number(x.delivery_total) || 0;          // себестойност без ДДС
+  let ok = false, incomplete = false;
+  const PAGE = 50, MAXPG = 30;
+  for (let pg = 1; pg <= MAXPG; pg++) {
+    let rows = null;
+    for (let t = 0; t < 3 && rows === null; t++) {
+      try {
+        const r = await cexCall("Reports_sales_by_articles",
+          { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { ref_date: [from, to] } }, user, pass);
+        if (r && r.ok && r.data && Array.isArray(r.data.rows)) { rows = r.data.rows; ok = true; }
+      } catch (e) {}
+      if (rows === null) await new Promise(res => setTimeout(res, 250 * (t + 1)));
+    }
+    if (rows === null) { incomplete = true; break; }
+    for (const x of rows) {
+      const id = String(x.article_id);
+      const a = by[id] || (by[id] = { article_id: Number(x.article_id), name: x.article_name || ("#" + id), units: 0, revenue: 0, cost: 0 });
+      a.units += Number(x.cnt) || 0;
+      a.revenue += Number(x.total_no_dds) || 0;       // без ДДС
+      a.cost += Number(x.delivery_total) || 0;        // себестойност без ДДС
+    }
+    if (rows.length < PAGE) break;                    // последна страница
   }
-  return { ok: !!(r && r.ok), articles: Object.values(by) };
+  return { ok, incomplete, articles: Object.values(by) };
 }
 
 // ── ДАШБОРД агрегатор (Фаза 1): оборот по ден + по клиент, издадени фактури, разлика.
