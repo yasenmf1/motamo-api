@@ -355,9 +355,49 @@ async function dashData(from, to, expenses, user, pass) {
   const suppliers = Object.entries(loadsBySupplier).map(([name, neto]) => ({ name, neto })).sort((a, b) => b.neto - a.neto);
   const avgCheck = accountsN ? Math.round((totalNeto / accountsN) * 100) / 100 : 0;
 
+  // ── СЪВЕТИ / НАБЛЮДЕНИЯ (автоматични изводи от данните) ──────────────────────
+  const insights = [];
+  const money = n => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("bg-BG", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+  // 1) последен пълен месец спрямо предходния (по оборот)
+  const byMonth = {};
+  for (const d in byDay) { const ym = d.slice(0, 7); byMonth[ym] = (byMonth[ym] || 0) + byDay[d]; }
+  const months = Object.keys(byMonth).sort();
+  const curYm = to.slice(0, 7);
+  const full = months.filter(m => m < curYm);          // изключваме текущия (непълен) месец
+  if (full.length >= 2) {
+    const a = byMonth[full[full.length - 1]], b = byMonth[full[full.length - 2]];
+    if (b) { const d = (a - b) / b * 100;
+      insights.push({ t: d >= 0 ? "good" : "bad", text: `Оборот ${full[full.length - 1]}: ${money(a)} — ${d >= 0 ? "▲" : "▼"} ${Math.abs(d).toFixed(1)}% спрямо ${full[full.length - 2]} (${money(b)}).` }); }
+  }
+  // 2) обща рентабилност
+  if (totalNeto > 0 && !unitsTrunc) {
+    const m = result / totalNeto * 100;
+    insights.push({ t: m >= 35 ? "good" : m >= 20 ? "warn" : "bad", text: `Обща рентабилност за периода: ${m.toFixed(1)}% (резултат ${money(result)}).` });
+  }
+  // 3) чакат фактура
+  const wait = clients.filter(c => !c.exempt && c.gap > 0.5);
+  if (wait.length) insights.push({ t: "warn", text: `${wait.length} клиента чакат фактура — общо ${money(gapNeto)}. Най-много: ${wait.sort((x, y) => y.gap - x.gap)[0].name} (${money(wait[0].gap)}).` });
+  // 4) спрели клиенти (>14 дни без поръчка спрямо края на периода)
+  const toDate = new Date(to + "T12:00:00Z");
+  const stopped = clients.filter(c => c.last).map(c => ({ c, ago: Math.round((toDate - new Date(c.last + "T12:00:00Z")) / 864e5) })).filter(o => o.ago >= 14).sort((a, b) => b.ago - a.ago);
+  if (stopped.length) insights.push({ t: "bad", text: `${stopped.length} клиента не са поръчвали ≥14 дни. Най-дълго: ${stopped[0].c.name} (${stopped[0].ago} дни, оборот ${money(stopped[0].c.turnover)}) — струва си обаждане.` });
+  // 5) най-печеливш / най-нисък маржин клиент
+  const withM = clients.filter(c => c.margin != null && c.turnover > 50);
+  if (withM.length >= 2) {
+    const best = withM.slice().sort((a, b) => b.margin - a.margin)[0];
+    const worst = withM.slice().sort((a, b) => a.margin - b.margin)[0];
+    insights.push({ t: "info", text: `Най-печеливш клиент: ${best.name} (${best.margin.toFixed(1)}% маржин). Най-нисък: ${worst.name} (${worst.margin.toFixed(1)}%).` });
+  }
+  // 6) артикул с най-нисък маржин
+  const pm = products.filter(p => p.revenue > 50).map(p => ({ p, m: p.profit / p.revenue * 100 }));
+  if (pm.length) { const low = pm.slice().sort((a, b) => a.m - b.m)[0];
+    insights.push({ t: low.m < 25 ? "warn" : "info", text: `Най-нисък маржин артикул: ${low.p.name} (${low.m.toFixed(1)}%). Най-печеливш: ${pm.slice().sort((a, b) => b.p.profit - a.p.profit)[0].p.name}.` }); }
+  // 7) склад
+  if (stockValue > 0) insights.push({ t: "info", text: `В склада стоят ${money(stockValue)} по себестойност (${stockItems} артикула).` });
+
   return { from, to, total_neto: totalNeto, accounts: accountsN, by_day: byDay, invoiced_neto: invTotalNeto, clients,
     gap_neto: gapNeto, stock_value: stockValue, stock_items: stockItems, avg_check: avgCheck,
-    cogs, expenses: exp, result, products, units_truncated: unitsTrunc,
+    cogs, expenses: exp, result, products, units_truncated: unitsTrunc, insights,
     loads_neto: loadsNeto, loads_count: loadsN, suppliers, loads_by_month: loadsByMonth };
 }
 
@@ -627,6 +667,11 @@ td.q,th.q{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 td.q{font-weight:700}td.inv{color:#8a6608}td.gap{color:#1f7a3a}td.gap.bad{color:#b3121b;font-weight:800}
 td.c{text-align:right;color:#7a8087}
 .tag{display:inline-block;font-size:10px;font-weight:700;color:#7a4b8a;background:#f0e8f5;border-radius:10px;padding:1px 7px;vertical-align:1px;text-transform:uppercase;letter-spacing:.3px}
+.tips{list-style:none;margin:0;padding:8px 10px;display:grid;gap:8px}
+.tips li{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:10px;font-size:14px;line-height:1.35;background:#f7f8fa;border-left:5px solid #9aa0a6}
+.tips li .ic{font-size:16px;flex:0 0 auto;line-height:1.2}
+.tips li.good{background:#eaf6ee;border-color:#0a6b2e}.tips li.warn{background:#fdf3e3;border-color:#b06a00}
+.tips li.bad{background:#fdecec;border-color:#b3121b}.tips li.info{background:#eef3f8;border-color:#2b6ca3}
 tr:nth-child(even) td{background:#fafbfc}
 .note{color:#7a8087;font-size:12px;text-align:center;margin:2px 0 20px}
 .err{background:#fff;border-radius:12px;padding:24px;text-align:center;color:#b3121b}
@@ -656,8 +701,8 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
 </div>
 <div class="card"><h2>Оборот по период<span class="seg" id="seg"><button data-g="day">Ден</button><button data-g="week">Седмица</button><button data-g="month" class="on">Месец</button></span></h2>
   <div class="chartbox"><canvas id="cTrend" height="150"></canvas></div>
-  <details class="tbl"><summary>таблица</summary>
-  <table><thead><tr><th>Период</th><th class="q">Оборот без ДДС</th></tr></thead><tbody id="bkt"></tbody></table></details></div>
+  <details class="tbl" open><summary>таблица · сравнение спрямо предходния</summary>
+  <table><thead><tr><th>Период</th><th class="q">Оборот без ДДС</th><th class="q">Δ предх.</th></tr></thead><tbody id="bkt"></tbody></table></details></div>
 <div class="card"><h2>Оборот по клиент<span>дял от оборота</span></h2>
   <div class="chartbox donut"><canvas id="cClients" height="260" style="max-width:420px"></canvas></div>
   <details class="tbl" open><summary>таблица</summary>
@@ -687,13 +732,17 @@ function bgn(n){return (Math.round((n||0)*100)/100).toLocaleString('bg-BG',{mini
 function wk(iso){var d=new Date(iso+'T12:00:00Z');var day=(d.getUTCDay()+6)%7;d.setUTCDate(d.getUTCDate()-day);return d.toISOString().slice(0,10)}
 function bucketize(g){var b={};Object.keys(BYDAY).forEach(function(d){var key=g==='day'?d:g==='week'?wk(d):d.slice(0,7);b[key]=(b[key]||0)+BYDAY[d]});return b}
 var trendChart=null;
+function dpct(cur,prev){return (prev!=null&&prev!==0)?((cur-prev)/prev*100):null}
+function dcell(d){if(d==null)return '<td class="c">—</td>';var c=d>=0?'#0a6b2e':'#b3121b';return '<td class="q" style="color:'+c+';font-weight:800">'+(d>=0?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'%</td>'}
 function render(g){var b=bucketize(g);var keys=Object.keys(b).sort();
-  var h='';keys.slice().reverse().forEach(function(k){h+='<tr><td>'+(g==='week'?'седм. от '+k:k)+'</td><td class="q">'+bgn(b[k])+' €</td></tr>'});
-  var bkt=document.getElementById('bkt');if(bkt)bkt.innerHTML=h||'<tr><td colspan="2" class="note">няма данни</td></tr>';
-  if(window.Chart){var ctx=document.getElementById('cTrend');var vals=keys.map(function(k){return Math.round((b[k]||0)*100)/100});
+  var vals=keys.map(function(k){return Math.round((b[k]||0)*100)/100});
+  var deltas=keys.map(function(k,i){return dpct(b[k],i>0?b[keys[i-1]]:null)});
+  var h='';for(var i=keys.length-1;i>=0;i--){var lab=g==='week'?'седм. от '+keys[i]:keys[i];h+='<tr><td>'+lab+'</td><td class="q">'+bgn(b[keys[i]])+' €</td>'+dcell(deltas[i])+'</tr>'}
+  var bkt=document.getElementById('bkt');if(bkt)bkt.innerHTML=h||'<tr><td colspan="3" class="note">няма данни</td></tr>';
+  if(window.Chart){var ctx=document.getElementById('cTrend');
     if(trendChart)trendChart.destroy();
     trendChart=new Chart(ctx,{type:'line',data:{labels:keys,datasets:[{label:'Оборот без ДДС',data:vals,borderColor:'#1f5b59',backgroundColor:'rgba(31,91,89,.12)',fill:true,tension:.3,pointRadius:2,pointHoverRadius:5,borderWidth:2}]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return bgn(c.parsed.y)+' €'}}}},scales:{y:{ticks:{callback:function(v){return bgn(v)}}},x:{ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:14}}}}});}
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return bgn(c.parsed.y)+' €'},afterLabel:function(c){var d=deltas[c.dataIndex];return d==null?'':'спрямо предх.: '+(d>=0?'+':'')+d.toFixed(1)+'%'}}}},scales:{y:{ticks:{callback:function(v){return bgn(v)}}},x:{ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:14}}}}});}
 }
 document.querySelectorAll('#seg button').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('#seg button').forEach(function(x){x.className=''});b.className='on';render(b.getAttribute('data-g'))})});
 render('month');
@@ -885,6 +934,13 @@ module.exports = async function handler(req, res) {
     if (!okV) { res.status(403).send(dashboardPage({ error: "Липсва или грешен ключ в линка." }, "")); return; }
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).send(dashboardPage({ error: "Не е конфигуриран достъп до цеха." }, q.k)); return; }
+    if (q.debug === "ord") {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      const r = await cexCall("Orders_getlist", { order_by: "date desc", length: 3 }, user, pass);
+      const a = Array.isArray(r.data) ? r.data : Object.values(r.data || {});
+      res.status(200).send(JSON.stringify({ keys: a[0] ? Object.keys(a[0]) : [], sample: a.slice(0, 2) }, null, 2));
+      return;
+    }
     const today = sofiaToday();
     const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 4) + "-01-01"; // по подразбиране от 1 януари
     const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
