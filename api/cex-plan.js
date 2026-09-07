@@ -206,16 +206,33 @@ async function dashData(from, to, expenses, user, pass) {
   // Orders се вадят на ПАРАЛЕЛНИ страници по offset (Barsy лимит 10000/заявка; „date desc"
   // + offset странира назад). Цехът има ~50k поръчки общо → 6×10000 покриват цялата
   // история, значи ПЪЛНИ бройки за коя да е дата (вкл. 01.01). Всичко наведнъж, паралелно.
-  const ordPages = [0, 1, 2, 3, 4, 5].map(i =>
-    cexCall("Orders_getlist", { order_by: "date desc", length: 10000, offset: i * 10000 }, user, pass).catch(() => ({ data: [] })));
-  const [accR, invR, artR, stoR, ...ordRs] = await Promise.all([
+  // Първо леките извиквания (паралелно).
+  const [accR, invR, artR, stoR] = await Promise.all([
     cexCall("Accounts_getlist", { order_by: "account_id desc", length: 8000 }, user, pass),
     cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 5000 }, user, pass).catch(() => ({ data: [] })),
     cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["avg_delivery_price", "store_amount"] }, user, pass).catch(() => ({ data: [] })),
     cexCall("Storeloads_getlist", { order_by: "store_load_id desc", length: 2000, extra_properties: ["all"] }, user, pass).catch(() => ({ data: [] })),
-    ...ordPages
   ]);
-  const ordR = { data: [].concat(...ordRs.map(arrOf)) };
+  // Orders: страници по offset, ПОСЛЕДОВАТЕЛНО + retry. Barsy къса при паралелни заявки и
+  // тихото .catch подценяваше COGS (ту 84k, ту 14k). Тук всяка страница се повтаря до 4 пъти;
+  // спираме при непълна страница (край). Ако страница откаже съвсем → маркираме частично (⚠).
+  const ORD_LEN = 10000, ORD_MAXP = 8;
+  let ordersIncomplete = false;
+  const getOrdPage = async off => {
+    for (let t = 0; t < 4; t++) {
+      try { const r = await cexCall("Orders_getlist", { order_by: "date desc", length: ORD_LEN, offset: off }, user, pass); if (r && r.ok) return arrOf(r); } catch (e) {}
+      await new Promise(res => setTimeout(res, 250 * (t + 1)));
+    }
+    return null;
+  };
+  let ordAll = [];
+  for (let p = 0; p < ORD_MAXP; p++) {
+    const a = await getOrdPage(p * ORD_LEN);
+    if (a === null) { ordersIncomplete = true; break; }
+    ordAll = ordAll.concat(a);
+    if (a.length < ORD_LEN) break;   // непълна страница → край на историята
+  }
+  const ordR = { data: ordAll };
   let all = arrOf(accR);
   const byDay = {};        // "YYYY-MM-DD" → нето оборот
   const byClient = {};     // client_id → { name, neto, n }
@@ -296,6 +313,7 @@ async function dashData(from, to, expenses, user, pass) {
       if (cid !== undefined) clientCogs[cid] = (clientCogs[cid] || 0) + lineCost;
     }
     if (ord.length && oldest > from) unitsTrunc = true;   // не сме стигнали началото → частично
+    if (ordersIncomplete) unitsTrunc = true;              // страница отказа → частично
   }
   const products = Object.entries(units).map(([id, u]) => {
     const c = cost[id] || 0; const un = Math.round(u.units * 1000) / 1000;
