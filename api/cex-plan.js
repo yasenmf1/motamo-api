@@ -778,13 +778,20 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // ── ВРЕМЕНЕН: списък начини на плащане (виждани от потр. Claude) ──
+  // ── ВРЕМЕНЕН: списък начини на плащане (суров), за да намеря ид на „По банка" в цеха ──
   if (body.action === "paymethods") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     let out = {};
-    for (const m of ["Paymentmethods_getlist", "Paymethods_getlist"]) {
-      try { const r = await cexCall(m, { filters: {} }, user, pass); let a = r.data; a = Array.isArray(a) ? a : (a && (a.list || Object.values(a))) || []; out[m] = (a || []).map(x => ({ id: x.paymethod_id || x.id, name: x.name })); }
-      catch (e) { out[m] = "ERR " + String(e && e.message); }
+    const tries = [
+      ["Paymentmethods_getlist", {}],
+      ["Paymentmethods_getlist", { filters: {} }],
+      ["Paymentmethods_getlist", { seller_company_id: 1 }],
+      ["Paymethods_getlist", {}],
+      ["Paymentmethods_getlistobject", { filters: {} }]
+    ];
+    for (const [m, p] of tries) {
+      try { const r = await cexCall(m, p, user, pass); out[m + " " + JSON.stringify(p)] = JSON.stringify(r.data).slice(0, 500); }
+      catch (e) { out[m + " " + JSON.stringify(p)] = "ERR " + String(e && e.message); }
     }
     res.status(200).json({ ok: true, out });
     return;
