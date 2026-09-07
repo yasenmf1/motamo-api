@@ -196,6 +196,53 @@ async function seedRazos(razosDate, user, pass, includeSameDay) {
   return { shops, accounts: accts.length };
 }
 
+// ── ДАШБОРД агрегатор (Фаза 1): оборот по ден + по клиент, издадени фактури, разлика.
+// Оборот = сумата на ЗАТВОРЕНИТЕ сметки (`total_sum` е с ДДС → нето = /1.2), групиран по
+// ден на затваряне и по клиент. Фактури = Invoices type_id 1 (не стокови 11), неанулирани.
+async function dashData(from, to, user, pass) {
+  const VAT = 1.2;
+  const inRange = d => d && d >= from && d <= to;
+  const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3000 }, user, pass);
+  let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
+  const byDay = {};        // "YYYY-MM-DD" → нето оборот
+  const byClient = {};     // client_id → { name, neto, n }
+  let totalNeto = 0, accountsN = 0;
+  for (const a of all) {
+    if (String(a.account_alias || "").includes("CLTEST")) continue;
+    const day = String(a.close_date || "").slice(0, 10);
+    if (!inRange(day)) continue;                       // само затворени в периода
+    const gross = Number(a.total_sum) || 0;
+    if (!gross) continue;
+    const neto = Math.round((gross / VAT) * 100) / 100;
+    const cid = a.client_id != null ? a.client_id : 0;
+    byDay[day] = Math.round(((byDay[day] || 0) + neto) * 100) / 100;
+    const c = byClient[cid] || (byClient[cid] = { name: a.client_name || ("клиент " + cid), neto: 0, n: 0 });
+    c.neto = Math.round((c.neto + neto) * 100) / 100; c.n++;
+    totalNeto = Math.round((totalNeto + neto) * 100) / 100; accountsN++;
+  }
+  // издадени ФАКТУРИ (type_id 1) по клиент в периода (нето)
+  const invByClient = {};
+  let invTotalNeto = 0;
+  try {
+    const ri = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 3000 }, user, pass);
+    let inv = ri.data || []; if (!Array.isArray(inv)) inv = Object.values(inv);
+    for (const x of inv) {
+      if (String(x.type_id) !== "1" || String(x.is_anulate) === "1") continue;
+      if (!inRange(String(x.create_date || "").slice(0, 10))) continue;
+      const cid = x.client_id != null ? x.client_id : 0;
+      const neto = Number(x.total_neto) || 0;
+      invByClient[cid] = Math.round(((invByClient[cid] || 0) + neto) * 100) / 100;
+      invTotalNeto = Math.round((invTotalNeto + neto) * 100) / 100;
+    }
+  } catch (e) { /* фактури по избор */ }
+  // клиентска таблица: оборот, фактурирано, разлика (липсва фактура)
+  const clients = Object.entries(byClient).map(([cid, c]) => {
+    const invoiced = invByClient[cid] || 0;
+    return { client_id: Number(cid), name: c.name, turnover: c.neto, accounts: c.n, invoiced, gap: Math.round((c.neto - invoiced) * 100) / 100 };
+  }).sort((a, b) => b.turnover - a.turnover);
+  return { from, to, total_neto: totalNeto, accounts: accountsN, by_day: byDay, invoiced_neto: invTotalNeto, clients };
+}
+
 // ── Зареждане ПО ГРАФИК (не по дата на затваряне, която закъснява). Обектът и
 // групата се разпознават ПО ID от регистъра CEX_OBJECTS (виж по-долу), не по име;
 // количествата = ПОСЛЕДНАТА реална заявка на обекта към датата. Графикът е на
@@ -407,6 +454,78 @@ header .d{font-size:15px;opacity:.93;margin-top:4px}
 </style></head><body>${inner}</body></html>`;
 }
 
+// ── HTML: ЦЕХ ДАШБОРД (Фаза 1) ────────────────────────────────────────────────
+function dashboardPage(data, k) {
+  const bg = n => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("bg-BG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const err = data && data.error;
+  const rows = err ? "" : (data.clients || []).map(c => `<tr><td class="n">${esc(c.name)}</td><td class="q">${bg(c.turnover)}</td><td class="q inv">${bg(c.invoiced)}</td><td class="q gap${c.gap > 0.5 ? " bad" : ""}">${bg(c.gap)}</td><td class="c">${c.accounts}</td></tr>`).join("");
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Цех · Дашборд</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}
+body{font:15px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#eef0f3;color:#14171a}
+header{background:linear-gradient(135deg,#374151,#1f2937);color:#fff;padding:16px 20px;position:sticky;top:0;z-index:5;box-shadow:0 2px 12px rgba(0,0,0,.18)}
+header h1{margin:0;font-size:22px;font-weight:800}
+header .d{font-size:14px;opacity:.9;margin-top:3px}
+.wrap{padding:16px;max-width:900px;margin:0 auto;display:grid;gap:16px}
+form.period{display:flex;gap:8px;align-items:end;flex-wrap:wrap;background:#fff;border-radius:12px;padding:12px 14px;box-shadow:0 2px 8px rgba(20,23,26,.08)}
+form.period label{font-size:12px;color:#555;display:block}
+form.period input{font:14px system-ui;padding:6px 8px;border:1px solid #d7dade;border-radius:7px}
+form.period button{font:14px system-ui;font-weight:700;padding:7px 14px;border:0;border-radius:7px;background:#374151;color:#fff;cursor:pointer}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpi{background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 2px 8px rgba(20,23,26,.08)}
+.kpi .l{font-size:12px;color:#7a8087;text-transform:uppercase;letter-spacing:.4px}
+.kpi .v{font-size:26px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums}
+.kpi.turn .v{color:#1f5b59}.kpi.inv .v{color:#8a6608}.kpi.gap .v{color:#b3121b}
+.card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(20,23,26,.08)}
+.card>h2{margin:0;font-size:15px;font-weight:800;color:#fff;background:#374151;padding:11px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.card>h2>span:not(.seg){font-size:12px;font-weight:600;opacity:.85}
+.seg{display:flex;gap:4px}.seg button{font:12px system-ui;font-weight:700;border:0;border-radius:6px;padding:4px 10px;cursor:pointer;background:rgba(255,255,255,.2);color:#fff}
+.seg button.on{background:#fff;color:#374151}
+table{width:100%;border-collapse:collapse}
+th,td{padding:9px 14px;font-size:14px;border-top:1px solid #f1f2f4;text-align:left}
+th{background:#f7f8fa;font-size:12px;color:#555;text-transform:uppercase;letter-spacing:.3px}
+td.q,th.q{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.q{font-weight:700}td.inv{color:#8a6608}td.gap{color:#1f7a3a}td.gap.bad{color:#b3121b;font-weight:800}
+td.c{text-align:right;color:#7a8087}
+tr:nth-child(even) td{background:#fafbfc}
+.note{color:#7a8087;font-size:12px;text-align:center;margin:2px 0 20px}
+.err{background:#fff;border-radius:12px;padding:24px;text-align:center;color:#b3121b}
+@media(max-width:520px){th,td{padding:8px 10px;font-size:13px}.kpi .v{font-size:22px}}
+</style></head><body>
+<header><h1>🍣 Цех · Дашборд</h1><div class="d">${err ? "грешка" : esc(data.from) + " – " + esc(data.to) + " · " + (data.accounts || 0) + " сметки · оборот без ДДС"}</div></header>
+<div class="wrap">
+<form class="period" method="get">
+  <input type="hidden" name="view" value="dashboard">${k ? `<input type="hidden" name="k" value="${esc(k)}">` : ""}
+  <div><label>от</label><input type="date" name="from" lang="bg-BG" value="${esc((data && data.from) || "")}"></div>
+  <div><label>до</label><input type="date" name="to" lang="bg-BG" value="${esc((data && data.to) || "")}"></div>
+  <button type="submit">Покажи</button>
+</form>
+${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>` : `
+<div class="kpis">
+  <div class="kpi turn"><div class="l">Оборот (без ДДС)</div><div class="v">${bg(data.total_neto)} €</div></div>
+  <div class="kpi inv"><div class="l">Фактурирано</div><div class="v">${bg(data.invoiced_neto)} €</div></div>
+  <div class="kpi gap"><div class="l">Без фактура</div><div class="v">${bg(data.total_neto - data.invoiced_neto)} €</div></div>
+  <div class="kpi"><div class="l">Сметки</div><div class="v">${data.accounts || 0}</div></div>
+</div>
+<div class="card"><h2>Оборот по период<span class="seg" id="seg"><button data-g="day" class="on">Ден</button><button data-g="week">Седмица</button><button data-g="month">Месец</button></span></h2>
+  <table><thead><tr><th>Период</th><th class="q">Оборот без ДДС</th></tr></thead><tbody id="bkt"></tbody></table></div>
+<div class="card"><h2>По клиенти<span>оборот · фактурирано · без фактура</span></h2>
+  <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Фактурирано</th><th class="q">Без фактура</th><th class="q">Сметки</th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="5" class="note">Няма затворени сметки в периода.</td></tr>'}</tbody></table></div>
+<div class="note">Оборот = затворените сметки (total_sum без ДДС). „Без фактура" = оборот − издадени фактури (тип 1). Стоковите разписки (тип 11) не се броят като фактури.</div>
+<script>
+var BYDAY=${err ? "{}" : JSON.stringify(data.by_day || {})};
+function bgn(n){return (Math.round((n||0)*100)/100).toLocaleString('bg-BG',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function wk(iso){var d=new Date(iso+'T12:00:00Z');var day=(d.getUTCDay()+6)%7;d.setUTCDate(d.getUTCDate()-day);return d.toISOString().slice(0,10)}
+function render(g){var buckets={};Object.keys(BYDAY).forEach(function(d){var key=g==='day'?d:g==='week'?('седм. от '+wk(d)):d.slice(0,7);buckets[key]=(buckets[key]||0)+BYDAY[d]});
+var keys=Object.keys(buckets).sort().reverse();var h='';keys.forEach(function(k){h+='<tr><td>'+k+'</td><td class="q">'+bgn(buckets[k])+' €</td></tr>'});
+document.getElementById('bkt').innerHTML=h||'<tr><td colspan="2" class="note">няма данни</td></tr>'}
+document.querySelectorAll('#seg button').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('#seg button').forEach(function(x){x.className=''});b.className='on';render(b.getAttribute('data-g'))})});
+render('day');
+</script>`}
+</div></body></html>`;
+}
+
 // ── HTML: репорт за наличности (суровини+заготовки) ───────────────────────────
 function stockPage(inner) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
@@ -553,6 +672,23 @@ module.exports = async function handler(req, res) {
   }
 
   // 2) Четящ екран за цеха (сървърно смята днешния план от днешните сметки).
+  // ── ЦЕХ ДАШБОРД (Фаза 1): оборот/фактури по период и клиент ──
+  if (req.method === "GET" && view === "dashboard") {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    const okV = [process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].some(t => t && q.k === t);
+    if (!okV) { res.status(403).send(dashboardPage({ error: "Липсва или грешен ключ в линка." }, "")); return; }
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).send(dashboardPage({ error: "Не е конфигуриран достъп до цеха." }, q.k)); return; }
+    const today = sofiaToday();
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 8) + "01"; // 1-во число на текущия месец
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
+    let data;
+    try { data = await dashData(from, to, user, pass); }
+    catch (e) { data = { from, to, error: "Не мога да прочета данните сега. Опитай пак след минута. (" + String(e && e.message) + ")" }; }
+    res.status(200).send(dashboardPage(data, q.k));
+    return;
+  }
+
   if (req.method === "GET" && view === "today") {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     const okV = [process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].some(t => t && q.k === t);
