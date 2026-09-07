@@ -677,7 +677,11 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     const acc = Number(body.account_id); if (!acc) { res.status(400).json({ ok: false, error: "no_account_id" }); return; }
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    // Стоковата е документ за деня на изписване → НЕ бъдеща дата (Barsy отказва бъдеща
+    // дата с обща „непредвидена грешка"). Затова я ограничаваме най-късно до ДНЕС.
+    const today = sofiaToday();
+    let date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : today;
+    if (date > today) date = today;
     const DT = 11; // стокова разписка
     // 1) зареди формата (хедър полета + грид с редовете, вече с партида)
     const load = await cexCallRoot({ invoices_edit: { params: { bid: 1, doc_type: DT, gen_mode: 1, account_id: acc } } }, user, pass);
@@ -755,22 +759,6 @@ module.exports = async function handler(req, res) {
     const scheduled = s.shops.filter(x => x.scheduled).length;
     res.status(200).json({ ok: true, date, dow: s.dow, seeded_accounts: s.shops.length, scheduled_count: scheduled,
       shops: s.shops.map(x => ({ account_id: x.account_id, last_date: x.last_date, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, scheduled: x.scheduled, order: sortObj(x.order || {}, 2) })) });
-    return;
-  }
-
-  // ── ВРЕМЕНЕН: документите на сметка (има ли стокова?) ──
-  if (body.action === "inv_probe") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    let out = {};
-    // 1) полетата на сметка от Accounts_getlist (дали има флаг за фактура/стокова)
-    try { const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3 }, user, pass); let a = r.data; a = Array.isArray(a) ? a : Object.values(a || {}); out.acct_keys = a[0] ? Object.keys(a[0]) : []; out.acct_sample = a[0] || null; }
-    catch (e) { out.acct_err = String(e && e.message); }
-    // 2) документите на конкретни сметки (2888 имаше стокова, 2937 вероятно няма)
-    for (const id of [Number(body.a1) || 2888, Number(body.a2) || 2937]) {
-      try { const r = await cexCall("Accounts_account_documents", { id }, user, pass); out["docs_" + id] = JSON.stringify(r.data).slice(0, 900); }
-      catch (e) { out["docs_" + id] = "ERR " + String(e && e.message); }
-    }
-    res.status(200).json({ ok: true, out });
     return;
   }
 
