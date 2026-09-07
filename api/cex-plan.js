@@ -226,7 +226,11 @@ async function scheduleSeed(dateIso, user, pass) {
     if (!seen[key] || closedOf(a) > closedOf(seen[key])) seen[key] = a;
   }
   const entries = Object.values(seen);
-  const shops = await mapLimit(entries, 6, async (a) => {
+  // Резерва за ПЛАНИРАНЕ НАПРЕД: ако денят още няма затворени сметки (утрешен разнос),
+  // тикаме активните от последните N дни — последната им затворена поръчка като база.
+  const cutoff = new Date(dateIso + "T00:00:00Z"); cutoff.setUTCDate(cutoff.getUTCDate() - 14);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  let shops = await mapLimit(entries, 6, async (a) => {
     const g = (cexObj(a) || {}).group || "adhoc";
     const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
     const order = {};
@@ -236,10 +240,14 @@ async function scheduleSeed(dateIso, user, pass) {
     }
     const lastStr = closedOf(a);
     const hasOrder = Object.values(order).some(v => v > 0);
-    // ТИКНАТ = обектът има ЗАТВОРЕНА сметка ТОЧНО на избраната дата (реален разнос за
-    // деня). Обект със стара затворена сметка се показва, но не се тика (справка).
-    return { account_id: a.account_id, last_date: lastStr, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group: g, scheduled: lastStr === dateIso && hasOrder, order };
+    const onDate = lastStr === dateIso;            // затворена ТОЧНО на деня = реален разнос
+    const recent = lastStr >= cutoffStr;           // активен в последните 14 дни (за прогноза)
+    return { account_id: a.account_id, last_date: lastStr, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group: g, onDate, recent, hasOrder, order };
   });
+  // Ако денят ИМА затворени сметки (минал/реален ден) → тикаме само точните за деня.
+  // Иначе (планиране напред) → тикаме активните от последните 14 дни като прогноза.
+  const anyOnDate = shops.some(s => s.onDate && s.hasOrder);
+  for (const s of shops) s.scheduled = s.hasOrder && (anyOnDate ? s.onDate : s.recent);
   // Подредба: първо дължимите днес, после по група, после по име.
   const grank = { sibies: 0, merkanto: 1, haskovo: 2, adhoc: 3 };
   shops.sort((x, y) => (Number(y.scheduled) - Number(x.scheduled)) || ((grank[x.group] || 9) - (grank[y.group] || 9)) || String(x.rep || x.client || "").localeCompare(String(y.rep || y.client || ""), "bg"));
