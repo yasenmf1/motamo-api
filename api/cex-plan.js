@@ -205,10 +205,10 @@ async function dashData(from, to, expenses, user, pass) {
   const arrOf = x => { let d = x && x.data; d = Array.isArray(d) ? d : (d && (d.list || (typeof d === "object" ? Object.values(d) : []))) || []; return Array.isArray(d) ? d : []; };
   // 5-те четения ПАРАЛЕЛНО (иначе последователно надхвърля таймаута); всяко със свой 9с.
   const [accR, invR, artR, ordR, stoR] = await Promise.all([
-    cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3000 }, user, pass),
-    cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 3000 }, user, pass).catch(() => ({ data: [] })),
+    cexCall("Accounts_getlist", { order_by: "account_id desc", length: 8000 }, user, pass),
+    cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 5000 }, user, pass).catch(() => ({ data: [] })),
     cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["avg_delivery_price"] }, user, pass).catch(() => ({ data: [] })),
-    cexCall("Orders_getlist", { order_by: "date desc", length: 5000 }, user, pass).catch(() => ({ data: [] })),
+    cexCall("Orders_getlist", { order_by: "date desc", length: 10000 }, user, pass).catch(() => ({ data: [] })),
     cexCall("Storeloads_getlist", { order_by: "store_load_id desc", length: 2000, extra_properties: ["all"] }, user, pass).catch(() => ({ data: [] }))
   ]);
   let all = arrOf(accR);
@@ -528,7 +528,7 @@ form.period button{font:14px system-ui;font-weight:700;padding:7px 14px;border:0
 .kpi .l{font-size:12px;color:#7a8087;text-transform:uppercase;letter-spacing:.4px}
 .kpi .v{font-size:26px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums}
 .kpi.turn .v{color:#1f5b59}.kpi.inv .v{color:#8a6608}.kpi.gap .v{color:#b3121b}
-.kpi.cost .v{color:#b06a00}.kpi.exp .v{color:#7a4b8a}.kpi.res .v{color:#0a6b2e}
+.kpi.cost .v{color:#b06a00}.kpi.exp .v{color:#7a4b8a}.kpi.res .v{color:#0a6b2e}.kpi.load .v{color:#2b6ca3}
 .card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(20,23,26,.08)}
 .card>h2{margin:0;font-size:15px;font-weight:800;color:#fff;background:#374151;padding:11px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .card>h2>span:not(.seg){font-size:12px;font-weight:600;opacity:.85}
@@ -557,11 +557,12 @@ tr:nth-child(even) td{background:#fafbfc}
 ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>` : `
 <div class="kpis">
   <div class="kpi turn"><div class="l">Оборот (без ДДС)</div><div class="v">${bg(data.total_neto)} €</div></div>
-  <div class="kpi cost"><div class="l">Себестойност</div><div class="v">${bg(data.cogs)} €</div></div>
+  <div class="kpi cost"><div class="l">Себестойност${data.units_truncated ? " ⚠" : ""}</div><div class="v">${data.units_truncated ? "~" : ""}${bg(data.cogs)} €</div></div>
   <div class="kpi exp"><div class="l">Разходи</div><div class="v">${bg(data.expenses)} €</div></div>
-  <div class="kpi res"><div class="l">Резултат</div><div class="v">${bg(data.result)} €</div></div>
+  <div class="kpi res"><div class="l">Резултат${data.units_truncated ? " ⚠" : ""}</div><div class="v">${data.units_truncated ? "~" : ""}${bg(data.result)} €</div></div>
   <div class="kpi inv"><div class="l">Фактурирано</div><div class="v">${bg(data.invoiced_neto)} €</div></div>
   <div class="kpi gap"><div class="l">Без фактура</div><div class="v">${bg(data.total_neto - data.invoiced_neto)} €</div></div>
+  <div class="kpi load"><div class="l">Зареждания</div><div class="v">${bg(data.loads_neto)} €</div></div>
   <div class="kpi"><div class="l">Сметки</div><div class="v">${data.accounts || 0}</div></div>
 </div>
 <div class="card"><h2>Оборот по период<span class="seg" id="seg"><button data-g="day" class="on">Ден</button><button data-g="week">Седмица</button><button data-g="month">Месец</button></span></h2>
@@ -572,6 +573,9 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
 <div class="card"><h2>Продадени артикули · себестойност<span>${(data.products || []).length} вида${data.units_truncated ? " · ⚠ частично" : ""}</span></h2>
   <table><thead><tr><th>Артикул</th><th class="q">Бройки</th><th class="q">Себест./бр</th><th class="q">Обща себест.</th></tr></thead>
   <tbody>${(data.products || []).map(p => `<tr><td class="n">${esc(p.name)}</td><td class="c">${bg(p.units)}</td><td class="q inv">${bg(p.unit_cost)}</td><td class="q">${bg(p.total_cost)}</td></tr>`).join("") || '<tr><td colspan="4" class="note">Няма продажби в периода.</td></tr>'}</tbody></table></div>
+<div class="card"><h2>Зареждания по доставчик<span>${(data.suppliers || []).length} доставчика · ${data.loads_count || 0} документа</span></h2>
+  <table><thead><tr><th>Доставчик</th><th class="q">Сума без ДДС</th></tr></thead>
+  <tbody>${(data.suppliers || []).map(s => `<tr><td class="n">${esc(s.name)}</td><td class="q">${bg(s.neto)}</td></tr>`).join("") || '<tr><td colspan="2" class="note">Няма зареждания в периода.</td></tr>'}</tbody></table></div>
 <div class="note">Всичко е <b>без ДДС</b>. Оборот = затворените сметки (total_sum/1.2). „Без фактура" = оборот − фактури (тип 1); стоковите разписки (тип 11) не са фактури. Себестойност = Barsy avg_delivery_price × бройки; <b>зависи от коректно зареден склад</b> (докато складът не се води, е ориентировъчна). Резултат = оборот − себестойност − разходи.${data.units_truncated ? " ⚠ Бройките за този период са частични (много редове) — стесни периода за точни числа." : ""}</div>
 <script>
 var BYDAY=${err ? "{}" : JSON.stringify(data.by_day || {})};
@@ -740,7 +744,7 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).send(dashboardPage({ error: "Не е конфигуриран достъп до цеха." }, q.k)); return; }
     const today = sofiaToday();
-    const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 8) + "01"; // 1-во число на текущия месец
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 4) + "-01-01"; // по подразбиране от 1 януари
     const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
     const expenses = Number(q.exp) || 0;
     let data;
@@ -856,36 +860,6 @@ module.exports = async function handler(req, res) {
   const allowed = isWrite ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
-
-  // ── ВРЕМЕНЕН: Orders страниране (start/offset) + обхват на прозореца ──
-  if (body.action === "ord_probe") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    const out = {};
-    const span = async (label, p) => { try { const r = await cexCall("Orders_getlist", p, user, pass); let a = r.data || []; if (!Array.isArray(a)) a = Object.values(a); const dates = a.map(o => String(o.date || "").slice(0, 10)).filter(Boolean).sort(); out[label] = { n: a.length, oldest: dates[0], newest: dates[dates.length - 1], first_id: a[0] && a[0].order_id, last_id: a[a.length - 1] && a[a.length - 1].order_id }; } catch (e) { out[label] = "ERR " + String(e && e.message); } };
-    await span("p0_len5000", { order_by: "date desc", length: 5000 });
-    await span("p1_start5000", { order_by: "date desc", length: 5000, start: 5000 });
-    await span("p1_offset5000", { order_by: "date desc", length: 2000, offset: 5000 });
-    res.status(200).json({ ok: true, out });
-    return;
-  }
-
-  // ── ВРЕМЕНЕН: проби на зареждания (Storeloads) за Фаза 3 ──
-  if (body.action === "load_probe") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    const out = {};
-    try {
-      const r = await cexCall("Storeloads_getlist", { order_by: "store_load_id desc", length: 5, extra_properties: ["all"] }, user, pass);
-      let L = r.data || []; if (!Array.isArray(L)) L = Object.values(L);
-      out.list_keys = L[0] ? Object.keys(L[0]) : []; out.list_sample = L.slice(0, 2);
-      const id = L[0] && (L[0].store_load_id || L[0].id);
-      out.newest_id = id;
-      for (const m of ["Storeloads_get", "Storeloads_getdetails", "Storeloads_movements"]) {
-        try { const rr = await cexCall(m, { id }, user, pass); out[m] = JSON.stringify(rr.data).slice(0, 700); } catch (e) { out[m] = "ERR " + String(e && e.message); }
-      }
-    } catch (e) { out.err = String(e && e.message); }
-    res.status(200).json({ ok: true, out });
-    return;
-  }
 
   // ── ДИАГНОСТИК (само четене): затворени сметки на дата (реалният разнос) ──
   if (body.action === "closed_on") {
