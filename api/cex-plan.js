@@ -164,6 +164,32 @@ async function seedShops(date, user, pass) {
   }));
   return { shops, accounts: accts.length };
 }
+// Кухненски екран ПО РАЗНОС ДЕН (работим ден напред): за разнос ден D показваме
+// сметките, направени в навечерието (create_date == D−1, още отворени), плюс вече
+// затворените за D (close_date/ref_date == D). Barsy не пуска бъдеща дата на сметка,
+// затова разнос-денят се извежда от деня на правене + 1, не от датата на сметката.
+async function seedRazos(razosDate, user, pass) {
+  const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 900 }, user, pass);
+  let all = list.data || []; if (!Array.isArray(all)) all = Object.values(all);
+  const prev = isoPlusDays(razosDate, -1);
+  const accts = all.filter(a => {
+    const cd = String(a.create_date || "").slice(0, 10);
+    const cl = String(a.close_date || "").slice(0, 10);
+    const rf = String(a.ref_date || "").slice(0, 10);
+    return cl === razosDate || rf === razosDate || (!cl && cd === prev);
+  });
+  const shops = await Promise.all(accts.map(async (a) => {
+    const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
+    const order = {};
+    for (const o of (rows.data || [])) {
+      const art = byId(o.article_id) || resolve(o.article_name);
+      if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + (Number(o.amount) || 0);
+    }
+    const group = (cexObj(a) || {}).group || "adhoc";
+    return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group, order };
+  }));
+  return { shops, accounts: accts.length };
+}
 
 // ── Зареждане ПО ГРАФИК (не по дата на затваряне, която закъснява). Обектът и
 // групата се разпознават ПО ID от регистъра CEX_OBJECTS (виж по-долу), не по име;
@@ -524,9 +550,11 @@ module.exports = async function handler(req, res) {
     if (!okV) { res.status(403).send(todayPage(`<div class="wrap"><h2>Няма достъп</h2><p>Липсва или грешен ключ в линка.</p></div>`)); return; }
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).send(todayPage(`<div class="wrap">Не е конфигуриран достъп до цеха.</div>`)); return; }
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(q.date || "") ? q.date : sofiaToday();
+    // Работим ДЕН НАПРЕД: екранът е за УТРЕШНИЯ разнос по подразбиране; чете сметките,
+    // направени днес (навечерието). ?date= задава изрично разнос ден.
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(q.date || "") ? q.date : isoPlusDays(sofiaToday(), 1);
     let seed;
-    try { seed = await seedShops(date, user, pass); }
+    try { seed = await seedRazos(date, user, pass); }
     catch (e) { res.status(200).send(todayPage(`<div class="wrap"><h2>Грешка</h2><p>Не мога да прочета сметките сега. Опитай пак след минута.</p></div>`)); return; }
     const { agg, rolls, zag } = compute(seed.shops);
     const sets = {}; for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set) sets[name] = qty; }
@@ -544,9 +572,9 @@ module.exports = async function handler(req, res) {
     const routeCard = activeCities.length ? `<div class="card route"><h2>По маршрут<span class="cnt">${activeCities.map(([, l]) => l).join(" · ")}</span></h2><div class="scroll"><table>${routeHead}${routeBody}</table></div></div>` : "";
     const empty = !Object.keys(rolls).length && !Object.keys(sets).length;
     res.status(200).send(todayPage(`
-      <header><h1>🍣 Цех · за днес</h1><div class="d">${esc(date)} · ${seed.accounts} магазина · обновено ${esc(sofiaTime())}</div></header>
+      <header><h1>🍣 Цех · за разнос ${esc(date)}</h1><div class="d">производство днес · ${seed.accounts} магазина · обновено ${esc(sofiaTime())}</div></header>
       <div class="wrap">${empty
-        ? `<div class="empty"><h2>Още няма заявки за днес</h2><p>Когато влязат сметките, тук се показва какво да се произведе.<br>Страницата се обновява сама.</p></div>`
+        ? `<div class="empty"><h2>Още няма заявки за ${esc(date)}</h2><p>Когато направиш сметките за разноса, тук се показва какво да се произведе.<br>Страницата се обновява сама.</p></div>`
         : `${routeCard}${card("sets", "Сетове (общо)", sets)}${card("rolls", "Ролки / поке (общо)", rolls)}${card("zag", "Заготовки (общо)", zag)}
         <div class="note">Обновява се сам на всеки 3 минути · „По маршрут" = продуктите за всеки град · долните карти са общо за всички</div>`}</div>`));
     return;
