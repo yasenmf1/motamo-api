@@ -248,6 +248,11 @@ async function scheduleSeed(dateIso, user, pass) {
   // Иначе (планиране напред) → тикаме активните от последните 14 дни като прогноза.
   const anyOnDate = shops.some(s => s.onDate && s.hasOrder);
   for (const s of shops) s.scheduled = s.hasOrder && (anyOnDate ? s.onDate : s.recent);
+  // Скриваме обекти без поръчка от >30 дни (за да не се тъпче решетката със стари справки).
+  // Тикнатите остават винаги; стар обект се появява пак сам, щом му дойде затворена сметка.
+  const staleCut = new Date(dateIso + "T00:00:00Z"); staleCut.setUTCDate(staleCut.getUTCDate() - 30);
+  const staleCutStr = staleCut.toISOString().slice(0, 10);
+  shops = shops.filter(s => s.scheduled || s.last_date >= staleCutStr);
   // Подредба: първо дължимите днес, после по група, после по име.
   const grank = { sibies: 0, merkanto: 1, haskovo: 2, adhoc: 3 };
   shops.sort((x, y) => (Number(y.scheduled) - Number(x.scheduled)) || ((grank[x.group] || 9) - (grank[y.group] || 9)) || String(x.rep || x.client || "").localeCompare(String(y.rep || y.client || ""), "bg"));
