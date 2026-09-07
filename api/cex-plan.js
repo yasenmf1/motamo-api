@@ -800,11 +800,11 @@ module.exports = async function handler(req, res) {
   if (body.action === "dash_probe") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     const out = {};
-    const one = async (m, p) => { try { const r = await cexCall(m, p, user, pass); let d = r.data; d = Array.isArray(d) ? d : (d && (d.list || (typeof d === "object" ? Object.values(d) : d))); const arr = Array.isArray(d) ? d : []; out[m] = { n: arr.length, keys: arr[0] ? Object.keys(arr[0]) : Object.keys(r.data || {}), sample: arr[0] || r.data }; } catch (e) { out[m] = "ERR " + String(e && e.message); } };
-    await one("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["store_amount"] });
-    // може ли Orders_getlist да върне период наведнъж (не по сметка)?
-    await one("Orders_getlist", { filters: { create_date_from: "2026-09-01", create_date_to: "2026-09-07" } });
-    await one("Orders_getlist", { filters: {}, order_by: "order_id desc", length: 3 });
+    const one = async (label, m, p) => { try { const r = await cexCall(m, p, user, pass); let d = r.data; d = Array.isArray(d) ? d : (d && (d.list || (typeof d === "object" ? Object.values(d) : d))); const arr = Array.isArray(d) ? d : []; out[label] = { n: arr.length, sample: arr[0] || r.data }; } catch (e) { out[label] = "ERR " + String(e && e.message); } };
+    // avg_delivery_price за меню артикули (CET KAWA 81, NACHI ORO 75)
+    await one("articles_cost", "Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["store_amount", "avg_delivery_price"] });
+    await one("orders_periodfilter", "Orders_getlist", { filters: { create_date_from: "2026-09-01", create_date_to: "2026-09-07" } });
+    await one("orders_datefilter", "Orders_getlist", { filters: { date_from: "2026-09-01", date_to: "2026-09-07" } });
     res.status(200).json({ ok: true, out: JSON.parse(JSON.stringify(out).slice(0, 4000)) });
     return;
   }
