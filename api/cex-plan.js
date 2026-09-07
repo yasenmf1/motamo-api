@@ -782,15 +782,12 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // ── ВРЕМЕНЕН: пълен отговор Accounts_account_documents за 1 сметка ──
+  // ── ВРЕМЕНЕН: последните стокови (doc_type 11) — виж receiver_id спрямо обект ──
   if (body.action === "acct_docs") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    const id = Number(body.a1) || 2937;
-    const r = await cexCall("Accounts_account_documents", { id }, user, pass);
-    // намери масиви с документи (елементи с inv_id/type_id/doc_num)
-    const found = [];
-    (function w(n) { if (!n || typeof n !== "object") return; if (Array.isArray(n)) { if (n.length && n[0] && typeof n[0] === "object" && (n[0].inv_id != null || n[0].type_id != null || n[0].doc_num != null || n[0].num != null)) found.push(n); return n.forEach(w); } for (const k in n) w(n[k]); })(r.data);
-    res.status(200).json({ ok: true, id, doc_arrays: found.slice(0, 3), full: JSON.stringify(r.data).length > 4000 ? "(too big " + JSON.stringify(r.data).length + ")" : r.data });
+    const r = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 25 }, user, pass);
+    let a = r.data; a = Array.isArray(a) ? a : Object.values(a || {});
+    res.status(200).json({ ok: true, recent: a.filter(x => String(x.type_id) === "11").map(x => ({ inv_id: x.inv_id, inv_num: x.inv_num, client_id: x.client_id, receiver_id: x.receiver_id, create_date: x.create_date, total_all: x.total_all, is_anulate: x.is_anulate })) });
     return;
   }
 
