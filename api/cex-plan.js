@@ -679,7 +679,7 @@ function render(g){var b=bucketize(g);var keys=Object.keys(b).sort();
 }
 document.querySelectorAll('#seg button').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('#seg button').forEach(function(x){x.className=''});b.className='on';render(b.getAttribute('data-g'))})});
 render('month');
-if(window.Chart){var top=CLIENTS.slice().sort(function(a,b){return b.t-a.t});var lead=top.slice(0,7);var rest=top.slice(7).reduce(function(s,c){return s+c.t},0);
+if(window.Chart){var scl=CLIENTS.slice().sort(function(a,b){return b.t-a.t});var lead=scl.slice(0,7);var rest=scl.slice(7).reduce(function(s,c){return s+c.t},0);
   var labels=lead.map(function(c){return c.name});var vals=lead.map(function(c){return Math.round(c.t*100)/100});
   if(rest>0){labels.push('други');vals.push(Math.round(rest*100)/100)}
   var cols=['#1f5b59','#2b6ca3','#b06a00','#7a4b8a','#0a6b2e','#b3121b','#8a6608','#9aa0a6'];
