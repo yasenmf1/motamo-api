@@ -684,7 +684,7 @@ if(window.Chart){var top=CLIENTS.slice().sort(function(a,b){return b.t-a.t});var
   if(rest>0){labels.push('други');vals.push(Math.round(rest*100)/100)}
   var cols=['#1f5b59','#2b6ca3','#b06a00','#7a4b8a','#0a6b2e','#b3121b','#8a6608','#9aa0a6'];
   new Chart(document.getElementById('cClients'),{type:'doughnut',data:{labels:labels,datasets:[{data:vals,backgroundColor:cols,borderWidth:2,borderColor:'#fff'}]},
-    options:{responsive:true,maintainAspectRatio:false,cutout:'58%',plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}},tooltip:{callbacks:{label:function(c){var s=c.dataset.data.reduce(function(a,b){return a+b},0);return c.label+': '+bgn(c.parsed)+' € ('+(s?Math.round(c.parsed/s*100):0)+'%)'}}}}});}
+    options:{responsive:true,maintainAspectRatio:false,cutout:'58%',plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}},tooltip:{callbacks:{label:function(c){var s=c.dataset.data.reduce(function(a,b){return a+b},0);return c.label+': '+bgn(c.parsed)+' € ('+(s?Math.round(c.parsed/s*100):0)+'%)'}}}}}});}
 // топ артикули по оборот/печалба (#5)
 function renderProducts(s){var body=document.getElementById('prodrows');if(!body)return;
   var arr=PRODUCTS.slice().sort(function(a,b){return (b[s]||0)-(a[s]||0)});
