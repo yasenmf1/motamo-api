@@ -918,7 +918,7 @@ h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.
 <span class="grp"><label>Зареди</label><input id="date" type="date" lang="bg-BG"><b class="dlab" id="dlab"></b><button onclick="seed()">По ден</button><button class="alt" onclick="schedSeed()">По график</button></span>
 <span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="window.print()">Печат</button></span>
 <span class="grp"><label>Партида</label><input id="pdate" type="date" lang="bg-BG" title="Партида L.<тази дата>, срок +3 дни"><b class="dlab" id="plab"></b></span>
-<span class="grp"><button class="prod" onclick="doProduce()">① Производство</button><button class="acc" onclick="doAccounts()">② Сметки</button><button class="alt" onclick="loadAccounts()" title="Изтегля реалните сметки за разнос-деня от „Зареди" (с текущите количества) — за ③ Стокова">↻ Изтегли сметки</button><button class="alt" onclick="loadByLot()" title="Изтегля сметките, ползвали производствената партида L.<деня от „Зареди"> (±2 дни) — за ③ Стокова по партида">↻ По партида</button><button class="acc" onclick="doStokova()">③ Стокова</button></span></header>
+<span class="grp"><button class="prod" onclick="doProduce()">① Производство</button><button class="acc" onclick="doAccounts()">② Сметки</button><button class="alt" onclick="loadByLot()" title="Изтегля сметките, ползвали производствената партида L.<деня от „Зареди"> (±2 дни), през реалните движения — 100% точно за стари сметки. За ③ Стокова.">↻ Изтегли сметки (по партида)</button><button class="acc" onclick="doStokova()">③ Стокова</button></span></header>
 <div class="wrap"><div id="msg" class="msg"></div><div class="scroll"><table id="grid"></table></div><div id="planbox"></div></div>
 <script>
 var MENU=${JSON.stringify(MENU)};var shops=[];var LASTACC=[];var $=function(id){return document.getElementById(id)};
@@ -954,12 +954,9 @@ function tbl(t,o){var ks=Object.keys(o||{});if(!ks.length)return '';var h='<tabl
 function renderPlan(j){$('planbox').innerHTML='<h2>За производство</h2><div class="plan">'+tbl('Сетове',j.produce_sets)+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
 function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy за '+sel.length+' магазина:\\n• първо заготовки (майонези, сосове…), после ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (заготовки → ролки → сетове)');api({action:'produce_plan',shops:sel,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.zagotovki&&j.zagotovki.error)||(j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||j.error||j.message||''),'err');return}var zp=(j.zagotovki&&j.zagotovki.produced&&j.zagotovki.produced.length)||0,zs=(j.zagotovki&&j.zagotovki.skipped&&j.zagotovki.skipped.length)||0,ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;msg('✓ Производството е създадено. Партида '+j.lot+' · заготовки: '+zp+' произв.'+(zs?(' ('+zs+' без рецепта, прескочени)'):'')+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+'. Провери в касата и „Приключи", ако е ок.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value||$('date').value;var lot=pd?('L.'+pd.split('-').reverse().join('.')):'';if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy за '+sel.length+' магазина'+(lot?(', ВЕЧЕ с партида '+lot):'')+'.\\nЦените ги слага Barsy по правилото на клиента.\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;sel.forEach(function(s,i){if(cr[i]&&cr[i].account_id)s.account_id=cr[i].account_id});LASTACC=cr.filter(function(c){return c.ok&&c.account_id}).map(function(c){return c.account_id});msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. После натисни ③ Стокова.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
-// Тегли по датата от календара (полето „Зареди") = деня на разноса. Вади сметките,
-// направени в навечерието (за този разнос) + затворените за деня.
-function loadAccounts(){var d=$('date').value;msg('Изтеглям реалните сметки за разнос '+d+'…');api({action:'load_accounts',date:d}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}shops=j.shops||[];renderGrid();$('planbox').innerHTML='';if(!shops.length){msg('Няма сметки за разнос '+j.date+'. (Сметките се правят в навечерието — избери верния ден горе в „Зареди".)','err');return}var sc=shops.filter(function(s){return s.has_stokova}).length;msg('Изтеглени '+shops.length+' реални сметки за разнос '+j.date+'. '+(sc?(sc+' вече имат стокова (червено „С", разтикнати). '):'')+'Тикни които искаш и натисни ③ Стокова.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 // Тегли сметките, ползвали производствената ПАРТИДА L.<деня от „Зареди"> (±2 дни).
 function loadByLot(){var d=$('date').value;var lot='L.'+(d?d.split('-').reverse().join('.'):'');msg('Търся сметките с партида '+lot+' (±2 дни)…');api({action:'load_by_lot',date:d}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}shops=j.shops||[];renderGrid();$('planbox').innerHTML='';if(!shops.length){msg('Няма сметки с партида '+(j.lot||lot)+'. (Провери деня в „Зареди" и че има производство с тази партида.)','err');return}var sc=shops.filter(function(s){return s.has_stokova}).length;msg('Партида '+(j.lot||lot)+': '+shops.length+' сметки я ползват. '+(sc?(sc+' вече имат стокова (червено „С", разтикнати). '):'')+'Тикни които искаш и натисни ③ Стокова.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
-function doStokova(){var sel=selShops().filter(function(s){return s.account_id});if(!sel.length){msg('Няма сметки за стокова. Натисни „↻ Изтегли сметки" (или ② Сметки), после тикни обектите.','err');return}var pd=$('pdate').value||$('date').value;if(!confirm('Ще СЪЗДАМ стокови за '+sel.length+' обекта (една по една), с дата '+pd+'.\\nПродължавам?'))return;var i=0,okc=0,errs=[];
+function doStokova(){var sel=selShops().filter(function(s){return s.account_id});if(!sel.length){msg('Няма сметки за стокова. Натисни „↻ Изтегли сметки (по партида)" (или ② Сметки), после тикни обектите.','err');return}var pd=$('pdate').value||$('date').value;if(!confirm('Ще СЪЗДАМ стокови за '+sel.length+' обекта (една по една), с дата '+pd+'.\\nПродължавам?'))return;var i=0,okc=0,errs=[];
 function nextStok(){if(i>=sel.length){msg('✓ Стокови: '+okc+'/'+sel.length+' готови'+(errs.length?(' · грешки: '+errs.join(' | ')):''),errs.length?'err':'ok');return}var s=sel[i];msg('Правя стокова '+(i+1)+'/'+sel.length+' ('+shortName(s.client,s.rep)+')…');api({action:'create_stokova',account_id:s.account_id,date:pd}).then(function(j){if(j.ok)okc++;else errs.push('#'+s.account_id+': '+(j.error||''));i++;nextStok()}).catch(function(e){errs.push('#'+s.account_id+': мрежа');i++;nextStok()})}
 nextStok()}
 function renderCreated(cr){var h='<h2>Създадени сметки</h2><table><tr><th class="shop">Магазин</th><th>сметка №</th><th>артикули</th><th>статус</th></tr>';cr.forEach(function(c){var full=(c.client||'')+(c.rep?(' · '+c.rep):'');h+='<tr><td class="shop" title="'+esc(full)+'">'+esc(shortName(c.client,c.rep))+'</td><td>'+(c.account_id||'—')+'</td><td>'+(c.items||0)+'</td><td>'+(c.ok?'✓':esc(c.skipped||'грешка'))+'</td></tr>'});$('planbox').innerHTML=h+'</table>'}
@@ -1230,45 +1227,8 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // ── ИЗТЕГЛИ СМЕТКИ за разнос ден (реалните, вече коригирани сметки — за ③ Стокова) ──
-  // Чете съществуващите сметки за разноса (направени в навечерието + затворените за деня),
-  // с техните account_id и ТЕКУЩИ количества (след ръчните допълвания). Всички тикнати.
-  // Освен това маркира кои вече имат ИЗДАДЕНА стокова (по клиент+дата+сума → червено „С").
-  if (body.action === "load_accounts") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
-    let s;
-    // Без same-day: сметка, направена в деня D, е за разноса D+1 → не влиза в разнос D.
-    try { s = await seedRazos(date, user, pass); }
-    catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
-    // издадени стокови (doc_type 11, неанулирани) около тази дата → суми по клиент.
-    // Прозорец ±2 дни, защото датата на стоковата може да се разминава с деня на
-    // затваряне на сметката (напр. сметка затворена 07.09, стокова издадена 08.09).
-    const okDates = {}; for (let k = -2; k <= 2; k++) okDates[isoPlusDays(date, k)] = 1;
-    let stok = {}; // client_id → [total_all,…]
-    try {
-      const r = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 400 }, user, pass);
-      let inv = r.data; inv = Array.isArray(inv) ? inv : Object.values(inv || {});
-      for (const x of inv) {
-        if (String(x.type_id) !== "11" || String(x.is_anulate) === "1") continue;
-        if (!okDates[String(x.create_date || "").slice(0, 10)]) continue;
-        (stok[x.client_id] = stok[x.client_id] || []).push(Number(x.total_all) || 0);
-      }
-    } catch (e) { stok = {}; }
-    // маркер: има стокова със същата сума за клиента (в рамките на ±0.05); „изразходваме" я,
-    // за да не маркира два обекта от една сметка (при различни суми).
-    const hasStok = (sh) => {
-      const arr = stok[sh.client_id]; if (!arr || !arr.length) return false;
-      const i = arr.findIndex(t => Math.abs(t - (sh.total || 0)) < 0.05);
-      if (i < 0) return false; arr.splice(i, 1); return true;
-    };
-    res.status(200).json({ ok: true, date, seeded_accounts: s.shops.length,
-      shops: s.shops.map(x => { const hs = hasStok(x); return { account_id: x.account_id, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, total: x.total, has_stokova: hs, scheduled: !hs, order: sortObj(x.order || {}, 2) }; }) });
-    return;
-  }
-
-  // ── Изтегля сметките, ползвали ПАРТИДА L.<дата> (за ③ Стокова по производствена партида).
+  // ── ИЗТЕГЛИ СМЕТКИ за ③ Стокова — ПО ПАРТИДА L.<дата> (замени date-базирания load_accounts,
+  // защото партидата дава 100% точните сметки по стари дати чрез реалните движения).
   // Партида→сметка през справка Reports_lot_list_details (движения „AC", ref_id=сметка).
   if (body.action === "load_by_lot") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
