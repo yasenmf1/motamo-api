@@ -182,16 +182,16 @@ function cexDueOn(group, dow) {
 // никога грешка. Обект извън регистъра НЕ се показва (клиентският ред „СИБИЕС ООД"
 // без обект, тестови/непознати обекти). group sibies/merkanto/haskovo имат график;
 // adhoc се показва, но не се тика (излиза само при реална поръчка). Собственикът
-// потвърди списъка 2026-09-07 (без СИБИЕС „Три чучура 13а" pid 7 — не се зарежда).
+// потвърди списъка 2026-09-07 (вкл. СИБИЕС „Три чучура 13а" pid 7 и Казанлък pid 13).
 const CEX_OBJECTS = {
   // Хасково — ХАЙ ЛЕВЕЛ ЛИМИТЕД (клиент 9, без под-обект)
   "9:": { group: "haskovo" },
   // Стара Загора и региона — СИБИЕС ООД (клиент 2)
   "2:1": { group: "sibies" },  "2:2": { group: "sibies" },  "2:3": { group: "sibies" },
   "2:4": { group: "sibies" },  "2:5": { group: "sibies" },  "2:6": { group: "sibies" },
-  "2:8": { group: "sibies" },  "2:9": { group: "sibies" },  "2:10": { group: "sibies" },
-  "2:11": { group: "sibies" }, "2:12": { group: "sibies" }, "2:13": { group: "sibies" },
-  "2:14": { group: "sibies" }, "2:15": { group: "sibies" },
+  "2:7": { group: "sibies" },  "2:8": { group: "sibies" },  "2:9": { group: "sibies" },
+  "2:10": { group: "sibies" }, "2:11": { group: "sibies" }, "2:12": { group: "sibies" },
+  "2:13": { group: "sibies" }, "2:14": { group: "sibies" }, "2:15": { group: "sibies" },
   // Сливен — Мерканто / АНТОНИЙ ЕООД (клиент 11)
   "11:23": { group: "merkanto" }, "11:25": { group: "merkanto" }, "11:26": { group: "merkanto" },
   "11:27": { group: "merkanto" }, "11:28": { group: "merkanto" }, "11:29": { group: "merkanto" },
