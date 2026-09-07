@@ -496,7 +496,7 @@ function selShops(){collect();var out=[];document.querySelectorAll('#grid .selbo
 function calc(){var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}msg('Смятам…');api({shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}renderPlan(j);msg('Планът е готов за '+sel.length+' магазина.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function tbl(t,o){var ks=Object.keys(o||{});if(!ks.length)return '';var h='<table><tr><th class="shop">'+t+'</th><th>кол.</th></tr>';ks.forEach(function(k){h+='<tr><td class="shop">'+esc(k)+'</td><td class="q">'+o[k]+'</td></tr>'});return h+'</table>'}
 function renderPlan(j){$('planbox').innerHTML='<h2>За производство</h2><div class="plan">'+tbl('Сетове',j.produce_sets)+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
-function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy за '+sel.length+' магазина:\\n• ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (ролки → сетове)');api({action:'produce_plan',shops:sel,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||(j.zagotovki&&j.zagotovki.error)||j.error||j.message||''),'err');return}var ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;msg('✓ Производството е създадено. Партида '+j.lot+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+'. Провери в касата и „Приключи", ако е ок.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy за '+sel.length+' магазина:\\n• първо заготовки (майонези, сосове…), после ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (заготовки → ролки → сетове)');api({action:'produce_plan',shops:sel,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.zagotovki&&j.zagotovki.error)||(j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||j.error||j.message||''),'err');return}var zi=j.zagotovki&&j.zagotovki.store_production_id,ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;msg('✓ Производството е създадено. Партида '+j.lot+' · заготовки №'+(zi||'—')+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+'. Провери в касата и „Приключи", ако е ок.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value||$('date').value;var lot=pd?('L.'+pd.split('-').reverse().join('.')):'';if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy за '+sel.length+' магазина'+(lot?(', ВЕЧЕ с партида '+lot):'')+'.\\nЦените ги слага Barsy по правилото на клиента.\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;sel.forEach(function(s,i){if(cr[i]&&cr[i].account_id)s.account_id=cr[i].account_id});LASTACC=cr.filter(function(c){return c.ok&&c.account_id}).map(function(c){return c.account_id});msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. После натисни ③ Стокова.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function doStokova(){var sel=selShops().filter(function(s){return s.account_id});if(!sel.length){msg('Няма сметки за стокова. Тикни обектите и първо ② Сметки.','err');return}var pd=$('pdate').value||$('date').value;if(!confirm('Ще СЪЗДАМ стокови за '+sel.length+' обекта (една по една), с дата '+pd+'.\\nПродължавам?'))return;var i=0,okc=0,errs=[];
 function nextStok(){if(i>=sel.length){msg('✓ Стокови: '+okc+'/'+sel.length+' готови'+(errs.length?(' · грешки: '+errs.join(' | ')):''),errs.length?'err':'ok');return}var s=sel[i];msg('Правя стокова '+(i+1)+'/'+sel.length+' ('+shortName(s.client,s.rep)+')…');api({action:'create_stokova',account_id:s.account_id,date:pd}).then(function(j){if(j.ok)okc++;else errs.push('#'+s.account_id+': '+(j.error||''));i++;nextStok()}).catch(function(e){errs.push('#'+s.account_id+': мрежа');i++;nextStok()})}
@@ -787,19 +787,24 @@ module.exports = async function handler(req, res) {
     for (const [name, qty] of Object.entries(explodeToRolls(setProduce))) { const a = resolve(name); if (a && a.is_menu && !a.is_set) rollNeed[name] = (rollNeed[name] || 0) + qty; }
     const rollProduce = {};
     for (const [name, qty] of Object.entries(rollNeed)) { const a = resolve(name); if (a) rollProduce[name] = round(Number(qty) + deficit(a.id)); }
-    // Произвеждаме ролките СЛЕД заготовките и ПРЕДИ сетовете (сетът тегли ролките по рецепта).
-    const zagRows = toRows(zag), rollRows = toRows(rollProduce), setRows = toRows(setProduce);
-    const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate, produced_rolls: sortObj(rollProduce, 2), produced_sets: sortObj(setProduce, 2) };
-    // Ред: (заготовки по избор →) ролки → сетове. Ролките дърпат готовите заготовки от
-    // наличност; заготовките се включват само с include_zag (някои нямат рецепта).
+    // ЗАГОТОВКИ: нужните за деня (заг. от рецептите) + дефицит (покрива минуса), за да са
+    // налични, преди да произведем ролките/сетовете, които ги консумират. По подразбиране
+    // ги произвеждаме (include_zag !== false), защото иначе липсват (майонези, сосове…).
+    const zagProduce = {};
+    for (const [name, qty] of Object.entries(zag)) { const a = resolve(name); if (a && Number(qty) > 0) zagProduce[name] = round(Number(qty) + deficit(a.id)); }
+    const doZag = body.include_zag !== false;
+    // Произвеждаме заготовките ПЪРВО, после ролките, после сетовете (всяко следващо тегли предното).
+    const zagRows = toRows(zagProduce), rollRows = toRows(rollProduce), setRows = toRows(setProduce);
+    const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate, produced_zagotovki: sortObj(zagProduce, 2), produced_rolls: sortObj(rollProduce, 2), produced_sets: sortObj(setProduce, 2) };
+    // Ред: заготовки → ролки → сетове.
     try {
-      if (body.include_zag === true && zagRows.length) out.zagotovki = await createProduction(zagRows, { lot, lot_exp }, user, pass);
+      if (doZag && zagRows.length) out.zagotovki = await createProduction(zagRows, { lot, lot_exp }, user, pass);
       if (rollRows.length) out.rolls = await createProduction(rollRows, { lot, lot_exp }, user, pass);
       if (setRows.length) out.sets = await createProduction(setRows, { lot, lot_exp }, user, pass);
     } catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
     out.ok = (!rollRows.length || (out.rolls && out.rolls.ok))
       && (!setRows.length || (out.sets && out.sets.ok))
-      && (body.include_zag !== true || !zagRows.length || (out.zagotovki && out.zagotovki.ok));
+      && (!doZag || !zagRows.length || (out.zagotovki && out.zagotovki.ok));
     res.status(200).json(out);
     return;
   }
