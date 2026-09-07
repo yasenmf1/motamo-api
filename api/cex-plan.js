@@ -203,12 +203,13 @@ async function dashData(from, to, expenses, user, pass) {
   const VAT = 1.2;
   const inRange = d => d && d >= from && d <= to;
   const arrOf = x => { let d = x && x.data; d = Array.isArray(d) ? d : (d && (d.list || (typeof d === "object" ? Object.values(d) : []))) || []; return Array.isArray(d) ? d : []; };
-  // 4-те четения ПАРАЛЕЛНО (иначе последователно надхвърля таймаута); всяко със свой 9с.
-  const [accR, invR, artR, ordR] = await Promise.all([
+  // 5-те четения ПАРАЛЕЛНО (иначе последователно надхвърля таймаута); всяко със свой 9с.
+  const [accR, invR, artR, ordR, stoR] = await Promise.all([
     cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3000 }, user, pass),
     cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 3000 }, user, pass).catch(() => ({ data: [] })),
     cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["avg_delivery_price"] }, user, pass).catch(() => ({ data: [] })),
-    cexCall("Orders_getlist", { order_by: "date desc", length: 5000 }, user, pass).catch(() => ({ data: [] }))
+    cexCall("Orders_getlist", { order_by: "date desc", length: 5000 }, user, pass).catch(() => ({ data: [] })),
+    cexCall("Storeloads_getlist", { order_by: "store_load_id desc", length: 2000, extra_properties: ["all"] }, user, pass).catch(() => ({ data: [] }))
   ]);
   let all = arrOf(accR);
   const byDay = {};        // "YYYY-MM-DD" → нето оборот
@@ -273,8 +274,25 @@ async function dashData(from, to, expenses, user, pass) {
   const exp = Math.round((Number(expenses) || 0) * 100) / 100;
   const result = Math.round((totalNeto - cogs - exp) * 100) / 100;
 
+  // ── ФАЗА 3: зареждания (доставки) за периода — суми без ДДС, по доставчик ──
+  // Storeloads с extra:["all"] носят doc_date/supplier_name/total_sum/has_tax.
+  const loadsBySupplier = {};
+  let loadsNeto = 0, loadsN = 0;
+  for (const s of arrOf(stoR)) {
+    if (Number(s.operation_type) !== 1) continue;          // само зареждания (не ревизии/връщания)
+    const day = String(s.doc_date || s.date || "").slice(0, 10);
+    if (!inRange(day)) continue;
+    const gross = Number(s.total_sum) || 0; if (!gross) continue;
+    const neto = Number(s.has_tax) === 1 ? Math.round((gross / VAT) * 100) / 100 : gross;
+    const sup = s.supplier_name || ("доставчик " + (s.supplier_id || ""));
+    loadsBySupplier[sup] = Math.round(((loadsBySupplier[sup] || 0) + neto) * 100) / 100;
+    loadsNeto = Math.round((loadsNeto + neto) * 100) / 100; loadsN++;
+  }
+  const suppliers = Object.entries(loadsBySupplier).map(([name, neto]) => ({ name, neto })).sort((a, b) => b.neto - a.neto);
+
   return { from, to, total_neto: totalNeto, accounts: accountsN, by_day: byDay, invoiced_neto: invTotalNeto, clients,
-    cogs, expenses: exp, result, products, units_truncated: unitsTrunc };
+    cogs, expenses: exp, result, products, units_truncated: unitsTrunc,
+    loads_neto: loadsNeto, loads_count: loadsN, suppliers };
 }
 
 // ── Зареждане ПО ГРАФИК (не по дата на затваряне, която закъснява). Обектът и
@@ -838,6 +856,18 @@ module.exports = async function handler(req, res) {
   const allowed = isWrite ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+
+  // ── ВРЕМЕНЕН: Orders страниране (start/offset) + обхват на прозореца ──
+  if (body.action === "ord_probe") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    const out = {};
+    const span = async (label, p) => { try { const r = await cexCall("Orders_getlist", p, user, pass); let a = r.data || []; if (!Array.isArray(a)) a = Object.values(a); const dates = a.map(o => String(o.date || "").slice(0, 10)).filter(Boolean).sort(); out[label] = { n: a.length, oldest: dates[0], newest: dates[dates.length - 1], first_id: a[0] && a[0].order_id, last_id: a[a.length - 1] && a[a.length - 1].order_id }; } catch (e) { out[label] = "ERR " + String(e && e.message); } };
+    await span("p0_len5000", { order_by: "date desc", length: 5000 });
+    await span("p1_start5000", { order_by: "date desc", length: 5000, start: 5000 });
+    await span("p1_offset5000", { order_by: "date desc", length: 2000, offset: 5000 });
+    res.status(200).json({ ok: true, out });
+    return;
+  }
 
   // ── ВРЕМЕНЕН: проби на зареждания (Storeloads) за Фаза 3 ──
   if (body.action === "load_probe") {
