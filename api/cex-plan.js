@@ -724,11 +724,10 @@ module.exports = async function handler(req, res) {
       receiver_name: null, seller_name: "", additional_text: "", free_text: ""
     };
     for (const k in defaults) if (!(k in values) || values[k] === undefined) values[k] = defaults[k];
-    // Начин на плащане: по подразбиране НЕ го подаваме → Barsy взима клиентския по
-    // подразбиране (тук „По банка", заложен в профила на клиента). Ако body даде изричен
-    // paymethod_id, го подаваме; ако е null — оставяме без.
-    delete values.paymethod_id;
-    if (body.paymethod_id !== undefined && body.paymethod_id !== null) values.paymethod_id = String(body.paymethod_id);
+    // Начин на плащане „По банка" (ид 5) по подразбиране — потр. Claude вече има правото
+    // (ролята е разрешена за метода). body.paymethod_id=null → без начин (пропускаме ключа).
+    if (body.paymethod_id === null) delete values.paymethod_id;
+    else values.paymethod_id = String(body.paymethod_id !== undefined ? body.paymethod_id : 5);
     // 3) редове: препрати грид data_source.target → вземи редовете
     let rows = [];
     let rowsRaw = null;
@@ -780,25 +779,6 @@ module.exports = async function handler(req, res) {
     const scheduled = s.shops.filter(x => x.scheduled).length;
     res.status(200).json({ ok: true, date, dow: s.dow, seeded_accounts: s.shops.length, scheduled_count: scheduled,
       shops: s.shops.map(x => ({ account_id: x.account_id, last_date: x.last_date, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, scheduled: x.scheduled, order: sortObj(x.order || {}, 2) })) });
-    return;
-  }
-
-  // ── ВРЕМЕНЕН: списък начини на плащане (суров), за да намеря ид на „По банка" в цеха ──
-  if (body.action === "paymethods") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    let out = {};
-    const tries = [
-      ["Clients_get", { id: 11 }],
-      ["Clients_getlist", { filters: { client_id: 11 } }],
-      ["Paymentmethods_getlist", { company_id: 1 }],
-      ["Companies_getpaymethods", { company_id: 1 }],
-      ["Paymentmethods_getlist", { active: 1 }]
-    ];
-    for (const [m, p] of tries) {
-      try { const r = await cexCall(m, p, user, pass); out[m + " " + JSON.stringify(p)] = JSON.stringify(r.data).slice(0, 500); }
-      catch (e) { out[m + " " + JSON.stringify(p)] = "ERR " + String(e && e.message); }
-    }
-    res.status(200).json({ ok: true, out });
     return;
   }
 
