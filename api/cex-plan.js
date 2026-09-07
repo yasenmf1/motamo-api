@@ -159,7 +159,8 @@ async function seedShops(date, user, pass) {
       const art = byId(o.article_id) || resolve(o.article_name);
       if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + (Number(o.amount) || 0);
     }
-    return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, order };
+    const group = cexGroupOf((a.client_name || "") + " " + (a.person_name || ""));
+    return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group, order };
   }));
   return { shops, accounts: accts.length };
 }
@@ -313,13 +314,21 @@ header .d{font-size:15px;opacity:.93;margin-top:4px}
 .card{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(20,23,26,.08)}
 .card>h2{margin:0;font-size:16px;font-weight:800;color:#fff;padding:13px 18px;letter-spacing:.6px;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
 .card>h2 .cnt{font-size:13px;font-weight:600;opacity:.9;background:rgba(255,255,255,.22);padding:2px 10px;border-radius:20px}
-.card.sets>h2{background:#b8860b}.card.rolls>h2{background:#b3121b}.card.zag>h2{background:#2b7a78}
+.card.sets>h2{background:#b8860b}.card.rolls>h2{background:#b3121b}.card.zag>h2{background:#2b7a78}.card.route>h2{background:#374151}
 .card table{width:100%;border-collapse:collapse}
 .card td{padding:13px 18px;font-size:21px;border-top:1px solid #f1f2f4}
 .card tr:first-child td{border-top:0}
 .card td.q{text-align:right;font-weight:800;font-size:27px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .card.sets td.q{color:#8a6608}.card.rolls td.q{color:#b3121b}.card.zag td.q{color:#1f5b59}
 .card tr:nth-child(even) td{background:#fafbfc}
+.card.route .scroll{overflow-x:auto}
+.card.route th{padding:11px 14px;font-size:14px;font-weight:800;color:#374151;background:#eef0f3;text-align:right;white-space:nowrap;position:sticky;top:0}
+.card.route th.n{text-align:left}
+.card.route td{padding:11px 14px;font-size:17px}
+.card.route td.n{font-weight:600;white-space:nowrap}
+.card.route td.q{font-size:20px;color:#111827}
+.card.route td.q.zero{color:#c9ced4;font-weight:500}
+.card.route th.tot,.card.route td.q.tot{color:#b3121b;border-left:2px solid #e6e8eb}
 .empty{background:#fff;border-radius:16px;padding:34px 20px;text-align:center;color:#555;box-shadow:0 2px 8px rgba(20,23,26,.08)}
 .empty h2{margin:0 0 8px;font-size:23px;color:#14171a}
 .note{color:#7a8087;font-size:13px;text-align:center;margin:2px 0 20px}
@@ -483,13 +492,23 @@ module.exports = async function handler(req, res) {
     const sets = {}; for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set) sets[name] = qty; }
     const tbl = (obj) => Object.keys(obj).sort().map(k => `<tr><td>${esc(k)}</td><td class="q">${round(obj[k])}</td></tr>`).join("");
     const card = (cls, title, obj) => { const n = Object.keys(obj).length; return n ? `<div class="card ${cls}"><h2>${title}<span class="cnt">${n} вида</span></h2><table>${tbl(obj)}</table></div>` : ""; };
+    // „По маршрут": разбивка на поръчаните продукти по град (група). Girls пакетират по маршрут.
+    const CITY = [["haskovo", "Хасково"], ["merkanto", "Сливен"], ["sibies", "Ст. Загора"], ["adhoc", "Друго"]];
+    const byCity = {};
+    for (const s of seed.shops) { const g = s.group || "adhoc"; const dst = byCity[g] || (byCity[g] = {}); for (const [k, v] of Object.entries(s.order || {})) dst[k] = (dst[k] || 0) + (Number(v) || 0); }
+    const activeCities = CITY.filter(([g]) => byCity[g] && Object.values(byCity[g]).some(v => v > 0));
+    // редове = поръчаните артикули; сетовете първо, после по име
+    const artNames = Object.keys(agg).filter(n => agg[n] > 0).sort((a, b) => { const A = resolve(a), B = resolve(b); return (Number(!!(B && B.is_set)) - Number(!!(A && A.is_set))) || a.localeCompare(b, "bg"); });
+    const routeHead = `<tr><th class="n">Артикул</th>${activeCities.map(([, lbl]) => `<th class="q">${esc(lbl)}</th>`).join("")}<th class="q tot">Общо</th></tr>`;
+    const routeBody = artNames.map(n => `<tr><td class="n">${esc(n)}</td>${activeCities.map(([g]) => { const v = (byCity[g] || {})[n] || 0; return `<td class="q${v ? "" : " zero"}">${v ? round(v) : "·"}</td>`; }).join("")}<td class="q tot">${round(agg[n])}</td></tr>`).join("");
+    const routeCard = activeCities.length ? `<div class="card route"><h2>По маршрут<span class="cnt">${activeCities.map(([, l]) => l).join(" · ")}</span></h2><div class="scroll"><table>${routeHead}${routeBody}</table></div></div>` : "";
     const empty = !Object.keys(rolls).length && !Object.keys(sets).length;
     res.status(200).send(todayPage(`
       <header><h1>🍣 Цех · за днес</h1><div class="d">${esc(date)} · ${seed.accounts} магазина · обновено ${esc(sofiaTime())}</div></header>
       <div class="wrap">${empty
         ? `<div class="empty"><h2>Още няма заявки за днес</h2><p>Когато влязат сметките, тук се показва какво да се произведе.<br>Страницата се обновява сама.</p></div>`
-        : `${card("sets", "Сетове", sets)}${card("rolls", "Ролки / поке", rolls)}${card("zag", "Заготовки", zag)}
-        <div class="note">Обновява се сам на всеки 3 минути · числата са общо за всички магазини</div>`}</div>`));
+        : `${routeCard}${card("sets", "Сетове (общо)", sets)}${card("rolls", "Ролки / поке (общо)", rolls)}${card("zag", "Заготовки (общо)", zag)}
+        <div class="note">Обновява се сам на всеки 3 минути · „По маршрут" = продуктите за всеки град · долните карти са общо за всички</div>`}</div>`));
     return;
   }
 
