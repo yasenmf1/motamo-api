@@ -212,25 +212,20 @@ async function scheduleSeed(dateIso, user, pass) {
   // Така обект без сметка до тази дата НЕ се показва (напр. по-късни тестови сметки не
   // изкарват обекти, които никога не сме зареждали), а количествата са последната
   // реална поръчка на обекта към деня.
-  const dateOf = a => String(a.close_date || a.ref_date || a.create_date || "").slice(0, 10);
-  all = all.filter(a => { const dt = dateOf(a); return dt && dt <= dateIso; });
-  // Най-скорошната сметка (към датата) на всеки ОБЕКТ по ДАТА (не по account_id, който
-  // при преномерирани/тестови сметки може да е по-голям от по-нов реален разнос).
-  // Пропускаме анонимни и тестовите (alias CLTEST), за да не се пълни от тест.
-  // Показваме САМО обекти от регистъра (по id). Клиентският ред без обект, тестови
-  // и непознати обекти отпадат сами — няма как да сгрешим по име.
+  // Стъпваме на ЗАТВОРЕНИ сметки = реалният разнос (отворените чернови/тестове се
+  // игнорират). Броим само затворени с `close_date` ≤ избраната дата.
+  const closedOf = a => String(a.close_date || "").slice(0, 10);
+  all = all.filter(a => { const cd = closedOf(a); return cd && cd <= dateIso; });
+  // Най-скорошната ЗАТВОРЕНА сметка на всеки ОБЕКТ (по дата на затваряне).
+  // Показваме САМО обекти от регистъра (по id) — непознати/клиентски редове отпадат.
   const seen = {};
   for (const a of all) {
     if (String(a.account_alias || "").includes("CLTEST")) continue;
     const key = cexKey(a);
     if (!CEX_OBJECTS[key]) continue;
-    if (!seen[key] || dateOf(a) > dateOf(seen[key])) seen[key] = a;
+    if (!seen[key] || closedOf(a) > closedOf(seen[key])) seen[key] = a;
   }
   const entries = Object.values(seen);
-  // Тик само за АКТИВНИ обекти: с поръчка в последните 14 дни. Неактивните (напр.
-  // СИБИЕС, който не поръчва) остават нетикнати, макар групата да е дължима днес.
-  const cutoff = new Date(dateIso + "T00:00:00Z"); cutoff.setUTCDate(cutoff.getUTCDate() - 14);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
   const shops = await mapLimit(entries, 6, async (a) => {
     const g = (cexObj(a) || {}).group || "adhoc";
     const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
@@ -239,10 +234,11 @@ async function scheduleSeed(dateIso, user, pass) {
       const art = byId(o.article_id) || resolve(o.article_name);
       if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + (Number(o.amount) || 0);
     }
-    const lastStr = dateOf(a);
-    const recent = lastStr >= cutoffStr;
+    const lastStr = closedOf(a);
     const hasOrder = Object.values(order).some(v => v > 0);
-    return { account_id: a.account_id, last_date: lastStr, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group: g, scheduled: cexDueOn(g, dow) && recent && hasOrder, order };
+    // ТИКНАТ = обектът има ЗАТВОРЕНА сметка ТОЧНО на избраната дата (реален разнос за
+    // деня). Обект със стара затворена сметка се показва, но не се тика (справка).
+    return { account_id: a.account_id, last_date: lastStr, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group: g, scheduled: lastStr === dateIso && hasOrder, order };
   });
   // Подредба: първо дължимите днес, после по група, после по име.
   const grank = { sibies: 0, merkanto: 1, haskovo: 2, adhoc: 3 };
