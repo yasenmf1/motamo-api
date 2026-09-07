@@ -959,7 +959,9 @@ module.exports = async function handler(req, res) {
         { filters: { date_from: from, date_to: to } },
         { ref_date: [from, to] },
       ];
+      const n = Number(q.n) || 0;
       const body = { active_struct_id: "eStructList_1", action_type: "values", filters: { ref_date: [from, to] } };
+      if (n) { body.length = n; body.records = n; body.limit = n; body.page_size = n; }
       const r = await cexCall(m, body, user, pass);
       const d = r.data || {};
       // намери масив с редове-данни
