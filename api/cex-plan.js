@@ -948,6 +948,29 @@ module.exports = async function handler(req, res) {
       res.status(200).send(JSON.stringify({ keys: a[0] ? Object.keys(a[0]) : [], sample: a.slice(0, 1) }, null, 2));
       return;
     }
+    if (q.debug === "rep") {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      const m = String(q.m || "Reports_sales_by_articles");
+      if (!/^Reports_[a-z_]+$/.test(m)) { res.status(400).send(JSON.stringify({ error: "bad method" })); return; }
+      const from = q.from || "2026-08-01", to = q.to || "2026-08-31";
+      const shapes = [
+        { filters: { ref_date: [from, to] } },
+        { filters: { ref_date: from } },
+        { filters: { date_from: from, date_to: to } },
+        { ref_date: [from, to] },
+      ];
+      const out = [];
+      for (const body of shapes) {
+        try {
+          const r = await cexCall(m, body, user, pass);
+          const d = r.data;
+          let rows = Array.isArray(d) ? d : (d && d.list) ? d.list : (d && d.rows) ? d.rows : null;
+          out.push({ body, ok: r.ok, status: r.status, topType: Array.isArray(d) ? "array" : typeof d, topKeys: d && !Array.isArray(d) ? Object.keys(d).slice(0, 20) : null, rowCount: rows ? rows.length : null, rowKeys: rows && rows[0] ? Object.keys(rows[0]) : null, sample: rows ? rows.slice(0, 2) : (r.raw ? r.raw.slice(0, 400) : null) });
+        } catch (e) { out.push({ body, error: String(e && e.message) }); }
+      }
+      res.status(200).send(JSON.stringify({ method: m, tries: out }, null, 2));
+      return;
+    }
     if (q.debug === "recon") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       const ar = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 40 }, user, pass);
