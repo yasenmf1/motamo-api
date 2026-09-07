@@ -202,8 +202,15 @@ async function seedRazos(razosDate, user, pass, includeSameDay) {
 async function dashData(from, to, expenses, user, pass) {
   const VAT = 1.2;
   const inRange = d => d && d >= from && d <= to;
-  const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3000 }, user, pass);
-  let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
+  const arrOf = x => { let d = x && x.data; d = Array.isArray(d) ? d : (d && (d.list || (typeof d === "object" ? Object.values(d) : []))) || []; return Array.isArray(d) ? d : []; };
+  // 4-те четения ПАРАЛЕЛНО (иначе последователно надхвърля таймаута); всяко със свой 9с.
+  const [accR, invR, artR, ordR] = await Promise.all([
+    cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3000 }, user, pass),
+    cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 3000 }, user, pass).catch(() => ({ data: [] })),
+    cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["avg_delivery_price"] }, user, pass).catch(() => ({ data: [] })),
+    cexCall("Orders_getlist", { order_by: "date desc", length: 5000 }, user, pass).catch(() => ({ data: [] }))
+  ]);
+  let all = arrOf(accR);
   const byDay = {};        // "YYYY-MM-DD" → нето оборот
   const byClient = {};     // client_id → { name, neto, n }
   let totalNeto = 0, accountsN = 0;
@@ -223,18 +230,14 @@ async function dashData(from, to, expenses, user, pass) {
   // издадени ФАКТУРИ (type_id 1) по клиент в периода (нето)
   const invByClient = {};
   let invTotalNeto = 0;
-  try {
-    const ri = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 3000 }, user, pass);
-    let inv = ri.data || []; if (!Array.isArray(inv)) inv = Object.values(inv);
-    for (const x of inv) {
-      if (String(x.type_id) !== "1" || String(x.is_anulate) === "1") continue;
-      if (!inRange(String(x.create_date || "").slice(0, 10))) continue;
-      const cid = x.client_id != null ? x.client_id : 0;
-      const neto = Number(x.total_neto) || 0;
-      invByClient[cid] = Math.round(((invByClient[cid] || 0) + neto) * 100) / 100;
-      invTotalNeto = Math.round((invTotalNeto + neto) * 100) / 100;
-    }
-  } catch (e) { /* фактури по избор */ }
+  for (const x of arrOf(invR)) {
+    if (String(x.type_id) !== "1" || String(x.is_anulate) === "1") continue;
+    if (!inRange(String(x.create_date || "").slice(0, 10))) continue;
+    const cid = x.client_id != null ? x.client_id : 0;
+    const neto = Number(x.total_neto) || 0;
+    invByClient[cid] = Math.round(((invByClient[cid] || 0) + neto) * 100) / 100;
+    invTotalNeto = Math.round((invTotalNeto + neto) * 100) / 100;
+  }
   // клиентска таблица: оборот, фактурирано, разлика (липсва фактура)
   const clients = Object.entries(byClient).map(([cid, c]) => {
     const invoiced = invByClient[cid] || 0;
@@ -245,16 +248,11 @@ async function dashData(from, to, expenses, user, pass) {
   // Цена на бройка = Barsy avg_delivery_price (една заявка). Бройки = Orders (последните,
   // сортирани по дата) филтрирани по дата в периода — Orders НЕ филтрира по дата на сървъра.
   const cost = {};   // article_id → avg_delivery_price (без ДДС)
-  try {
-    const ra = await cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["avg_delivery_price"] }, user, pass);
-    let L = ra.data && (ra.data.list || ra.data) || {}; L = Array.isArray(L) ? L : Object.values(L);
-    for (const a of L) { const id = a && (a.article_id || a.id); if (id != null) cost[String(id)] = Number(a.avg_delivery_price) || 0; }
-  } catch (e) { /* себестойност по избор */ }
+  for (const a of arrOf(artR)) { const id = a && (a.article_id || a.id); if (id != null) cost[String(id)] = Number(a.avg_delivery_price) || 0; }
   const units = {};  // article_id → { name, units }
   let cogs = 0, unitsTrunc = false;
-  try {
-    const ro = await cexCall("Orders_getlist", { order_by: "date desc", length: 9000 }, user, pass);
-    let ord = ro.data || []; if (!Array.isArray(ord)) ord = Object.values(ord);
+  {
+    const ord = arrOf(ordR);
     let oldest = "9999";
     for (const o of ord) {
       const day = String(o.date || "").slice(0, 10); if (day && day < oldest) oldest = day;
@@ -265,8 +263,8 @@ async function dashData(from, to, expenses, user, pass) {
       u.units += amt;
       cogs += amt * (cost[String(id)] || 0);
     }
-    if (oldest > from) unitsTrunc = true;   // не сме стигнали началото на периода → бройките са частични
-  } catch (e) { /* бройки по избор */ }
+    if (ord.length && oldest > from) unitsTrunc = true;   // не сме стигнали началото → частично
+  }
   const products = Object.entries(units).map(([id, u]) => {
     const c = cost[id] || 0; const un = Math.round(u.units * 1000) / 1000;
     return { article_id: Number(id), name: u.name, units: un, unit_cost: Math.round(c * 100) / 100, total_cost: Math.round(un * c * 100) / 100 };
