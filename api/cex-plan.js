@@ -950,6 +950,17 @@ module.exports = async function handler(req, res) {
     if (!okV) { res.status(403).send(dashboardPage({ error: "Липсва или грешен ключ в линка." }, "")); return; }
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).send(dashboardPage({ error: "Не е конфигуриран достъп до цеха." }, q.k)); return; }
+    if (q.debug === "lotchk") {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      const lv = q.lv || "L.03.09.2026";
+      const r = await cexCall("Reports_lot_list_details",
+        { active_struct_id: "eStructList_1", action_type: "values", page_num: 1, filters: { ref_date: ["2026-08-01", "2026-09-30"], lot_value: lv } }, user, pass);
+      const d = r.data || {}; const rows = Array.isArray(d.rows) ? d.rows : [];
+      const byType = {}; for (const x of rows) byType[x.operation_ref_type] = (byType[x.operation_ref_type] || 0) + 1;
+      const outs = rows.filter(x => (Number(x.amount) || 0) < 0).slice(0, 5).map(x => ({ art: x.article_name, amt: x.amount, ref_type: x.operation_ref_type, ref_id: x.ref_id, doc: x.operation_doc_date }));
+      res.status(200).send(JSON.stringify({ lot: lv, ok: r.ok, records: d.records, page_rows: rows.length, byType, outSamples: outs }, null, 2));
+      return;
+    }
     const today = sofiaToday();
     const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 4) + "-01-01"; // по подразбиране от 1 януари
     const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
