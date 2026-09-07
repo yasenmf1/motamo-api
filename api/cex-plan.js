@@ -817,6 +817,7 @@ module.exports = async function handler(req, res) {
       if (i < 0) return false; arr.splice(i, 1); return true;
     };
     res.status(200).json({ ok: true, date, seeded_accounts: s.shops.length,
+      _stok_totals: stok,
       shops: s.shops.map(x => { const hs = hasStok(x); return { account_id: x.account_id, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, total: x.total, has_stokova: hs, scheduled: !hs, order: sortObj(x.order || {}, 2) }; }) });
     return;
   }
