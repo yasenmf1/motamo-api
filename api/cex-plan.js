@@ -907,6 +907,22 @@ module.exports = async function handler(req, res) {
     if (!okV) { res.status(403).send(dashboardPage({ error: "Липсва или грешен ключ в линка." }, "")); return; }
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).send(dashboardPage({ error: "Не е конфигуриран достъп до цеха." }, q.k)); return; }
+    if (q.debug === "rep") {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      const m = String(q.m || "");
+      if (!/^Reports_[a-z_]+$/.test(m)) { res.status(400).send(JSON.stringify({ error: "bad method" })); return; }
+      const f = q.from || "2026-08-01", t2 = q.to || "2026-08-31";
+      const sid = q.sid || "eStructList_1";
+      const body = { active_struct_id: sid, action_type: "values", page_num: Number(q.page) || 1, filters: { ref_date: [f, t2] } };
+      const r = await cexCall(m, body, user, pass);
+      const d = r.data || {};
+      const rows = Array.isArray(d.rows) ? d.rows : null;
+      res.status(200).send(JSON.stringify({ method: m, ok: r.ok, topKeys: Object.keys(d).slice(0, 12),
+        total: d.total, records: d.records, rowCount: rows ? rows.length : null,
+        rowKeys: rows && rows[0] ? Object.keys(rows[0]) : null, sample: rows ? rows.slice(0, 3) : (r.raw || "").slice(0, 300),
+        totals: d.totals }, null, 2));
+      return;
+    }
     const today = sofiaToday();
     const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 4) + "-01-01"; // по подразбиране от 1 януари
     const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
