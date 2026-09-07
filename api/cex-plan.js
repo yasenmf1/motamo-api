@@ -183,11 +183,11 @@ async function seedRazos(razosDate, user, pass, includeSameDay) {
   const shops = await Promise.all(accts.map(async (a) => {
     const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
     const order = {};
-    let total = 0; // обща сума С ДДС — за връзка към издадена стокова (клиент+дата+сума)
+    let total = 0; // обща сума С ДДС (current_price вече е с ДДС) — за връзка към стокова
     for (const o of (rows.data || [])) {
       const art = byId(o.article_id) || resolve(o.article_name);
       const amt = Number(o.amount) || 0, pr = Number(o.current_price) || 0;
-      if (amt && pr) total += Math.round(amt * pr * 1.2 * 100) / 100;
+      if (amt && pr) total += Math.round(amt * pr * 100) / 100;
       if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + amt;
     }
     const group = (cexObj(a) || {}).group || "adhoc";
