@@ -199,7 +199,7 @@ async function seedRazos(razosDate, user, pass, includeSameDay) {
 // ── ДАШБОРД агрегатор (Фаза 1): оборот по ден + по клиент, издадени фактури, разлика.
 // Оборот = сумата на ЗАТВОРЕНИТЕ сметки (`total_sum` е с ДДС → нето = /1.2), групиран по
 // ден на затваряне и по клиент. Фактури = Invoices type_id 1 (не стокови 11), неанулирани.
-async function dashData(from, to, user, pass) {
+async function dashData(from, to, expenses, user, pass) {
   const VAT = 1.2;
   const inRange = d => d && d >= from && d <= to;
   const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3000 }, user, pass);
@@ -240,7 +240,43 @@ async function dashData(from, to, user, pass) {
     const invoiced = invByClient[cid] || 0;
     return { client_id: Number(cid), name: c.name, turnover: c.neto, accounts: c.n, invoiced, gap: Math.round((c.neto - invoiced) * 100) / 100 };
   }).sort((a, b) => b.turnover - a.turnover);
-  return { from, to, total_neto: totalNeto, accounts: accountsN, by_day: byDay, invoiced_neto: invTotalNeto, clients };
+
+  // ── ФАЗА 2: себестойност (avg_delivery_price, без ДДС) + бройки продадени + резултат ──
+  // Цена на бройка = Barsy avg_delivery_price (една заявка). Бройки = Orders (последните,
+  // сортирани по дата) филтрирани по дата в периода — Orders НЕ филтрира по дата на сървъра.
+  const cost = {};   // article_id → avg_delivery_price (без ДДС)
+  try {
+    const ra = await cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["avg_delivery_price"] }, user, pass);
+    let L = ra.data && (ra.data.list || ra.data) || {}; L = Array.isArray(L) ? L : Object.values(L);
+    for (const a of L) { const id = a && (a.article_id || a.id); if (id != null) cost[String(id)] = Number(a.avg_delivery_price) || 0; }
+  } catch (e) { /* себестойност по избор */ }
+  const units = {};  // article_id → { name, units }
+  let cogs = 0, unitsTrunc = false;
+  try {
+    const ro = await cexCall("Orders_getlist", { order_by: "date desc", length: 9000 }, user, pass);
+    let ord = ro.data || []; if (!Array.isArray(ord)) ord = Object.values(ord);
+    let oldest = "9999";
+    for (const o of ord) {
+      const day = String(o.date || "").slice(0, 10); if (day && day < oldest) oldest = day;
+      if (!inRange(day)) continue;
+      const id = o.article_id; if (id == null) continue;
+      const amt = Number(o.amount) || 0; if (!amt) continue;
+      const u = units[String(id)] || (units[String(id)] = { name: o.article_name || ("#" + id), units: 0 });
+      u.units += amt;
+      cogs += amt * (cost[String(id)] || 0);
+    }
+    if (oldest > from) unitsTrunc = true;   // не сме стигнали началото на периода → бройките са частични
+  } catch (e) { /* бройки по избор */ }
+  const products = Object.entries(units).map(([id, u]) => {
+    const c = cost[id] || 0; const un = Math.round(u.units * 1000) / 1000;
+    return { article_id: Number(id), name: u.name, units: un, unit_cost: Math.round(c * 100) / 100, total_cost: Math.round(un * c * 100) / 100 };
+  }).filter(p => p.units > 0).sort((a, b) => b.total_cost - a.total_cost);
+  cogs = Math.round(cogs * 100) / 100;
+  const exp = Math.round((Number(expenses) || 0) * 100) / 100;
+  const result = Math.round((totalNeto - cogs - exp) * 100) / 100;
+
+  return { from, to, total_neto: totalNeto, accounts: accountsN, by_day: byDay, invoiced_neto: invTotalNeto, clients,
+    cogs, expenses: exp, result, products, units_truncated: unitsTrunc };
 }
 
 // ── Зареждане ПО ГРАФИК (не по дата на затваряне, която закъснява). Обектът и
@@ -476,6 +512,7 @@ form.period button{font:14px system-ui;font-weight:700;padding:7px 14px;border:0
 .kpi .l{font-size:12px;color:#7a8087;text-transform:uppercase;letter-spacing:.4px}
 .kpi .v{font-size:26px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums}
 .kpi.turn .v{color:#1f5b59}.kpi.inv .v{color:#8a6608}.kpi.gap .v{color:#b3121b}
+.kpi.cost .v{color:#b06a00}.kpi.exp .v{color:#7a4b8a}.kpi.res .v{color:#0a6b2e}
 .card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(20,23,26,.08)}
 .card>h2{margin:0;font-size:15px;font-weight:800;color:#fff;background:#374151;padding:11px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .card>h2>span:not(.seg){font-size:12px;font-weight:600;opacity:.85}
@@ -498,11 +535,15 @@ tr:nth-child(even) td{background:#fafbfc}
   <input type="hidden" name="view" value="dashboard">${k ? `<input type="hidden" name="k" value="${esc(k)}">` : ""}
   <div><label>от</label><input type="date" name="from" lang="bg-BG" value="${esc((data && data.from) || "")}"></div>
   <div><label>до</label><input type="date" name="to" lang="bg-BG" value="${esc((data && data.to) || "")}"></div>
+  <div><label>разходи €</label><input type="number" step="0.01" name="exp" value="${err ? "" : (data.expenses || 0)}" style="width:90px"></div>
   <button type="submit">Покажи</button>
 </form>
 ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>` : `
 <div class="kpis">
   <div class="kpi turn"><div class="l">Оборот (без ДДС)</div><div class="v">${bg(data.total_neto)} €</div></div>
+  <div class="kpi cost"><div class="l">Себестойност</div><div class="v">${bg(data.cogs)} €</div></div>
+  <div class="kpi exp"><div class="l">Разходи</div><div class="v">${bg(data.expenses)} €</div></div>
+  <div class="kpi res"><div class="l">Резултат</div><div class="v">${bg(data.result)} €</div></div>
   <div class="kpi inv"><div class="l">Фактурирано</div><div class="v">${bg(data.invoiced_neto)} €</div></div>
   <div class="kpi gap"><div class="l">Без фактура</div><div class="v">${bg(data.total_neto - data.invoiced_neto)} €</div></div>
   <div class="kpi"><div class="l">Сметки</div><div class="v">${data.accounts || 0}</div></div>
@@ -512,7 +553,10 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
 <div class="card"><h2>По клиенти<span>оборот · фактурирано · без фактура</span></h2>
   <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Фактурирано</th><th class="q">Без фактура</th><th class="q">Сметки</th></tr></thead>
   <tbody>${rows || '<tr><td colspan="5" class="note">Няма затворени сметки в периода.</td></tr>'}</tbody></table></div>
-<div class="note">Оборот = затворените сметки (total_sum без ДДС). „Без фактура" = оборот − издадени фактури (тип 1). Стоковите разписки (тип 11) не се броят като фактури.</div>
+<div class="card"><h2>Продадени артикули · себестойност<span>${(data.products || []).length} вида${data.units_truncated ? " · ⚠ частично" : ""}</span></h2>
+  <table><thead><tr><th>Артикул</th><th class="q">Бройки</th><th class="q">Себест./бр</th><th class="q">Обща себест.</th></tr></thead>
+  <tbody>${(data.products || []).map(p => `<tr><td class="n">${esc(p.name)}</td><td class="c">${bg(p.units)}</td><td class="q inv">${bg(p.unit_cost)}</td><td class="q">${bg(p.total_cost)}</td></tr>`).join("") || '<tr><td colspan="4" class="note">Няма продажби в периода.</td></tr>'}</tbody></table></div>
+<div class="note">Всичко е <b>без ДДС</b>. Оборот = затворените сметки (total_sum/1.2). „Без фактура" = оборот − фактури (тип 1); стоковите разписки (тип 11) не са фактури. Себестойност = Barsy avg_delivery_price × бройки; <b>зависи от коректно зареден склад</b> (докато складът не се води, е ориентировъчна). Резултат = оборот − себестойност − разходи.${data.units_truncated ? " ⚠ Бройките за този период са частични (много редове) — стесни периода за точни числа." : ""}</div>
 <script>
 var BYDAY=${err ? "{}" : JSON.stringify(data.by_day || {})};
 function bgn(n){return (Math.round((n||0)*100)/100).toLocaleString('bg-BG',{minimumFractionDigits:2,maximumFractionDigits:2})}
@@ -682,8 +726,9 @@ module.exports = async function handler(req, res) {
     const today = sofiaToday();
     const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 8) + "01"; // 1-во число на текущия месец
     const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
+    const expenses = Number(q.exp) || 0;
     let data;
-    try { data = await dashData(from, to, user, pass); }
+    try { data = await dashData(from, to, expenses, user, pass); }
     catch (e) { data = { from, to, error: "Не мога да прочета данните сега. Опитай пак след минута. (" + String(e && e.message) + ")" }; }
     res.status(200).send(dashboardPage(data, q.k));
     return;
@@ -795,21 +840,6 @@ module.exports = async function handler(req, res) {
   const allowed = isWrite ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
-
-  // ── ВРЕМЕНЕН: проби на източниците за дашборда (полета/структура) ──
-  if (body.action === "dash_probe") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    const out = {};
-    const one = async (label, m, p) => { try { const r = await cexCall(m, p, user, pass); let d = r.data; d = Array.isArray(d) ? d : (d && (d.list || (typeof d === "object" ? Object.values(d) : d))); const arr = Array.isArray(d) ? d : []; out[label] = { n: arr.length, sample: arr[0] || r.data }; } catch (e) { out[label] = "ERR " + String(e && e.message); } };
-    try {
-      const r = await cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["store_amount", "avg_delivery_price"] }, user, pass);
-      let L = r.data && (r.data.list || r.data) || {}; L = Array.isArray(L) ? L : Object.values(L);
-      out.menu_costs = L.filter(a => [81, 80, 143, 75, 76, 74, 129, 132].includes(a.article_id || a.id)).map(a => ({ id: a.article_id || a.id, name: a.article_name, avg: a.avg_delivery_price, cur: a.current_price }));
-    } catch (e) { out.menu_costs = "ERR " + String(e && e.message); }
-    await one("orders_desc", "Orders_getlist", { order_by: "date desc", length: 5 });
-    res.status(200).json({ ok: true, out: JSON.parse(JSON.stringify(out).slice(0, 4000)) });
-    return;
-  }
 
   // ── ДИАГНОСТИК (само четене): затворени сметки на дата (реалният разнос) ──
   if (body.action === "closed_on") {
