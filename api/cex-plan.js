@@ -720,10 +720,15 @@ module.exports = async function handler(req, res) {
       receiver_mol: null, discount: "0", seller_mol: null, receiver_country_id: "BG", deal_id: null,
       deal_title: "", seller_country_id: "BG", person_id: null, person_name: "", with_tax: 0,
       currency_id: "1", bank_name: null, bic: null, iban: null, is_anulate: "0",
-      client_paid_period: null, currency_rate: "1", bank_account_id: null, paymethod_id: null,
+      client_paid_period: null, currency_rate: "1", bank_account_id: null,
       receiver_name: null, seller_name: "", additional_text: "", free_text: ""
     };
     for (const k in defaults) if (!(k in values) || values[k] === undefined) values[k] = defaults[k];
+    // Начин на плащане: по подразбиране НЕ го подаваме → Barsy взима клиентския по
+    // подразбиране (тук „По банка", заложен в профила на клиента). Ако body даде изричен
+    // paymethod_id, го подаваме; ако е null — оставяме без.
+    delete values.paymethod_id;
+    if (body.paymethod_id !== undefined && body.paymethod_id !== null) values.paymethod_id = String(body.paymethod_id);
     // 3) редове: препрати грид data_source.target → вземи редовете
     let rows = [];
     let rowsRaw = null;
