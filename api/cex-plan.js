@@ -756,6 +756,18 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // ── ВРЕМЕНЕН: проби на Invoices_getlist (да видя дали носи връзка към сметка) ──
+  if (body.action === "inv_probe") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    let out = {};
+    for (const p of [{ filters: {} }, { filters: { type_id: 11 } }, { order_by: "inv_id desc", length: 20 }]) {
+      try { const r = await cexCall("Invoices_getlist", p, user, pass); const data = Array.isArray(r.data) ? r.data : (r.data && (r.data.list || Object.values(r.data))) || []; out[JSON.stringify(p)] = { n: (data || []).length, sample: (data || []).slice(0, 2) }; }
+      catch (e) { out[JSON.stringify(p)] = { err: String(e && e.message) }; }
+    }
+    res.status(200).json({ ok: true, out });
+    return;
+  }
+
   // ── ИЗТЕГЛИ СМЕТКИ за разнос ден (реалните, вече коригирани сметки — за ③ Стокова) ──
   // Чете съществуващите сметки за разноса (направени в навечерието + затворените за деня),
   // с техните account_id и ТЕКУЩИ количества (след ръчните допълвания). Всички тикнати.
