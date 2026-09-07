@@ -234,36 +234,16 @@ async function dashData(from, to, expenses, user, pass) {
   const VAT = 1.2;
   const inRange = d => d && d >= from && d <= to;
   const arrOf = x => { let d = x && x.data; d = Array.isArray(d) ? d : (d && (d.list || (typeof d === "object" ? Object.values(d) : []))) || []; return Array.isArray(d) ? d : []; };
-  // Orders се вадят на ПАРАЛЕЛНИ страници по offset (Barsy лимит 10000/заявка; „date desc"
-  // + offset странира назад). Цехът има ~50k поръчки общо → 6×10000 покриват цялата
-  // история, значи ПЪЛНИ бройки за коя да е дата (вкл. 01.01). Всичко наведнъж, паралелно.
-  // Първо леките извиквания (паралелно).
-  const [accR, invR, artR, stoR] = await Promise.all([
+  // Оборотът и COGS по артикул идват от Barsy справката „Продажби по артикули"
+  // (reportSalesByArticles) — авторитетна: оборотът ѝ съвпада със затворените сметки, а
+  // себестойността е историческата (не крехкото Orders-страниране). Всичко паралелно.
+  const [accR, invR, artR, stoR, salesRep] = await Promise.all([
     cexCall("Accounts_getlist", { order_by: "account_id desc", length: 8000 }, user, pass),
     cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 5000 }, user, pass).catch(() => ({ data: [] })),
     cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["avg_delivery_price", "store_amount"] }, user, pass).catch(() => ({ data: [] })),
     cexCall("Storeloads_getlist", { order_by: "store_load_id desc", length: 2000, extra_properties: ["all"] }, user, pass).catch(() => ({ data: [] })),
+    reportSalesByArticles(from, to, user, pass).catch(() => ({ ok: false, incomplete: true, articles: [] })),
   ]);
-  // Orders: страници по offset, ПОСЛЕДОВАТЕЛНО + retry. Barsy къса при паралелни заявки и
-  // тихото .catch подценяваше COGS (ту 84k, ту 14k). Тук всяка страница се повтаря до 4 пъти;
-  // спираме при непълна страница (край). Ако страница откаже съвсем → маркираме частично (⚠).
-  const ORD_LEN = 10000, ORD_MAXP = 8;
-  let ordersIncomplete = false;
-  const getOrdPage = async off => {
-    for (let t = 0; t < 4; t++) {
-      try { const r = await cexCall("Orders_getlist", { order_by: "date desc", length: ORD_LEN, offset: off }, user, pass); if (r && r.ok) return arrOf(r); } catch (e) {}
-      await new Promise(res => setTimeout(res, 250 * (t + 1)));
-    }
-    return null;
-  };
-  let ordAll = [];
-  for (let p = 0; p < ORD_MAXP; p++) {
-    const a = await getOrdPage(p * ORD_LEN);
-    if (a === null) { ordersIncomplete = true; break; }
-    ordAll = ordAll.concat(a);
-    if (a.length < ORD_LEN) break;   // непълна страница → край на историята
-  }
-  const ordR = { data: ordAll };
   let all = arrOf(accR);
   const byDay = {};        // "YYYY-MM-DD" → нето оборот
   const byClient = {};     // client_id → { name, neto, n }
@@ -306,63 +286,28 @@ async function dashData(from, to, expenses, user, pass) {
   // общо „без фактура" = сумата на разликите БЕЗ освободените клиенти (ИТТ)
   const gapNeto = Math.round(clients.reduce((s, c) => s + c.gap, 0) * 100) / 100;
 
-  // ── ФАЗА 2: себестойност (avg_delivery_price, без ДДС) + бройки продадени + резултат ──
-  // Цена на бройка = Barsy avg_delivery_price (една заявка). Бройки = Orders (последните,
-  // сортирани по дата) филтрирани по дата в периода — Orders НЕ филтрира по дата на сървъра.
-  const cost = {};   // article_id → avg_delivery_price (без ДДС)
-  // СКЛАД в пари: наличност (store_amount) × себестойност/бр, само положителните наличности
+  // ── ФАЗА 2: себестойност + печалба по артикул (от справка „Продажби по артикули") ──
+  // СКЛАД в пари: наличност (store_amount) × средна себестойност/бр, само положителните
   // (суровини със знак минус са незаписани зареждания и биха обезсмислили сумата).
   let stockValue = 0, stockItems = 0;
   for (const a of arrOf(artR)) {
     const id = a && (a.article_id || a.id); if (id == null) continue;
-    const c = Number(a.avg_delivery_price) || 0; cost[String(id)] = c;
+    const c = Number(a.avg_delivery_price) || 0;
     const q = Number(a.store_amount) || 0;
     if (q > 0 && c > 0) { stockValue += q * c; stockItems++; }
   }
   stockValue = Math.round(stockValue * 100) / 100;
-  // account_id → client_id (за себестойност/маржин по клиент)
-  const accClient = {};
-  for (const a of all) if (a.account_id != null) accClient[String(a.account_id)] = a.client_id != null ? a.client_id : 0;
-  const units = {};       // article_id → { name, units, rev }  (rev = оборот без ДДС)
-  const clientCogs = {};  // client_id → себестойност (без ДДС)
-  let cogs = 0, unitsTrunc = false;
-  {
-    const ord = arrOf(ordR);
-    let oldest = "9999";
-    for (const o of ord) {
-      const day = String(o.date || "").slice(0, 10); if (day && day < oldest) oldest = day;
-      if (!inRange(day)) continue;
-      const id = o.article_id; if (id == null) continue;
-      const amt = Number(o.amount) || 0; if (!amt) continue;
-      const u = units[String(id)] || (units[String(id)] = { name: o.article_name || ("#" + id), units: 0, rev: 0 });
-      u.units += amt;
-      const price = Number(o.current_price) || 0;         // на бройка, С ДДС → нето /1.2
-      u.rev += amt * price / VAT;
-      const lineCost = amt * (cost[String(id)] || 0);
-      cogs += lineCost;
-      const cid = o.account_id != null ? accClient[String(o.account_id)] : undefined;
-      if (cid !== undefined) clientCogs[cid] = (clientCogs[cid] || 0) + lineCost;
-    }
-    if (ord.length && oldest > from) unitsTrunc = true;   // не сме стигнали началото → частично
-    if (ordersIncomplete) unitsTrunc = true;              // страница отказа → частично
-  }
-  const products = Object.entries(units).map(([id, u]) => {
-    const c = cost[id] || 0; const un = Math.round(u.units * 1000) / 1000;
-    const tc = Math.round(un * c * 100) / 100; const rev = Math.round(u.rev * 100) / 100;
-    return { article_id: Number(id), name: u.name, units: un, unit_cost: Math.round(c * 100) / 100,
+  // Продадени артикули + себестойност — директно от Barsy справката (авторитетно).
+  const unitsTrunc = !!(salesRep && salesRep.incomplete);
+  const products = (salesRep && salesRep.articles || []).map(a => {
+    const un = Math.round(a.units * 1000) / 1000;
+    const rev = Math.round(a.revenue * 100) / 100;
+    const tc = Math.round(a.cost * 100) / 100;
+    return { article_id: a.article_id, name: a.name, units: un,
+      unit_cost: un ? Math.round((a.cost / un) * 100) / 100 : 0,
       total_cost: tc, revenue: rev, profit: Math.round((rev - tc) * 100) / 100 };
   }).filter(p => p.units > 0).sort((a, b) => b.revenue - a.revenue);
-  cogs = Math.round(cogs * 100) / 100;
-  // маржин по клиент (себестойността е приблизителна — по дата на поръчката)
-  const haveClientCogs = Object.keys(clientCogs).length > 0;
-  for (const c of clients) {
-    const cc = clientCogs[c.client_id];
-    if (haveClientCogs && cc != null && c.turnover > 0) {
-      c.cost = Math.round(cc * 100) / 100;
-      c.profit = Math.round((c.turnover - cc) * 100) / 100;
-      c.margin = Math.round((c.profit / c.turnover) * 1000) / 10;   // %
-    }
-  }
+  const cogs = Math.round(products.reduce((s, p) => s + p.total_cost, 0) * 100) / 100;
   const exp = Math.round((Number(expenses) || 0) * 100) / 100;
   const result = Math.round((totalNeto - cogs - exp) * 100) / 100;
 
@@ -412,17 +357,13 @@ async function dashData(from, to, expenses, user, pass) {
   const toDate = new Date(to + "T12:00:00Z");
   const stopped = clients.filter(c => c.last).map(c => ({ c, ago: Math.round((toDate - new Date(c.last + "T12:00:00Z")) / 864e5) })).filter(o => o.ago >= 14).sort((a, b) => b.ago - a.ago);
   if (stopped.length) insights.push({ t: "bad", text: `${stopped.length} клиента не са поръчвали ≥14 дни. Най-дълго: ${stopped[0].c.name} (${stopped[0].ago} дни, оборот ${money(stopped[0].c.turnover)}) — струва си обаждане.` });
-  // 5) най-печеливш / най-нисък маржин клиент
-  const withM = clients.filter(c => c.margin != null && c.turnover > 50);
-  if (withM.length >= 2) {
-    const best = withM.slice().sort((a, b) => b.margin - a.margin)[0];
-    const worst = withM.slice().sort((a, b) => a.margin - b.margin)[0];
-    insights.push({ t: "info", text: `Най-печеливш клиент: ${best.name} (${best.margin.toFixed(1)}% маржин). Най-нисък: ${worst.name} (${worst.margin.toFixed(1)}%).` });
-  }
-  // 6) артикул с най-нисък маржин
+  // 5) най-голям клиент по оборот
+  const bigC = clients.filter(c => !c.exempt).sort((a, b) => b.turnover - a.turnover)[0];
+  if (bigC) insights.push({ t: "info", text: `Най-голям клиент: ${bigC.name} — ${money(bigC.turnover)} (${totalNeto ? Math.round(bigC.turnover / totalNeto * 100) : 0}% от оборота).` });
+  // 6) артикул с най-нисък и най-висок маржин
   const pm = products.filter(p => p.revenue > 50).map(p => ({ p, m: p.profit / p.revenue * 100 }));
-  if (pm.length) { const low = pm.slice().sort((a, b) => a.m - b.m)[0];
-    insights.push({ t: low.m < 25 ? "warn" : "info", text: `Най-нисък маржин артикул: ${low.p.name} (${low.m.toFixed(1)}%). Най-печеливш: ${pm.slice().sort((a, b) => b.p.profit - a.p.profit)[0].p.name}.` }); }
+  if (pm.length) { const low = pm.slice().sort((a, b) => a.m - b.m)[0]; const hi = pm.slice().sort((a, b) => b.m - a.m)[0];
+    insights.push({ t: low.m < 25 ? "warn" : "info", text: `Маржин по артикул: най-нисък ${low.p.name} (${low.m.toFixed(1)}%), най-висок ${hi.p.name} (${hi.m.toFixed(1)}%).` }); }
   // 7) склад
   if (stockValue > 0) insights.push({ t: "info", text: `В склада стоят ${money(stockValue)} по себестойност (${stockItems} артикула).` });
 
@@ -647,8 +588,8 @@ header .d{font-size:15px;opacity:.93;margin-top:4px}
 function dashboardPage(data, k) {
   const bg = n => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("bg-BG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const err = data && data.error;
-  const mcol = c => c.margin != null ? `<td class="q" style="color:${c.margin >= 30 ? "#0a6b2e" : c.margin >= 15 ? "#b06a00" : "#b3121b"};font-weight:800">${c.margin.toLocaleString("bg-BG", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</td>` : `<td class="c">—</td>`;
-  const rows = err ? "" : (data.clients || []).map(c => `<tr><td class="n">${esc(c.name)}${c.exempt ? ' <span class="tag">не се фактурира</span>' : ""}</td><td class="q">${bg(c.turnover)}</td>${mcol(c)}<td class="q inv">${bg(c.invoiced)}</td><td class="q gap${!c.exempt && c.gap > 0.5 ? " bad" : ""}">${c.exempt ? "—" : bg(c.gap)}</td><td class="c">${c.accounts}</td></tr>`).join("");
+  const rows = err ? "" : (data.clients || []).map(c => `<tr><td class="n">${esc(c.name)}${c.exempt ? ' <span class="tag">не се фактурира</span>' : ""}</td><td class="q">${bg(c.turnover)}</td><td class="q inv">${bg(c.invoiced)}</td><td class="q gap${!c.exempt && c.gap > 0.5 ? " bad" : ""}">${c.exempt ? "—" : bg(c.gap)}</td><td class="c">${c.accounts}</td></tr>`).join("");
+  const tips = err ? "" : (data.insights || []).map(x => `<li class="${x.t}"><span class="ic">${x.t === "good" ? "✅" : x.t === "warn" ? "⚠️" : x.t === "bad" ? "🔴" : "💡"}</span><span>${esc(x.text)}</span></li>`).join("");
   const gapNeto = err ? 0 : (data.gap_neto != null ? data.gap_neto : (data.total_neto - data.invoiced_neto));
   const waiting = err ? [] : (data.clients || []).filter(c => !c.exempt && c.gap > 0.5).sort((a, b) => b.gap - a.gap);
   const waitRows = waiting.map(c => `<tr><td class="n">${esc(c.name)}</td><td class="q">${bg(c.turnover)}</td><td class="q inv">${bg(c.invoiced)}</td><td class="q gap bad">${bg(c.gap)}</td></tr>`).join("");
@@ -730,6 +671,7 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
   <div class="kpi stock"><div class="l">Склад (в пари)</div><div class="v">${bg(data.stock_value)} €</div><div class="s">${data.stock_items || 0} артикула · себест.</div></div>
   <div class="kpi"><div class="l">Сметки</div><div class="v">${data.accounts || 0}</div><div class="s">среден чек ${bg(data.avg_check)} €</div></div>
 </div>
+${tips ? `<div class="card"><h2>💡 Съвети / Наблюдения</h2><ul class="tips">${tips}</ul></div>` : ""}
 <div class="card"><h2>Оборот по период<span class="seg" id="seg"><button data-g="day">Ден</button><button data-g="week">Седмица</button><button data-g="month" class="on">Месец</button></span></h2>
   <div class="chartbox"><canvas id="cTrend" height="150"></canvas></div>
   <details class="tbl" open><summary>таблица · сравнение спрямо предходния</summary>
@@ -737,8 +679,8 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
 <div class="card"><h2>Оборот по клиент<span>дял от оборота</span></h2>
   <div class="chartbox donut"><canvas id="cClients" height="260" style="max-width:420px"></canvas></div>
   <details class="tbl" open><summary>таблица</summary>
-  <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Маржин</th><th class="q">Фактурирано</th><th class="q">Без фактура</th><th class="q">Сметки</th></tr></thead>
-  <tbody>${rows || '<tr><td colspan="6" class="note">Няма затворени сметки в периода.</td></tr>'}</tbody></table></details></div>
+  <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Фактурирано</th><th class="q">Без фактура</th><th class="q">Сметки</th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="5" class="note">Няма затворени сметки в периода.</td></tr>'}</tbody></table></details></div>
 <div class="card"><h2>📄 Чакат фактура<span>${waiting.length} клиента · общо ${bg(gapNeto)} €</span></h2>
   <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Фактурирано</th><th class="q">Без фактура</th></tr></thead>
   <tbody>${waitRows || '<tr><td colspan="4" class="note">Всичко е фактурирано 🎉</td></tr>'}</tbody></table></div>
@@ -752,7 +694,7 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
   <details class="tbl" open><summary>по доставчик</summary>
   <table><thead><tr><th>Доставчик</th><th class="q">Сума без ДДС</th></tr></thead>
   <tbody>${(data.suppliers || []).map(s => `<tr><td class="n">${esc(s.name)}</td><td class="q">${bg(s.neto)}</td></tr>`).join("") || '<tr><td colspan="2" class="note">Няма зареждания в периода.</td></tr>'}</tbody></table></details></div>
-<div class="note">Всичко е <b>без ДДС</b>. Оборот = затворените сметки (total_sum/1.2). „Без фактура" = оборот − фактури (тип 1), <b>без клиенти които не се фактурират (ИТТ)</b>; стоковите (тип 11) не са фактури. <b>Внимание:</b> фактурите не са календарен месец (част от края на месеца влизат в следващия), затова за кратки периоди „без фактура" по клиент може да е неточно. Склад = наличност × себестойност/бр (само положителни). Себестойност = avg_delivery_price × бройки. Резултат = оборот − себестойност − разходи.${data.units_truncated ? " ⚠ Бройките за този период са частични — стесни периода." : ""}</div>
+<div class="note">Всичко е <b>без ДДС</b>. Оборот = затворените сметки (total_sum/1.2). Себестойност и печалба по артикул идват от Barsy справка „Продажби по артикули" (историческа себестойност). „Без фактура" = оборот − фактури (тип 1), <b>без клиенти които не се фактурират (ИТТ)</b>; стоковите (тип 11) не са фактури. <b>Внимание:</b> фактурите не са календарен месец (част от края на месеца влизат в следващия). Склад = наличност × средна себестойност/бр (само положителни). Резултат = оборот − себестойност − разходи.${data.units_truncated ? " ⚠ Справката не се зареди докрай — числата може да са частични, презареди." : ""}</div>
 <script>
 var BYDAY=${err ? "{}" : JSON.stringify(data.by_day || {})};
 var CLIENTS=${err ? "[]" : JSON.stringify((data.clients || []).map(c => ({ name: c.name, t: c.turnover, last: c.last, n: c.accounts })))};
@@ -965,71 +907,6 @@ module.exports = async function handler(req, res) {
     if (!okV) { res.status(403).send(dashboardPage({ error: "Липсва или грешен ключ в линка." }, "")); return; }
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).send(dashboardPage({ error: "Не е конфигуриран достъп до цеха." }, q.k)); return; }
-    if (q.debug === "ord") {
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      const r = await cexCall("Orders_getlist", { order_by: "date desc", length: 3 }, user, pass);
-      const a = Array.isArray(r.data) ? r.data : Object.values(r.data || {});
-      res.status(200).send(JSON.stringify({ keys: a[0] ? Object.keys(a[0]) : [], sample: a.slice(0, 2) }, null, 2));
-      return;
-    }
-    if (q.debug === "acc") {
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3 }, user, pass);
-      const a = Array.isArray(r.data) ? r.data : Object.values(r.data || {});
-      res.status(200).send(JSON.stringify({ keys: a[0] ? Object.keys(a[0]) : [], sample: a.slice(0, 1) }, null, 2));
-      return;
-    }
-    if (q.debug === "repsum") {
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      const from = q.from || "2026-01-01", to = q.to || "2026-09-07";
-      const sb = await reportSalesByArticles(from, to, user, pass);
-      let rev = 0, cost = 0, units = 0;
-      sb.articles.forEach(a => { rev += a.revenue; cost += a.cost; units += a.units; });
-      res.status(200).send(JSON.stringify({ from, to, ok: sb.ok, articles: sb.articles.length,
-        revenue_no_dds: Math.round(rev * 100) / 100, cost_no_dds: Math.round(cost * 100) / 100,
-        units: Math.round(units), margin_pct: rev ? Math.round((rev - cost) / rev * 1000) / 10 : null }, null, 2));
-      return;
-    }
-    if (q.debug === "rep") {
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      const m = String(q.m || "Reports_sales_by_articles");
-      if (!/^Reports_[a-z_]+$/.test(m)) { res.status(400).send(JSON.stringify({ error: "bad method" })); return; }
-      const from = q.from || "2026-08-01", to = q.to || "2026-08-31";
-      const shapes = [
-        { filters: { ref_date: [from, to] } },
-        { filters: { ref_date: from } },
-        { filters: { date_from: from, date_to: to } },
-        { ref_date: [from, to] },
-      ];
-      const body = { active_struct_id: "eStructList_1", action_type: "values", filters: { ref_date: [from, to] } };
-      if (q.grp) body.group_field = q.grp;
-      if (q.page) body.page_num = Number(q.page);
-      const r = await cexCall(m, body, user, pass);
-      const d = r.data || {};
-      // намери масив с редове-данни
-      const findRows = o => { let best = null; (function w(x, depth) { if (!x || depth > 6) return; if (Array.isArray(x)) { if (x.length && typeof x[0] === "object" && !Array.isArray(x[0]) && ("article_id" in x[0] || "cnt" in x[0] || "oborot" in x[0] || "total_no_dds" in x[0] || "client_id" in x[0])) { if (!best || x.length > best.length) best = x; } x.forEach(e => w(e, depth + 1)); } else if (typeof x === "object") { for (const k in x) w(x[k], depth + 1); } })(o, 0); return best; };
-      const rows = findRows(d);
-      res.status(200).send(JSON.stringify({
-        method: m, ok: r.ok, topKeys: Object.keys(d).slice(0, 15),
-        rowCount: rows ? rows.length : null, rowKeys: rows && rows[0] ? Object.keys(rows[0]) : null,
-        sampleRows: rows ? rows.slice(0, 3) : (r.raw || "").slice(0, 500)
-      }, null, 2));
-      return;
-    }
-    if (q.debug === "recon") {
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      const ar = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 40 }, user, pass);
-      const accs = (Array.isArray(ar.data) ? ar.data : Object.values(ar.data || {})).filter(a => Number(a.total_sum) > 0 && a.close_date);
-      const acc = accs[0]; let out = { note: "no account" };
-      if (acc) {
-        const or = await cexCall("Orders_getlist", { filters: { account_id: acc.account_id }, length: 500 }, user, pass);
-        const os = Array.isArray(or.data) ? or.data : Object.values(or.data || {});
-        let sc = 0, sa = 0; os.forEach(o => { sc += (Number(o.amount) || 0) * (Number(o.current_price) || 0); sa += (Number(o.amount) || 0) * (Number(o.actual_price) || 0); });
-        out = { account_id: acc.account_id, client: acc.client_name, total_sum: acc.total_sum, sum_current: Math.round(sc * 100) / 100, sum_actual: Math.round(sa * 100) / 100, orders: os.length };
-      }
-      res.status(200).send(JSON.stringify(out, null, 2));
-      return;
-    }
     const today = sofiaToday();
     const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 4) + "-01-01"; // по подразбиране от 1 януари
     const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
