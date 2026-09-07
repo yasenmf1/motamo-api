@@ -6,6 +6,9 @@
     },
     "api/order.js": {
       "maxDuration": 10
+    },
+    "api/cex-plan.js": {
+      "maxDuration": 60
     }
   }
 }

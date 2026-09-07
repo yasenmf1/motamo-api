@@ -203,14 +203,19 @@ async function dashData(from, to, expenses, user, pass) {
   const VAT = 1.2;
   const inRange = d => d && d >= from && d <= to;
   const arrOf = x => { let d = x && x.data; d = Array.isArray(d) ? d : (d && (d.list || (typeof d === "object" ? Object.values(d) : []))) || []; return Array.isArray(d) ? d : []; };
-  // 5-те четения ПАРАЛЕЛНО (иначе последователно надхвърля таймаута); всяко със свой 9с.
-  const [accR, invR, artR, ordR, stoR] = await Promise.all([
+  // Orders се вадят на ПАРАЛЕЛНИ страници по offset (Barsy лимит 10000/заявка; „date desc"
+  // + offset странира назад). Цехът има ~50k поръчки общо → 6×10000 покриват цялата
+  // история, значи ПЪЛНИ бройки за коя да е дата (вкл. 01.01). Всичко наведнъж, паралелно.
+  const ordPages = [0, 1, 2, 3, 4, 5].map(i =>
+    cexCall("Orders_getlist", { order_by: "date desc", length: 10000, offset: i * 10000 }, user, pass).catch(() => ({ data: [] })));
+  const [accR, invR, artR, stoR, ...ordRs] = await Promise.all([
     cexCall("Accounts_getlist", { order_by: "account_id desc", length: 8000 }, user, pass),
     cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 5000 }, user, pass).catch(() => ({ data: [] })),
     cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["avg_delivery_price"] }, user, pass).catch(() => ({ data: [] })),
-    cexCall("Orders_getlist", { order_by: "date desc", length: 10000 }, user, pass).catch(() => ({ data: [] })),
-    cexCall("Storeloads_getlist", { order_by: "store_load_id desc", length: 2000, extra_properties: ["all"] }, user, pass).catch(() => ({ data: [] }))
+    cexCall("Storeloads_getlist", { order_by: "store_load_id desc", length: 2000, extra_properties: ["all"] }, user, pass).catch(() => ({ data: [] })),
+    ...ordPages
   ]);
+  const ordR = { data: [].concat(...ordRs.map(arrOf)) };
   let all = arrOf(accR);
   const byDay = {};        // "YYYY-MM-DD" → нето оборот
   const byClient = {};     // client_id → { name, neto, n }
@@ -860,22 +865,6 @@ module.exports = async function handler(req, res) {
   const allowed = isWrite ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
-
-  // ── ВРЕМЕНЕН: търсене на агрегат „продажби по артикул за период" ──
-  if (body.action === "sales_probe") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    const out = {};
-    const t = async (label, m, p) => { try { const r = await cexCall(m, p, user, pass); out[label] = JSON.stringify(r.data).slice(0, 500); } catch (e) { out[label] = "ERR " + String(e && e.message); } };
-    // артикул + продадено количество за период?
-    await t("art_sold", "Articles_getlistobject", { filters: {}, depots: [1], date_from: "2026-09-01", date_to: "2026-09-07", extra_properties: ["sold_amount", "sold_qty", "turnover"] });
-    await t("art_sold2", "Articles_getlistobject", { filters: { date_from: "2026-09-01", date_to: "2026-09-07" }, extra_properties: ["all"] });
-    // отчети
-    await t("reports_list", "Reports_getlist", {});
-    await t("rep_art_sales", "Reports_articles_sales", { date_from: "2026-09-01", date_to: "2026-09-07" });
-    await t("orders_agg", "Orders_getlist", { filters: {}, group_by: "article_id", date_from: "2026-09-01", date_to: "2026-09-07" });
-    res.status(200).json({ ok: true, out });
-    return;
-  }
 
   // ── ДИАГНОСТИК (само четене): затворени сметки на дата (реалният разнос) ──
   if (body.action === "closed_on") {
