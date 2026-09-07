@@ -183,12 +183,15 @@ async function seedRazos(razosDate, user, pass, includeSameDay) {
   const shops = await Promise.all(accts.map(async (a) => {
     const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
     const order = {};
+    let total = 0; // обща сума С ДДС — за връзка към издадена стокова (клиент+дата+сума)
     for (const o of (rows.data || [])) {
       const art = byId(o.article_id) || resolve(o.article_name);
-      if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + (Number(o.amount) || 0);
+      const amt = Number(o.amount) || 0, pr = Number(o.current_price) || 0;
+      if (amt && pr) total += Math.round(amt * pr * 1.2 * 100) / 100;
+      if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + amt;
     }
     const group = (cexObj(a) || {}).group || "adhoc";
-    return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group, order };
+    return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group, order, total: Math.round(total * 100) / 100 };
   }));
   return { shops, accounts: accts.length };
 }
@@ -476,6 +479,7 @@ table{border-collapse:collapse;background:#fff}
 #grid th{background:#2b2f36;color:#fff;position:sticky;top:0;z-index:2;font-weight:600;font-size:12px;letter-spacing:.02em}
 #grid tr:nth-child(even) td{background:#fafbfc}
 #grid th.shop,#grid td.shop{position:sticky;left:0;text-align:left;min-width:210px;max-width:250px;overflow:hidden;text-overflow:ellipsis;background:#fff;box-shadow:1px 0 0 #d7dade}
+.stok{display:inline-block;background:#c8151f;color:#fff;font-weight:800;font-size:11px;line-height:16px;width:16px;text-align:center;border-radius:4px;margin-left:4px}
 #grid td.shop{z-index:1;font-weight:500}#grid th.shop{z-index:3;background:#2b2f36}
 #grid td input{width:46px;text-align:center;border:1px solid #cfd3d8;border-radius:5px;padding:5px 3px;font-size:14px}
 #grid td input:focus{outline:2px solid #0a7d33;border-color:#0a7d33}
@@ -513,7 +517,7 @@ function schedSeed(){msg('Зареждам по график…');api({action:'s
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function shortName(client,rep){var r=(rep||client||'');r=r.replace(/[„“”"'']/g,'').replace(/^\\s*(ул\\.|бул\\.|ж\\.к\\.|жк|пл\\.)\\s*/i,'').replace(/\\s{2,}/g,' ').trim();return r||(client||'')}
 function renderGrid(){var h='<tr><th class="shop"><input type="checkbox" id="selall" checked title="Избери/махни всички"> Магазин</th>';MENU.forEach(function(m){h+='<th class="'+(m.is_set?'set':'')+'">'+m.name.replace('НACHI','')+'</th>'});h+='</tr>';
-shops.forEach(function(s,i){var full=(s.client||'')+(s.rep?(' · '+s.rep):'');var label=shortName(s.client,s.rep);h+='<tr><td class="shop" title="'+esc(full)+'"><input type="checkbox" class="selbox" data-i="'+i+'" '+(s.scheduled===false?'':'checked')+'> '+esc(label)+'</td>';
+shops.forEach(function(s,i){var full=(s.client||'')+(s.rep?(' · '+s.rep):'');var label=shortName(s.client,s.rep);var stok=s.has_stokova?' <span class="stok" title="Вече има издадена стокова">С</span>':'';h+='<tr><td class="shop" title="'+esc(full)+'"><input type="checkbox" class="selbox" data-i="'+i+'" '+(s.scheduled===false?'':'checked')+'> '+esc(label)+stok+'</td>';
 MENU.forEach(function(m){var v=(s.order&&s.order[m.name])||0;h+='<td class="'+(m.is_set?'set':'')+'"><input data-i="'+i+'" data-n="'+esc(m.name)+'" value="'+v+'" inputmode="numeric"></td>'});h+='</tr>'});$('grid').innerHTML=h;
 var sa=$('selall');if(sa){sa.addEventListener('change',function(){document.querySelectorAll('#grid .selbox').forEach(function(cb){cb.checked=sa.checked});syncRows()})}
 document.querySelectorAll('#grid .selbox').forEach(function(cb){cb.addEventListener('change',syncRows)});syncRows()}
@@ -782,18 +786,10 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // ── ВРЕМЕНЕН: последните стокови (doc_type 11) — виж receiver_id спрямо обект ──
-  if (body.action === "acct_docs") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    const r = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 25 }, user, pass);
-    let a = r.data; a = Array.isArray(a) ? a : Object.values(a || {});
-    res.status(200).json({ ok: true, recent: a.filter(x => String(x.type_id) === "11").map(x => ({ inv_id: x.inv_id, inv_num: x.inv_num, client_id: x.client_id, receiver_id: x.receiver_id, create_date: x.create_date, total_all: x.total_all, is_anulate: x.is_anulate })) });
-    return;
-  }
-
   // ── ИЗТЕГЛИ СМЕТКИ за разнос ден (реалните, вече коригирани сметки — за ③ Стокова) ──
   // Чете съществуващите сметки за разноса (направени в навечерието + затворените за деня),
   // с техните account_id и ТЕКУЩИ количества (след ръчните допълвания). Всички тикнати.
+  // Освен това маркира кои вече имат ИЗДАДЕНА стокова (по клиент+дата+сума → червено „С").
   if (body.action === "load_accounts") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
@@ -802,8 +798,26 @@ module.exports = async function handler(req, res) {
     // Без same-day: сметка, направена в деня D, е за разноса D+1 → не влиза в разнос D.
     try { s = await seedRazos(date, user, pass); }
     catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    // издадени стокови (doc_type 11, неанулирани) за тази дата → списък суми по клиент.
+    let stok = {}; // client_id → [total_all,…]
+    try {
+      const r = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 400 }, user, pass);
+      let inv = r.data; inv = Array.isArray(inv) ? inv : Object.values(inv || {});
+      for (const x of inv) {
+        if (String(x.type_id) !== "11" || String(x.is_anulate) === "1") continue;
+        if (String(x.create_date || "").slice(0, 10) !== date) continue;
+        (stok[x.client_id] = stok[x.client_id] || []).push(Number(x.total_all) || 0);
+      }
+    } catch (e) { stok = {}; }
+    // маркер: има стокова със същата сума за клиента (в рамките на ±0.05); „изразходваме" я,
+    // за да не маркира два обекта от една сметка (при различни суми).
+    const hasStok = (sh) => {
+      const arr = stok[sh.client_id]; if (!arr || !arr.length) return false;
+      const i = arr.findIndex(t => Math.abs(t - (sh.total || 0)) < 0.05);
+      if (i < 0) return false; arr.splice(i, 1); return true;
+    };
     res.status(200).json({ ok: true, date, seeded_accounts: s.shops.length,
-      shops: s.shops.map(x => ({ account_id: x.account_id, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, scheduled: true, order: sortObj(x.order || {}, 2) })) });
+      shops: s.shops.map(x => { const hs = hasStok(x); return { account_id: x.account_id, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, has_stokova: hs, scheduled: !hs, order: sortObj(x.order || {}, 2) }; }) });
     return;
   }
 
