@@ -705,9 +705,10 @@ module.exports = async function handler(req, res) {
     values.term_date = isoPlusDays(date, 30); values.payment_date = date;
     values.accounts = [acc];
     if (values.seller_company_id == null) values.seller_company_id = values.company_id != null ? values.company_id : 1;
-    // Начин на плащане „По банка" = 5 по подразбиране (потр. Claude вече има правото).
-    // Може да се подмени с body.paymethod_id (или null за без).
-    values.paymethod_id = body.paymethod_id !== undefined ? (body.paymethod_id === null ? null : String(body.paymethod_id)) : "5";
+    // Начин на плащане: по подразбиране БЕЗ (null) — потр. Claude още няма достъп до
+    // „По банка" (Barsy: „не може да бъде намерен … нужните права"). Като се даде правото,
+    // подаваме body.paymethod_id (напр. 5).
+    if (body.paymethod_id !== undefined) values.paymethod_id = body.paymethod_id === null ? null : String(body.paymethod_id);
     // ★ Barsy Invoices_create гърми с обща „непредвидена грешка", ако ЛИПСВА ключ, който
     // очаква. UI-ят винаги праща пълния набор. Затова гарантираме, че всички ключове
     // съществуват (null/"" по подразбиране), без да презаписваме взетите от формата.
@@ -774,6 +775,18 @@ module.exports = async function handler(req, res) {
     const scheduled = s.shops.filter(x => x.scheduled).length;
     res.status(200).json({ ok: true, date, dow: s.dow, seeded_accounts: s.shops.length, scheduled_count: scheduled,
       shops: s.shops.map(x => ({ account_id: x.account_id, last_date: x.last_date, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, scheduled: x.scheduled, order: sortObj(x.order || {}, 2) })) });
+    return;
+  }
+
+  // ── ВРЕМЕНЕН: списък начини на плащане (виждани от потр. Claude) ──
+  if (body.action === "paymethods") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    let out = {};
+    for (const m of ["Paymentmethods_getlist", "Paymethods_getlist"]) {
+      try { const r = await cexCall(m, { filters: {} }, user, pass); let a = r.data; a = Array.isArray(a) ? a : (a && (a.list || Object.values(a))) || []; out[m] = (a || []).map(x => ({ id: x.paymethod_id || x.id, name: x.name })); }
+      catch (e) { out[m] = "ERR " + String(e && e.message); }
+    }
+    res.status(200).json({ ok: true, out });
     return;
   }
 
