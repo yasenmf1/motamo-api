@@ -562,6 +562,18 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
+  // ── ВРЕМЕНЕН ДИАГНОСТИК (само четене): суровите редове на Orders_getlist за сметка ──
+  if (body.action === "orders_raw") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const acc = Number(body.account_id); if (!acc) { res.status(400).json({ ok: false, error: "no_account_id" }); return; }
+    const r = await cexCall("Orders_getlist", { filters: { account_id: acc } }, user, pass);
+    const data = Array.isArray(r.data) ? r.data : (r.data ? Object.values(r.data) : []);
+    res.status(200).json({ ok: true, account_id: acc, count: data.length,
+      rows: data.map(o => ({ order_id: o.order_id || o.id, article_id: o.article_id, article_name: o.article_name, amount: o.amount, status: o.status, create_date: o.create_date })) });
+    return;
+  }
+
   // ── ③ СТОКОВА РАЗПИСКА: сглобява Invoices_create от формата на сметката ──
   // body: {account_id, date, dry?}. dry=true → връща сглобеното БЕЗ да записва.
   if (body.action === "create_stokova") {
