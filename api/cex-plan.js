@@ -782,6 +782,21 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // ── ВРЕМЕНЕН: документите на сметка (за да засека издадена стокова) ──
+  if (body.action === "acct_docs") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    let out = {};
+    for (const id of [Number(body.a1) || 2937, Number(body.a2) || 2936, Number(body.a3) || 2896]) {
+      for (const m of ["Accounts_account_documents", "Invoices_getlist"]) {
+        const p = m === "Invoices_getlist" ? { filters: { account_id: id } } : { id };
+        try { const r = await cexCall(m, p, user, pass); out[m + " " + id] = JSON.stringify(r.data).slice(0, 500); }
+        catch (e) { out[m + " " + id] = "ERR " + String(e && e.message); }
+      }
+    }
+    res.status(200).json({ ok: true, out });
+    return;
+  }
+
   // ── ИЗТЕГЛИ СМЕТКИ за разнос ден (реалните, вече коригирани сметки — за ③ Стокова) ──
   // Чете съществуващите сметки за разноса (направени в навечерието + затворените за деня),
   // с техните account_id и ТЕКУЩИ количества (след ръчните допълвания). Всички тикнати.
