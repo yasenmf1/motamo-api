@@ -782,18 +782,15 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // ── ВРЕМЕНЕН: документите на сметка (за да засека издадена стокова) ──
+  // ── ВРЕМЕНЕН: пълен отговор Accounts_account_documents за 1 сметка ──
   if (body.action === "acct_docs") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    let out = {};
-    for (const id of [Number(body.a1) || 2937, Number(body.a2) || 2936, Number(body.a3) || 2896]) {
-      for (const m of ["Accounts_account_documents", "Invoices_getlist"]) {
-        const p = m === "Invoices_getlist" ? { filters: { account_id: id } } : { id };
-        try { const r = await cexCall(m, p, user, pass); out[m + " " + id] = JSON.stringify(r.data).slice(0, 500); }
-        catch (e) { out[m + " " + id] = "ERR " + String(e && e.message); }
-      }
-    }
-    res.status(200).json({ ok: true, out });
+    const id = Number(body.a1) || 2937;
+    const r = await cexCall("Accounts_account_documents", { id }, user, pass);
+    // намери масиви с документи (елементи с inv_id/type_id/doc_num)
+    const found = [];
+    (function w(n) { if (!n || typeof n !== "object") return; if (Array.isArray(n)) { if (n.length && n[0] && typeof n[0] === "object" && (n[0].inv_id != null || n[0].type_id != null || n[0].doc_num != null || n[0].num != null)) found.push(n); return n.forEach(w); } for (const k in n) w(n[k]); })(r.data);
+    res.status(200).json({ ok: true, id, doc_arrays: found.slice(0, 3), full: JSON.stringify(r.data).length > 4000 ? "(too big " + JSON.stringify(r.data).length + ")" : r.data });
     return;
   }
 
