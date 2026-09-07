@@ -801,10 +801,12 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     const out = {};
     const one = async (label, m, p) => { try { const r = await cexCall(m, p, user, pass); let d = r.data; d = Array.isArray(d) ? d : (d && (d.list || (typeof d === "object" ? Object.values(d) : d))); const arr = Array.isArray(d) ? d : []; out[label] = { n: arr.length, sample: arr[0] || r.data }; } catch (e) { out[label] = "ERR " + String(e && e.message); } };
-    // avg_delivery_price за меню артикули (CET KAWA 81, NACHI ORO 75)
-    await one("articles_cost", "Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["store_amount", "avg_delivery_price"] });
-    await one("orders_periodfilter", "Orders_getlist", { filters: { create_date_from: "2026-09-01", create_date_to: "2026-09-07" } });
-    await one("orders_datefilter", "Orders_getlist", { filters: { date_from: "2026-09-01", date_to: "2026-09-07" } });
+    try {
+      const r = await cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["store_amount", "avg_delivery_price"] }, user, pass);
+      let L = r.data && (r.data.list || r.data) || {}; L = Array.isArray(L) ? L : Object.values(L);
+      out.menu_costs = L.filter(a => [81, 80, 143, 75, 76, 74, 129, 132].includes(a.article_id || a.id)).map(a => ({ id: a.article_id || a.id, name: a.article_name, avg: a.avg_delivery_price, cur: a.current_price }));
+    } catch (e) { out.menu_costs = "ERR " + String(e && e.message); }
+    await one("orders_desc", "Orders_getlist", { order_by: "date desc", length: 5 });
     res.status(200).json({ ok: true, out: JSON.parse(JSON.stringify(out).slice(0, 4000)) });
     return;
   }
