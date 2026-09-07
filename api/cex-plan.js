@@ -839,6 +839,24 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
+  // ── ВРЕМЕНЕН: проби на зареждания (Storeloads) за Фаза 3 ──
+  if (body.action === "load_probe") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    const out = {};
+    try {
+      const r = await cexCall("Storeloads_getlist", { order_by: "store_load_id desc", length: 5, extra_properties: ["all"] }, user, pass);
+      let L = r.data || []; if (!Array.isArray(L)) L = Object.values(L);
+      out.list_keys = L[0] ? Object.keys(L[0]) : []; out.list_sample = L.slice(0, 2);
+      const id = L[0] && (L[0].store_load_id || L[0].id);
+      out.newest_id = id;
+      for (const m of ["Storeloads_get", "Storeloads_getdetails", "Storeloads_movements"]) {
+        try { const rr = await cexCall(m, { id }, user, pass); out[m] = JSON.stringify(rr.data).slice(0, 700); } catch (e) { out[m] = "ERR " + String(e && e.message); }
+      }
+    } catch (e) { out.err = String(e && e.message); }
+    res.status(200).json({ ok: true, out });
+    return;
+  }
+
   // ── ДИАГНОСТИК (само четене): затворени сметки на дата (реалният разнос) ──
   if (body.action === "closed_on") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
