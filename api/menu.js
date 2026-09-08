@@ -248,20 +248,26 @@ header h1{margin:0;font-size:19px;font-weight:800}header .d{font-size:13px;opaci
 .tip .th{font-weight:800;color:#0a6b2e;margin-bottom:6px}
 .tip ul{margin:0;padding-left:20px}.tip li{margin:3px 0;line-height:1.4}
 .empty{color:#7a8087;text-align:center;padding:30px}
+.lb{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:100;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none}
+.lb img{max-width:96%;max-height:88%;transform-origin:center center;user-select:none;-webkit-user-drag:none;touch-action:none}
+.lb .x{position:absolute;top:14px;right:14px;width:50px;height:50px;border-radius:50%;border:0;background:rgba(255,255,255,.92);font-size:22px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.lb .ctrl{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);display:flex;gap:14px}
+.lb .ctrl button{width:58px;height:58px;border-radius:50%;border:0;background:rgba(255,255,255,.92);font-size:28px;font-weight:800;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.4);line-height:1}
 @media(max-width:520px){.hero img{max-height:260px}.roll img{width:76px;height:76px}}
 </style></head><body>
 <header><h1>🍣 MOTAMO · Учи менюто</h1><div class="d">Сетове и ролки · състав и сосове · за екипа</div>
 <div class="tabs"><button id="tSets" class="on" onclick="tab('sets')">Сетове</button><button id="tRolls" onclick="tab('rolls')">Всички ролки</button></div>
 <input class="search" id="q" placeholder="🔎 търси сет, ролка или съставка (напр. пиле, унаги, скарида)…" oninput="onSearch()"></header>
 <div class="wrap"><div id="view"></div></div>
+<div id="lb" class="lb" hidden><button class="x" onclick="closeLB()">✕</button><img id="lbimg" src="" alt=""><div class="ctrl"><button onclick="zoomLB(-0.5)">−</button><button onclick="zoomLB(0,true)" title="нулирай">⟳</button><button onclick="zoomLB(0.5)">+</button></div></div>
 <script>
 var SETS=${J(data.sets)};var ROLLS=${J(data.rolls)};var MODE='sets';var CUR=null;
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function chips(sauces,al){var h='';(sauces||[]).forEach(function(s){h+='<span class="chip">🥢 '+esc(s)+'</span>'});(al||[]).forEach(function(a){h+='<span class="chip al">⚠ '+esc(a)+'</span>'});return h?'<div class="chips">'+h+'</div>':''}
-function rollCard(r,count){var lead=r.lead||r.composition||'';var img=r.image?'<img src="'+esc(r.image)+'" loading="lazy" onerror="this.style.visibility=\\'hidden\\'">':'<img>';
+function rollCard(r,count){var lead=r.lead||r.composition||'';var img=r.image?'<img src="'+esc(r.image)+'" loading="lazy" style="cursor:zoom-in" onclick="openLB(this.src)" onerror="this.style.visibility=\\'hidden\\'">':'<img>';
  return '<div class="roll">'+img+'<div class="rb"><div class="rn">'+esc(r.name||'?')+(count?'<span class="cnt">×'+count+'</span>':'')+'</div>'+(lead?'<div class="lead">'+esc(lead)+'</div>':'')+chips(r.sauces,r.allergens)+'</div></div>'}
 function setDetail(s){var h='<button class="back" onclick="CUR=null;render()">‹ Назад</button>';
- h+='<div class="hero"><img src="'+esc(s.image)+'" onerror="this.style.display=\\'none\\'"><div class="b"><h2>'+esc(s.name)+'</h2><div class="meta">'+(s.bites?s.bites+' хапки · ':'')+(s.weight?s.weight+' · ':'')+(s.price?s.price.toFixed(2)+' €':'')+'</div>'+(s.lead?'<p>'+esc(s.lead)+'</p>':'')+'</div></div>';
+ h+='<div class="hero"><img src="'+esc(s.image)+'" style="cursor:zoom-in" onclick="openLB(this.src)" onerror="this.style.display=\\'none\\'"><div class="b"><h2>'+esc(s.name)+'</h2><div class="meta">'+(s.bites?s.bites+' хапки · ':'')+(s.weight?s.weight+' · ':'')+(s.price?s.price.toFixed(2)+' €':'')+'</div>'+(s.lead?'<p>'+esc(s.lead)+'</p>':'')+'</div></div>';
  if(s.summary&&s.summary.length){h+='<div class="tip"><div class="th">💡 За сета — кажи на клиента</div><ul>'+s.summary.map(function(t){return '<li>'+esc(t)+'</li>'}).join('')+'</ul></div>'}
  h+='<div class="sec">Ролки в сета ('+(s.components?s.components.length:0)+')</div>';
  if(s.components&&s.components.length){s.components.forEach(function(c){h+=rollCard(c,c.count)})}else{h+='<div class="empty">Няма разбивка на ролките за този сет.</div>'}
@@ -273,9 +279,24 @@ function openSet(i){CUR=FSETS[i];render()}
 function openRoll(i){CUR={roll:FROLLS[i]};render()}
 function tab(m){MODE=m;CUR=null;document.getElementById('tSets').className=m==='sets'?'on':'';document.getElementById('tRolls').className=m==='rolls'?'on':'';render()}
 function onSearch(){CUR=null;render()}
+// ── Лайтбокс (уголемяване/зуум на снимка при клик) ──
+var LBs=1,LBx=0,LBy=0,LBdrag=null,LBtap=0;
+function lbApply(){var im=document.getElementById('lbimg');im.style.transform='translate('+LBx+'px,'+LBy+'px) scale('+LBs+')';im.style.cursor=LBs>1?'grab':'zoom-in'}
+function openLB(src){if(!src)return;var lb=document.getElementById('lb');document.getElementById('lbimg').src=src;LBs=1;LBx=0;LBy=0;lbApply();lb.hidden=false}
+function closeLB(){document.getElementById('lb').hidden=true}
+function zoomLB(d,reset){if(reset){LBs=1;LBx=0;LBy=0}else{LBs=Math.round(Math.max(1,Math.min(4,LBs+d))*10)/10;if(LBs<=1){LBx=0;LBy=0}}lbApply()}
+(function(){var lb=document.getElementById('lb'),im=document.getElementById('lbimg');
+ lb.addEventListener('click',function(e){if(e.target===lb)closeLB()});
+ lb.addEventListener('wheel',function(e){e.preventDefault();zoomLB(e.deltaY<0?0.4:-0.4)},{passive:false});
+ im.addEventListener('click',function(){var n=Date.now();if(n-LBtap<300){if(LBs>1)zoomLB(0,true);else zoomLB(1)}LBtap=n});
+ im.addEventListener('pointerdown',function(e){if(LBs<=1)return;LBdrag={x:e.clientX,y:e.clientY,ox:LBx,oy:LBy};try{im.setPointerCapture(e.pointerId)}catch(_){}});
+ im.addEventListener('pointermove',function(e){if(!LBdrag)return;LBx=LBdrag.ox+(e.clientX-LBdrag.x);LBy=LBdrag.oy+(e.clientY-LBdrag.y);lbApply()});
+ im.addEventListener('pointerup',function(){LBdrag=null});
+ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeLB()});
+})();
 function render(){var q=(document.getElementById('q').value||'').toLowerCase().trim();
  var v=document.getElementById('view');
- if(CUR&&CUR.roll){v.innerHTML='<button class="back" onclick="CUR=null;render()">‹ Назад</button><div class="hero"><img src="'+esc(CUR.roll.image)+'" onerror="this.style.display=\\'none\\'"><div class="b"><h2>'+esc(CUR.roll.name)+'</h2>'+(CUR.roll.lead?'<p>'+esc(CUR.roll.lead)+'</p>':'')+(CUR.roll.composition?'<p><b>Състав:</b> '+esc(CUR.roll.composition)+'</p>':'')+chips(CUR.roll.sauces,CUR.roll.allergens)+'</div></div>';return}
+ if(CUR&&CUR.roll){v.innerHTML='<button class="back" onclick="CUR=null;render()">‹ Назад</button><div class="hero"><img src="'+esc(CUR.roll.image)+'" style="cursor:zoom-in" onclick="openLB(this.src)" onerror="this.style.display=\\'none\\'"><div class="b"><h2>'+esc(CUR.roll.name)+'</h2>'+(CUR.roll.lead?'<p>'+esc(CUR.roll.lead)+'</p>':'')+(CUR.roll.composition?'<p><b>Състав:</b> '+esc(CUR.roll.composition)+'</p>':'')+chips(CUR.roll.sauces,CUR.roll.allergens)+'</div></div>';return}
  if(CUR){v.innerHTML=setDetail(CUR);return}
  function match(it){if(!q)return true;var s=(it.name||'')+' '+(it.lead||'')+' '+(it.composition||'')+' '+((it.sauces||[]).join(' '))+' '+((it.components||[]).map(function(c){return c.name}).join(' '));return s.toLowerCase().indexOf(q)>=0}
  if(MODE==='sets'){FSETS=SETS.filter(match);v.innerHTML=grid(FSETS,true)}else{FROLLS=ROLLS.filter(match);v.innerHTML=grid(FROLLS,false)}}
