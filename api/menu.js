@@ -135,6 +135,28 @@ function detectSauces(text) {
   const specific = out.some(l => /майонеза/.test(l) && l !== "Майонеза");
   return out.filter(l => !(specific && (l === "Майонеза")));
 }
+// „с/със" по правилото за благозвучие (със сьомга, със скарида; с пиле, с тон)
+function withPrep(w) { return /^[сзСЗ]/.test(w) ? "със " + w : "с " + w; }
+// Авто-обобщение на сет: разчита пълнежите на ролките → „6 вида, 3 с пиле, всички с крема сирене".
+function buildSetSummary(components) {
+  const n = components.length;
+  const bites = components.reduce((a, c) => a + (c.count || 0), 0);
+  const textOf = c => ((c.name || "") + " " + (c.lead || "") + " " + (c.composition || "")).toLowerCase();
+  const PROT = [["пиле", "пиле"], ["сьомга", "сьомга"], ["тон", "тон"], ["скарид", "скарида"], ["рак", "раци"], ["змиорк", "змиорка"]];
+  const COMM = [["крема сирене", "крема сирене"], ["крем сирене", "крема сирене"], ["авокадо", "авокадо"], ["краставиц", "краставица"], ["едамаме", "едамаме"], ["манго", "манго"]];
+  const countLabel = (defs) => { const m = {}; for (const c of components) { const t = textOf(c); const hit = new Set(); for (const [k, l] of defs) { if (t.includes(k)) hit.add(l); } for (const l of hit) m[l] = (m[l] || 0) + 1; } return m; };
+  const prot = countLabel(PROT), comm = countLabel(COMM);
+  const out = [];
+  out.push(`Сетът е от ${n} вида ролки · ${bites} хапки.`);
+  const protParts = Object.keys(prot).sort((a, b) => prot[b] - prot[a]).map(l => `${prot[l]} ${withPrep(l)}`);
+  if (protParts.length) out.push(`Протеини: ${protParts.join(", ")}.`);
+  const commParts = [];
+  for (const l of Object.keys(comm)) { const c = comm[l]; if (c === n && n > 1) commParts.push(`всички ${withPrep(l)}`); else if (c >= Math.ceil(n * 0.6) && c > 1) commParts.push(`повечето ${withPrep(l)}`); }
+  if (commParts.length) { const s = commParts.join(", "); out.push(s.charAt(0).toUpperCase() + s.slice(1) + "."); }
+  const sauces = []; for (const c of components) for (const s of (c.sauces || [])) if (!sauces.includes(s)) sauces.push(s);
+  if (sauces.length) out.push(`Сосове в сета: ${sauces.join(", ")}.`);
+  return out;
+}
 // Разбива „Състав: Х - 8 бр. Y - 4 бр. …" от описанието на сет → [{name,count}]
 function parseSetComponents(rawDesc) {
   const txt = stripTags(rawDesc);
@@ -182,7 +204,7 @@ function buildLearn(categories, rootArticles, source) {
         lead: r ? r.lead : "", composition: r ? r.composition : "", sauces: r ? r.sauces : [], allergens: r ? r.allergens : null };
     });
     const bites = comps.reduce((a, c) => a + (c.count || 0), 0);
-    return { id: s.id, name: s.name, image: s.image, price: s.price, lead: s.lead, weight: s.weight, bites, components: comps, allergens: s.allergens };
+    return { id: s.id, name: s.name, image: s.image, price: s.price, lead: s.lead, weight: s.weight, bites, components: comps, allergens: s.allergens, summary: buildSetSummary(comps) };
   }).sort((a, b) => b.price - a.price);
   // РОЛКИ = единичните артикули (не сетове), от ролковите категории
   const rollCats = /хосомаки|урамаки|футомаки|нигири|сашими/i;
@@ -200,7 +222,8 @@ header h1{margin:0;font-size:19px;font-weight:800}header .d{font-size:13px;opaci
 .tabs button{font:15px system-ui;font-weight:700;border:0;border-radius:20px;padding:8px 16px;cursor:pointer;background:rgba(255,255,255,.18);color:#fff}
 .tabs button.on{background:#fff;color:#b3121b}
 .wrap{max-width:1000px;margin:0 auto;padding:14px}
-.search{width:100%;padding:12px 14px;border:1px solid #d7dade;border-radius:10px;font-size:16px;margin-bottom:12px}
+.search{width:100%;padding:11px 14px;border:0;border-radius:10px;font-size:16px;margin-top:10px;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.search:focus{outline:2px solid #fff}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
 .card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(20,23,26,.08);cursor:pointer;transition:transform .1s}
 .card:hover{transform:translateY(-2px)}
@@ -221,12 +244,16 @@ header h1{margin:0;font-size:19px;font-weight:800}header .d{font-size:13px;opaci
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
 .chip{background:#fff3e0;color:#b06a00;border:1px solid #f0d9b5;border-radius:14px;padding:3px 10px;font-size:12px;font-weight:700}
 .chip.al{background:#eef3f8;color:#2b6ca3;border-color:#d3e2f0}
+.tip{background:#eaf6ee;border:1px solid #bfe3c9;border-left:5px solid #0a6b2e;border-radius:12px;padding:12px 14px;margin-bottom:16px}
+.tip .th{font-weight:800;color:#0a6b2e;margin-bottom:6px}
+.tip ul{margin:0;padding-left:20px}.tip li{margin:3px 0;line-height:1.4}
 .empty{color:#7a8087;text-align:center;padding:30px}
 @media(max-width:520px){.hero img{max-height:260px}.roll img{width:76px;height:76px}}
 </style></head><body>
 <header><h1>🍣 MOTAMO · Учи менюто</h1><div class="d">Сетове и ролки · състав и сосове · за екипа</div>
-<div class="tabs"><button id="tSets" class="on" onclick="tab('sets')">Сетове</button><button id="tRolls" onclick="tab('rolls')">Всички ролки</button></div></header>
-<div class="wrap"><input class="search" id="q" placeholder="търси сет, ролка или съставка…" oninput="render()"><div id="view"></div></div>
+<div class="tabs"><button id="tSets" class="on" onclick="tab('sets')">Сетове</button><button id="tRolls" onclick="tab('rolls')">Всички ролки</button></div>
+<input class="search" id="q" placeholder="🔎 търси сет, ролка или съставка (напр. пиле, унаги, скарида)…" oninput="onSearch()"></header>
+<div class="wrap"><div id="view"></div></div>
 <script>
 var SETS=${J(data.sets)};var ROLLS=${J(data.rolls)};var MODE='sets';var CUR=null;
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
@@ -235,6 +262,7 @@ function rollCard(r,count){var lead=r.lead||r.composition||'';var img=r.image?'<
  return '<div class="roll">'+img+'<div class="rb"><div class="rn">'+esc(r.name||'?')+(count?'<span class="cnt">×'+count+'</span>':'')+'</div>'+(lead?'<div class="lead">'+esc(lead)+'</div>':'')+chips(r.sauces,r.allergens)+'</div></div>'}
 function setDetail(s){var h='<button class="back" onclick="CUR=null;render()">‹ Назад</button>';
  h+='<div class="hero"><img src="'+esc(s.image)+'" onerror="this.style.display=\\'none\\'"><div class="b"><h2>'+esc(s.name)+'</h2><div class="meta">'+(s.bites?s.bites+' хапки · ':'')+(s.weight?s.weight+' · ':'')+(s.price?s.price.toFixed(2)+' €':'')+'</div>'+(s.lead?'<p>'+esc(s.lead)+'</p>':'')+'</div></div>';
+ if(s.summary&&s.summary.length){h+='<div class="tip"><div class="th">💡 За сета — кажи на клиента</div><ul>'+s.summary.map(function(t){return '<li>'+esc(t)+'</li>'}).join('')+'</ul></div>'}
  h+='<div class="sec">Ролки в сета ('+(s.components?s.components.length:0)+')</div>';
  if(s.components&&s.components.length){s.components.forEach(function(c){h+=rollCard(c,c.count)})}else{h+='<div class="empty">Няма разбивка на ролките за този сет.</div>'}
  return h}
@@ -244,6 +272,7 @@ var FSETS=SETS,FROLLS=ROLLS;
 function openSet(i){CUR=FSETS[i];render()}
 function openRoll(i){CUR={roll:FROLLS[i]};render()}
 function tab(m){MODE=m;CUR=null;document.getElementById('tSets').className=m==='sets'?'on':'';document.getElementById('tRolls').className=m==='rolls'?'on':'';render()}
+function onSearch(){CUR=null;render()}
 function render(){var q=(document.getElementById('q').value||'').toLowerCase().trim();
  var v=document.getElementById('view');
  if(CUR&&CUR.roll){v.innerHTML='<button class="back" onclick="CUR=null;render()">‹ Назад</button><div class="hero"><img src="'+esc(CUR.roll.image)+'" onerror="this.style.display=\\'none\\'"><div class="b"><h2>'+esc(CUR.roll.name)+'</h2>'+(CUR.roll.lead?'<p>'+esc(CUR.roll.lead)+'</p>':'')+(CUR.roll.composition?'<p><b>Състав:</b> '+esc(CUR.roll.composition)+'</p>':'')+chips(CUR.roll.sauces,CUR.roll.allergens)+'</div></div>';return}
