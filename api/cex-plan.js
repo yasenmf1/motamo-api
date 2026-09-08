@@ -1370,28 +1370,31 @@ module.exports = async function handler(req, res) {
     const toRows = (map) => Object.entries(map)
       .map(([name, qty]) => { const a = resolve(name); return a ? { article_id: a.id, article_name: a.name, amount: round(Number(qty)) } : null; })
       .filter(r => r && r.amount > 0);
-    // Наличността се чете, за да произведем САМО ЛИПСВАЩОТО = нужно − налично (но ≥0).
-    // Така: покрива минусите (сметките после минат — API потребителят не продава под
-    // нула) И не дублира вече наличното при повторно пускане (напр. само липсващата
-    // заготовка + сетовете, без пак да прави ролките).
     let sm = {};
     try { sm = await stockMap(user, pass); } catch (e) { sm = {}; }
     const rawStock = id => { const q = sm[String(id)]; return (q == null || isNaN(q)) ? 0 : q; };
-    const short = (need, id) => round(Math.max(0, Number(need) - rawStock(id)));
-    // Сетове (CET*): липсващото до поръчаното. Продават се като артикул → трябва в наличност.
+    const shortfall = (need, id) => Math.max(0, Number(need) - rawStock(id));
+    // ПРОДАВАНОТО (сетове + директни ролки/поке от заявката) се продава под ПАРТИДА
+    // L.<деня> в ② Сметки → произвеждаме ПЪЛНОТО поръчано под тази партида. Наличност
+    // в СТАРИ партиди не се брои (не се продава под L), затова тук НЕ гледаме склада.
     const setProduce = {};
-    for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set && Number(qty) > 0) { const p = short(qty, a.id); if (p > 0) setProduce[name] = p; } }
-    // Ролки/поке: директните поръчки + ролките за ПРОИЗВЕЖДАНИТЕ сетове, после липсващото.
-    const rollNeed = {};
-    for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_menu && !a.is_set && Number(qty) > 0) rollNeed[name] = (rollNeed[name] || 0) + Number(qty); }
-    for (const [name, qty] of Object.entries(explodeToRolls(setProduce))) { const a = resolve(name); if (a && a.is_menu && !a.is_set) rollNeed[name] = (rollNeed[name] || 0) + qty; }
+    for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set && Number(qty) > 0) setProduce[name] = round(Number(qty)); }
+    // Директно продадени ролки/поке → пълно (продават се под L). Компонентните ролки за
+    // сетовете се ТЕГЛЯТ от производството (FIFO, коя да е партида) → само липсващото до
+    // наличността (не дублираме вече наличните ролки).
+    const directRoll = {};
+    for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_menu && !a.is_set && Number(qty) > 0) directRoll[name] = (directRoll[name] || 0) + Number(qty); }
+    const setRolls = explodeToRolls(setProduce);
     const rollProduce = {};
-    for (const [name, qty] of Object.entries(rollNeed)) { const a = resolve(name); if (a) { const p = short(qty, a.id); if (p > 0) rollProduce[name] = p; } }
-    // ЗАГОТОВКИ: липсващото до дневната нужда (заг. от рецептите), за да са налични,
-    // преди да произведем ролките/сетовете, които ги консумират. По подразбиране ги
-    // произвеждаме (include_zag !== false), защото иначе липсват (майонези, сосове…).
+    for (const name of new Set([...Object.keys(directRoll), ...Object.keys(setRolls)])) {
+      const a = resolve(name); if (!a || !a.is_menu || a.is_set) continue;
+      const p = round((directRoll[name] || 0) + shortfall(setRolls[name] || 0, a.id));
+      if (p > 0) rollProduce[name] = p;
+    }
+    // ЗАГОТОВКИ: тегли се от производството → само липсващото до дневната нужда (покрива
+    // и минусите). Произвеждат се ПЪРВО и от най-дълбоката, преди ролките/сетовете.
     const zagProduce = {};
-    for (const [name, qty] of Object.entries(zag)) { const a = resolve(name); if (a && Number(qty) > 0) { const p = short(qty, a.id); if (p > 0) zagProduce[name] = p; } }
+    for (const [name, qty] of Object.entries(zag)) { const a = resolve(name); if (a && Number(qty) > 0) { const p = round(shortfall(Number(qty), a.id)); if (p > 0) zagProduce[name] = p; } }
     const doZag = body.include_zag !== false;
     // Произвеждаме заготовките ПЪРВО, после ролките, после сетовете (всяко следващо тегли предното).
     const zagRows = toRows(zagProduce).sort((a, b) => zagDepth(byId(a.article_id)) - zagDepth(byId(b.article_id)));
