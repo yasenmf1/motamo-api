@@ -111,6 +111,149 @@ function hasName(a) {
   return typeof a.article_name_public === "string" && a.article_name_public.trim().length > 0;
 }
 
+// ── „Учи менюто" (интерактивна обучителна страница за екипа) ──────────────────
+function stripTags(s) { return String(s || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(); }
+function escH(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+// нормализирано име за съпоставяне (сет-описание ↔ артикул): маха пунктуация/интервали, слива MOTA/МОТА
+function normName(s) { return String(s || "").toLowerCase().replace(/mota/g, "мота").replace(/[^a-zа-я0-9]/g, ""); }
+function imgOf(a, source) {
+  const stamp = typeof a.last_update === "string" ? a.last_update.replace(/\D/g, "") : "";
+  return `${IMAGE_BASE[source]}?article_id=${a.article_id}&mode=fix&width=550` + (stamp ? `&v=${stamp}` : "");
+}
+// Сосове/подправки, разпознати от свободния текст (за „с кои сосове се прави")
+const SAUCE_DICT = [
+  ["спайси майонеза", "Спайси майонеза"], ["чеснов", "Чеснова майонеза"], ["японска майонеза", "Японска майонеза"],
+  ["унаги", "Унаги сос"], ["терияки", "Терияки"], ["сладко чили", "Сладко чили"], ["сладък чили", "Сладко чили"],
+  ["манго", "Манго сос"], ["икура", "Икура сос"], ["васаби", "Васаби"], ["шрирача", "Шрирача"], ["срирача", "Шрирача"],
+  ["соев сос", "Соев сос"], ["теримайо", "Теримайо"], ["спайси", "Спайси сос"], ["майонеза", "Майонеза"]
+];
+function detectSauces(text) {
+  const t = " " + String(text || "").toLowerCase() + " ";
+  const out = [];
+  for (const [k, label] of SAUCE_DICT) { if (t.includes(k) && !out.includes(label)) out.push(label); }
+  // ако има конкретна майонеза, махни родовите „Майонеза"/„Спайси сос"
+  const specific = out.some(l => /майонеза/.test(l) && l !== "Майонеза");
+  return out.filter(l => !(specific && (l === "Майонеза")));
+}
+// Разбива „Състав: Х - 8 бр. Y - 4 бр. …" от описанието на сет → [{name,count}]
+function parseSetComponents(rawDesc) {
+  const txt = stripTags(rawDesc);
+  const m = txt.match(/[Сс][ъь]?став\s*:?(.+?)(?:[Тт]егло|[Аа]лерг|$)/);
+  const seg = m ? m[1] : txt;
+  const out = [];
+  const re = /([A-Za-zА-Яа-я][A-Za-zА-Яа-я .()/]*?)\s*[-–—]\s*(\d+)\s*бр/g;
+  let x;
+  while ((x = re.exec(seg)) !== null) { const name = x[1].replace(/\s+/g, " ").trim(); const count = parseInt(x[2], 10); if (name && count) out.push({ name, count }); }
+  return out;
+}
+// Строи данните за обучителната страница от суровото дърво на каталога.
+function buildLearn(categories, rootArticles, source) {
+  const all = []; const seen = new Set();
+  const push = (a, catName) => {
+    if (!a || seen.has(a.article_id) || !hasName(a)) return;
+    if (HIDDEN_CATEGORY.test(catName || "")) return;
+    seen.add(a.article_id);
+    const raw = (a.description_ml && a.description_ml.bg_BG) || a.description || "";
+    const spec = parseDescription(raw, a.article_name_public);
+    all.push({
+      id: a.article_id, name: a.article_name_public, cat: catName || "Други",
+      price: Number(a.current_price) || 0, image: imgOf(a, source),
+      lead: spec.lead || "", composition: spec.composition || "", weight: spec.weight || null, count: spec.count || null,
+      raw, allergens: (HAS_ALLERGENS[source] ? allergensFor(a.article_id) : null),
+      sauces: detectSauces((spec.lead || "") + " " + (spec.composition || "") + " " + stripTags(raw))
+    });
+  };
+  for (const e of categories) { const cn = (e.category && e.category.cat_name) || ""; for (const a of (e.articles || [])) push(a, cn); }
+  for (const a of rootArticles) push(a, "Други");
+  // индекс по нормализирано име
+  const byNorm = {}; for (const it of all) { const n = normName(it.name); if (n && !byNorm[n]) byNorm[n] = it; }
+  const findRoll = (name) => {
+    const n = normName(name); if (byNorm[n]) return byNorm[n];
+    // частично съвпадение (описанието понякога съкращава)
+    let best = null; for (const it of all) { const in2 = normName(it.name); if (!in2) continue; if (in2.includes(n) || n.includes(in2)) { if (!best || Math.abs(in2.length - n.length) < Math.abs(normName(best.name).length - n.length)) best = it; } }
+    return best;
+  };
+  // СЕТОВЕ = категория „Комбо" или име съдържа „сет"
+  const isSet = (it) => /комбо/i.test(it.cat) || /сет/i.test(it.name);
+  const sets = all.filter(isSet).map(s => {
+    const comps = parseSetComponents(s.raw).map(c => {
+      const r = findRoll(c.name);
+      return { name: c.name, count: c.count, id: r ? r.id : null, image: r ? r.image : null,
+        lead: r ? r.lead : "", composition: r ? r.composition : "", sauces: r ? r.sauces : [], allergens: r ? r.allergens : null };
+    });
+    const bites = comps.reduce((a, c) => a + (c.count || 0), 0);
+    return { id: s.id, name: s.name, image: s.image, price: s.price, lead: s.lead, weight: s.weight, bites, components: comps, allergens: s.allergens };
+  }).sort((a, b) => b.price - a.price);
+  // РОЛКИ = единичните артикули (не сетове), от ролковите категории
+  const rollCats = /хосомаки|урамаки|футомаки|нигири|сашими/i;
+  const rolls = all.filter(it => !isSet(it) && rollCats.test(it.cat)).sort((a, b) => a.name.localeCompare(b.name, "bg"));
+  return { sets, rolls };
+}
+function learnPage(data) {
+  const J = (o) => JSON.stringify(o).replace(/</g, "\\u003c");
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>MOTAMO · Учи менюто</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}body{margin:0;font:16px system-ui,Segoe UI,Roboto,sans-serif;background:#f4f5f7;color:#14171a}
+header{background:linear-gradient(135deg,#c8151f,#7a0c12);color:#fff;padding:14px 16px;position:sticky;top:0;z-index:10;box-shadow:0 2px 10px rgba(122,12,18,.3)}
+header h1{margin:0;font-size:19px;font-weight:800}header .d{font-size:13px;opacity:.9;margin-top:2px}
+.tabs{display:flex;gap:8px;margin-top:10px}
+.tabs button{font:15px system-ui;font-weight:700;border:0;border-radius:20px;padding:8px 16px;cursor:pointer;background:rgba(255,255,255,.18);color:#fff}
+.tabs button.on{background:#fff;color:#b3121b}
+.wrap{max-width:1000px;margin:0 auto;padding:14px}
+.search{width:100%;padding:12px 14px;border:1px solid #d7dade;border-radius:10px;font-size:16px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(20,23,26,.08);cursor:pointer;transition:transform .1s}
+.card:hover{transform:translateY(-2px)}
+.card img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:#eee}
+.card .b{padding:9px 11px}.card .n{font-weight:800;font-size:15px;line-height:1.2}
+.card .s{font-size:12px;color:#7a8087;margin-top:3px}
+.back{display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #d7dade;border-radius:20px;padding:8px 14px;font-weight:700;cursor:pointer;margin-bottom:12px;font-size:15px}
+.hero{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 10px rgba(20,23,26,.1);margin-bottom:16px}
+.hero img{width:100%;max-height:340px;object-fit:cover;display:block}
+.hero .b{padding:14px 16px}.hero h2{margin:0 0 4px;font-size:22px}
+.hero .meta{color:#b3121b;font-weight:800;font-size:15px}.hero p{color:#374151;line-height:1.4;margin:8px 0 0}
+.sec{font-size:14px;font-weight:800;color:#7a8087;text-transform:uppercase;letter-spacing:.4px;margin:6px 2px 10px}
+.roll{display:flex;gap:12px;background:#fff;border-radius:14px;box-shadow:0 2px 8px rgba(20,23,26,.08);padding:10px;margin-bottom:10px;align-items:flex-start}
+.roll img{width:96px;height:96px;border-radius:10px;object-fit:cover;flex:0 0 auto;background:#eee}
+.roll .rb{flex:1;min-width:0}.roll .rn{font-weight:800;font-size:16px}
+.roll .cnt{display:inline-block;background:#fdecec;color:#b3121b;font-weight:800;font-size:13px;border-radius:8px;padding:1px 8px;margin-left:6px}
+.roll .lead{color:#374151;font-size:14px;line-height:1.35;margin:4px 0}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
+.chip{background:#fff3e0;color:#b06a00;border:1px solid #f0d9b5;border-radius:14px;padding:3px 10px;font-size:12px;font-weight:700}
+.chip.al{background:#eef3f8;color:#2b6ca3;border-color:#d3e2f0}
+.empty{color:#7a8087;text-align:center;padding:30px}
+@media(max-width:520px){.hero img{max-height:260px}.roll img{width:76px;height:76px}}
+</style></head><body>
+<header><h1>🍣 MOTAMO · Учи менюто</h1><div class="d">Сетове и ролки · състав и сосове · за екипа</div>
+<div class="tabs"><button id="tSets" class="on" onclick="tab('sets')">Сетове</button><button id="tRolls" onclick="tab('rolls')">Всички ролки</button></div></header>
+<div class="wrap"><input class="search" id="q" placeholder="търси сет, ролка или съставка…" oninput="render()"><div id="view"></div></div>
+<script>
+var SETS=${J(data.sets)};var ROLLS=${J(data.rolls)};var MODE='sets';var CUR=null;
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function chips(sauces,al){var h='';(sauces||[]).forEach(function(s){h+='<span class="chip">🥢 '+esc(s)+'</span>'});(al||[]).forEach(function(a){h+='<span class="chip al">⚠ '+esc(a)+'</span>'});return h?'<div class="chips">'+h+'</div>':''}
+function rollCard(r,count){var lead=r.lead||r.composition||'';var img=r.image?'<img src="'+esc(r.image)+'" loading="lazy" onerror="this.style.visibility=\\'hidden\\'">':'<img>';
+ return '<div class="roll">'+img+'<div class="rb"><div class="rn">'+esc(r.name||'?')+(count?'<span class="cnt">×'+count+'</span>':'')+'</div>'+(lead?'<div class="lead">'+esc(lead)+'</div>':'')+chips(r.sauces,r.allergens)+'</div></div>'}
+function setDetail(s){var h='<button class="back" onclick="CUR=null;render()">‹ Назад</button>';
+ h+='<div class="hero"><img src="'+esc(s.image)+'" onerror="this.style.display=\\'none\\'"><div class="b"><h2>'+esc(s.name)+'</h2><div class="meta">'+(s.bites?s.bites+' хапки · ':'')+(s.weight?s.weight+' · ':'')+(s.price?s.price.toFixed(2)+' €':'')+'</div>'+(s.lead?'<p>'+esc(s.lead)+'</p>':'')+'</div></div>';
+ h+='<div class="sec">Ролки в сета ('+(s.components?s.components.length:0)+')</div>';
+ if(s.components&&s.components.length){s.components.forEach(function(c){h+=rollCard(c,c.count)})}else{h+='<div class="empty">Няма разбивка на ролките за този сет.</div>'}
+ return h}
+function grid(items,isSet){if(!items.length)return '<div class="empty">Няма съвпадения.</div>';var h='<div class="grid">';items.forEach(function(it,i){var sub=isSet?((it.bites?it.bites+' хапки':'')+(it.price?' · '+it.price.toFixed(2)+' €':'')):(it.sauces&&it.sauces.length?it.sauces.slice(0,2).join(', '):(it.cat||''));
+  h+='<div class="card" onclick="open'+(isSet?'Set':'Roll')+'('+i+')"><img src="'+esc(it.image)+'" loading="lazy" onerror="this.style.visibility=\\'hidden\\'"><div class="b"><div class="n">'+esc(it.name)+'</div><div class="s">'+esc(sub)+'</div></div></div>'});return h+'</div>'}
+var FSETS=SETS,FROLLS=ROLLS;
+function openSet(i){CUR=FSETS[i];render()}
+function openRoll(i){CUR={roll:FROLLS[i]};render()}
+function tab(m){MODE=m;CUR=null;document.getElementById('tSets').className=m==='sets'?'on':'';document.getElementById('tRolls').className=m==='rolls'?'on':'';render()}
+function render(){var q=(document.getElementById('q').value||'').toLowerCase().trim();
+ var v=document.getElementById('view');
+ if(CUR&&CUR.roll){v.innerHTML='<button class="back" onclick="CUR=null;render()">‹ Назад</button><div class="hero"><img src="'+esc(CUR.roll.image)+'" onerror="this.style.display=\\'none\\'"><div class="b"><h2>'+esc(CUR.roll.name)+'</h2>'+(CUR.roll.lead?'<p>'+esc(CUR.roll.lead)+'</p>':'')+(CUR.roll.composition?'<p><b>Състав:</b> '+esc(CUR.roll.composition)+'</p>':'')+chips(CUR.roll.sauces,CUR.roll.allergens)+'</div></div>';return}
+ if(CUR){v.innerHTML=setDetail(CUR);return}
+ function match(it){if(!q)return true;var s=(it.name||'')+' '+(it.lead||'')+' '+(it.composition||'')+' '+((it.sauces||[]).join(' '))+' '+((it.components||[]).map(function(c){return c.name}).join(' '));return s.toLowerCase().indexOf(q)>=0}
+ if(MODE==='sets'){FSETS=SETS.filter(match);v.innerHTML=grid(FSETS,true)}else{FROLLS=ROLLS.filter(match);v.innerHTML=grid(FROLLS,false)}}
+render();
+</script></body></html>`;
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -162,6 +305,14 @@ module.exports = async function handler(req, res) {
   const tree = (data && data.Categories_getalltree) || {};
   const categories = tree.categories || [];
   const rootArticles = tree.articles || [];
+
+  // „Учи менюто" — интерактивна обучителна страница (сет → ролки → състав/сосове).
+  if (req.query.view === "learn") {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", `s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${STALE_SECONDS}`);
+    res.status(200).send(learnPage(buildLearn(categories, rootArticles, source)));
+    return;
+  }
 
   // The root `category.cat_name` (e.g. "Меню Мотамо SHOP") is Barsy's internal
   // parent-container label, not a real menu category — only usable as an actual
