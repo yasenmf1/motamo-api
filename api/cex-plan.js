@@ -586,14 +586,35 @@ function explodeToRolls(order) {
   for (const [k, v] of Object.entries(order || {})) add(k, Number(v) || 0);
   return rolls;
 }
-function rollsToZag(rolls) {
+// Всички ЗАГОТОВКИ, нужни за дневната заявка — по ЦЯЛОТО рецептурно дърво: мини
+// през сетовете И ролките, за да хване и заготовките, които висят ДИРЕКТНО под
+// сет (напр. „заг. ХОСОМАКИ ПУШЕНА СЬОМГА" под CET MORI), плюс вложените заготовки.
+function orderToZag(orderMap) {
   const zag = {};
-  const walk = (name, qty) => {
-    const art = resolve(name); if (!art) return;
-    for (const c of art.components) { const cart = c.id != null ? byId(c.id) : resolve(c.name); if (cart && cart.cat === "Заготовки") { zag[cart.name] = (zag[cart.name] || 0) + qty * c.qty; walk(cart.name, qty * c.qty); } }
+  const walk = (art, qty) => {
+    if (!art) return;
+    for (const c of (art.components || [])) {
+      const ca = c.id != null ? byId(c.id) : resolve(c.name);
+      if (!ca) continue;
+      const need = qty * (Number(c.qty) || 0);
+      if (ca.cat === "Заготовки") { zag[ca.name] = (zag[ca.name] || 0) + need; walk(ca, need); }
+      else if (ca.is_set || ca.is_menu) walk(ca, need); // през сетове/ролки към вложените заготовки
+    }
   };
-  for (const [k, v] of Object.entries(rolls || {})) walk(k, Number(v) || 0);
+  for (const [k, v] of Object.entries(orderMap || {})) walk(resolve(k), Number(v) || 0);
   return zag;
+}
+// Дълбочина на заготовка в рецептата (1 = само суровини вътре). Произвеждаме
+// заготовките от НАЙ-ДЪЛБОКАТА към плитката, та вложената да е налична преди
+// родителя (заг. Марината → заг. Сварен ориз → заг. ХОСОМАКИ).
+function zagDepth(art, seen) {
+  if (!art) return 1; seen = seen || new Set(); if (seen.has(art.id)) return 1;
+  seen.add(art.id); let d = 1;
+  for (const c of (art.components || [])) {
+    const ca = c.id != null ? byId(c.id) : resolve(c.name);
+    if (ca && ca.cat === "Заготовки") { const cd = 1 + zagDepth(ca, seen); if (cd > d) d = cd; }
+  }
+  seen.delete(art.id); return d;
 }
 // Пълна разбивка на дневната заявка до ВСЯКА заготовка+суровина (консумация по
 // рецепти, всички нива). Връща {article_id: количество}. Това е „произв. по
@@ -617,7 +638,7 @@ const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&am
 function compute(shops) {
   const agg = {};
   for (const s of shops) for (const [k, v] of Object.entries(s.order || {})) agg[k] = (agg[k] || 0) + (Number(v) || 0);
-  return { agg, rolls: explodeToRolls(agg), zag: rollsToZag(explodeToRolls(agg)) };
+  return { agg, rolls: explodeToRolls(agg), zag: orderToZag(agg) };
 }
 // Партида/срок: партида = L.<деня на производство>, срок = +3 дни (правилото на цеха).
 function isoToDDMMYYYY(iso) { const p = String(iso).split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : iso; }
@@ -1326,7 +1347,8 @@ module.exports = async function handler(req, res) {
     for (const [name, qty] of Object.entries(zag)) { const a = resolve(name); if (a && Number(qty) > 0) zagProduce[name] = round(Number(qty) + deficit(a.id)); }
     const doZag = body.include_zag !== false;
     // Произвеждаме заготовките ПЪРВО, после ролките, после сетовете (всяко следващо тегли предното).
-    const zagRows = toRows(zagProduce), rollRows = toRows(rollProduce), setRows = toRows(setProduce);
+    const zagRows = toRows(zagProduce).sort((a, b) => zagDepth(byId(a.article_id)) - zagDepth(byId(b.article_id)));
+    const rollRows = toRows(rollProduce), setRows = toRows(setProduce);
     const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate, produced_zagotovki: sortObj(zagProduce, 2), produced_rolls: sortObj(rollProduce, 2), produced_sets: sortObj(setProduce, 2) };
     // Ред: заготовки → ролки → сетове.
     try {
