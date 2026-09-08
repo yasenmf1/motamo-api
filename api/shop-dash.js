@@ -63,15 +63,22 @@ async function salesByArticles(from, to, user, pass) {
   return { ok, incomplete, articles: Object.values(by) };
 }
 
-// Карта артикул → категория (за опаковка + донат по категория).
-async function articleCats(user, pass) {
+// Карта артикул → категория (за опаковка + донат по категория). Идва от ПУБЛИЧНОТО
+// меню на точката (Categories_getalltree), както в api/menu.js.
+const MENU_PUBLIC = "https://motamoshop.barsyonline.menu/public/endpoints/json?";
+async function articleCats() {
   const map = {};
   try {
-    const r = await shopCall("Articles_getlist", { length: 3000 }, user, pass);
-    for (const a of arrOf(r)) {
-      const id = a && (a.article_id || a.id); if (id == null) continue;
-      map[String(id)] = a.category_name || a.category || a.cat_name || (a.category_id != null ? String(a.category_id) : null);
+    const r = await withTimeout(async (signal) => {
+      const resp = await fetch(MENU_PUBLIC, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Categories_getalltree: {} }), signal });
+      return resp.ok ? resp.json() : null;
+    });
+    const tree = (r && r.Categories_getalltree) || {};
+    for (const entry of (tree.categories || [])) {
+      const name = (entry.category && entry.category.cat_name) || null;
+      for (const a of (entry.articles || [])) { const id = a && a.article_id; if (id != null && map[String(id)] == null) map[String(id)] = name; }
     }
+    for (const a of (tree.articles || [])) { const id = a && a.article_id; if (id != null && map[String(id)] == null) map[String(id)] = (tree.category && tree.category.cat_name) || "Други"; }
   } catch (e) {}
   return map;
 }
@@ -97,18 +104,19 @@ async function shopDashData(from, to, expenses, user, pass) {
   const prevTo = new Date(new Date(from) - 864e5).toISOString().slice(0, 10);
   const prevFrom = new Date(new Date(prevTo) - (days - 1) * 864e5).toISOString().slice(0, 10);
 
-  const [accR, payR, salesRep, prevRep, cats] = await Promise.all([
+  const [accR, salesRep, prevRep, cats] = await Promise.all([
     shopCall("Accounts_getlist", { order_by: "account_id desc", length: 12000 }, user, pass),
-    shopCall("Payments_getlist", { order_by: "payment_id desc", length: 12000 }, user, pass).catch(() => ({ data: [] })),
     salesByArticles(from, to, user, pass).catch(() => ({ ok: false, incomplete: true, articles: [] })),
     salesByArticles(prevFrom, prevTo, user, pass).catch(() => ({ ok: false, articles: [] })),
-    articleCats(user, pass),
+    articleCats(),
   ]);
 
   const all = arrOf(accR);
   const byDay = {}, byHour = {}, byChanDay = {};   // ден→нето, час→нето, ден→{online,counter}
   let totalNeto = 0, accountsN = 0, onlineNeto = 0, counterNeto = 0, onlineN = 0, counterN = 0;
-  let sample = null;
+  // Плащане: в брой / карта / друго — от самата СМЕТКА (payment_name на затворената сметка)
+  const byPay = { cash: { neto: 0, n: 0 }, card: { neto: 0, n: 0 }, other: { neto: 0, n: 0 } };
+  let payUsed = false, sample = null;
   for (const a of all) {
     if (String(a.account_alias || "").includes("CLTEST")) continue;
     const full = String(a.close_date || "");
@@ -125,22 +133,9 @@ async function shopDashData(from, to, expenses, user, pass) {
     const cd = byChanDay[day] || (byChanDay[day] = { online: 0, counter: 0 });
     if (online) { onlineNeto = round(onlineNeto + neto); onlineN++; cd.online = round(cd.online + neto); }
     else { counterNeto = round(counterNeto + neto); counterN++; cd.counter = round(cd.counter + neto); }
+    const pn = a.payment_name || a.payment_short_name;
+    if (pn) { payUsed = true; const k = payKind(pn); byPay[k].neto = round(byPay[k].neto + neto); byPay[k].n++; }
     totalNeto = round(totalNeto + neto); accountsN++;
-  }
-
-  // Плащане: в брой / карта / друго — от Payments_getlist по дата в периода
-  const byPay = { cash: { neto: 0, n: 0 }, card: { neto: 0, n: 0 }, other: { neto: 0, n: 0 } };
-  let paySample = null, payUsed = false;
-  for (const p of arrOf(payR)) {
-    if (String(p.is_anulate) === "1") continue;
-    const day = String(p.create_date || p.date || p.payment_date || "").slice(0, 10);
-    if (!inRange(day)) continue;
-    const gross = Number(p.sum != null ? p.sum : (p.amount != null ? p.amount : p.total)) || 0;
-    if (!gross) continue;
-    if (!paySample) paySample = p;
-    payUsed = true;
-    const k = payKind(p.paymethod_name || p.paymethod || p.payment_method || p.name);
-    byPay[k].neto = round(byPay[k].neto + gross / VAT); byPay[k].n++;
   }
 
   // Продукти: оборот/бройки от справката, себестойност от costs.js, опаковка по категория
@@ -199,7 +194,7 @@ async function shopDashData(from, to, expenses, user, pass) {
     online_neto: onlineNeto, counter_neto: counterNeto, online_n: onlineN, counter_n: counterN,
     pay: byPay, pay_used: payUsed, cogs, expenses: exp, result, products, by_cat: byCat, movers,
     units_truncated: unitsTrunc, insights,
-    _debug: { acc_total: all.length, acc_sample: sample, pay_sample: paySample, sales_ok: salesRep && salesRep.ok, sales_n: (salesRep && salesRep.articles || []).length, cat_n: Object.keys(cats).length } };
+    _debug: { acc_total: all.length, acc_sample: sample, pay: byPay, sales_ok: salesRep && salesRep.ok, sales_n: (salesRep && salesRep.articles || []).length, cat_n: Object.keys(cats).length } };
 }
 
 // ── Страница ─────────────────────────────────────────────────────────────────
