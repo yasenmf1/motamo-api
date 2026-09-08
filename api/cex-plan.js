@@ -933,14 +933,28 @@ table{border-collapse:collapse;background:#fff}
 #grid td.set input{background:#fff7e6}#grid th.set{background:#4a3d1a;color:#ffe6a3}
 h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.plan table{width:auto;min-width:260px}.plan table td,.plan table th{border:1px solid #e2e4e8;padding:7px 12px;text-align:left}.plan table th{background:#f0f1f3}.plan td.q{font-weight:700;color:#b3121b;text-align:right}
 @media print{header,.noprint{display:none}.wrap{padding:0}}
+.pickwrap{position:fixed;inset:0;background:rgba(20,23,26,.5);display:flex;align-items:center;justify-content:center;z-index:20;padding:16px}
+.pickbox{background:#fff;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.35);width:min(560px,100%);max-height:82vh;display:flex;flex-direction:column;overflow:hidden}
+.pickhd{display:flex;align-items:center;gap:10px;padding:12px 14px;background:#2b2f36;color:#fff;flex-wrap:wrap}
+.pickhd .pickhint{font-size:12px;opacity:.8;flex:1}
+.pickbox #pickfilter{margin:10px 14px 6px;padding:9px 10px;border:1px solid #cfd3d8;border-radius:7px;font-size:15px}
+.picklist{overflow:auto;padding:4px 8px 12px}
+.pick{padding:11px 12px;border-radius:8px;cursor:pointer;user-select:none;border:1px solid #eef0f2;margin:4px 0;font-size:15px}
+.pick:hover{background:#eef7f0;border-color:#0a7d33}
+.pick.has{opacity:.55}
+.pick .tag{font-size:11px;background:#e2e4e8;color:#555;border-radius:4px;padding:1px 6px;margin-left:6px}
 </style></head><body>
 <header><div class="brand"><img src="https://motamo.bg/icons/icon-192.png" alt="MOTAMO" onerror="this.style.display='none'"><h1>MOTAMO цех<small>производство · сметки · стокова</small></h1></div>
 <span id="tokwrap"><input id="tok" type="password" placeholder="токен" size="16"></span>
-<span class="grp"><label>Зареди</label><input id="date" type="date" lang="bg-BG"><b class="dlab" id="dlab"></b><button class="alt" onclick="loadByLot()" title="Зарежда сметките от партида L.<деня от „Зареди"> (±2 дни), през реалните движения — най-точната база. За референтен минал ден (после Изчисли/Производство/Сметки) или преди ③ Стокова.">↻ Зареди по партида</button></span>
-<span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="window.print()">Печат</button></span>
+<span class="grp"><label>Зареди</label><input id="date" type="date" lang="bg-BG"><b class="dlab" id="dlab"></b><button class="alt" onclick="loadByLot()" title="Зарежда сметките от партида L.[деня от Зареди] (±2 дни), през реалните движения — най-точната база. За референтен минал ден (после Изчисли/Производство/Сметки) или преди ③ Стокова.">↻ Зареди по партида</button></span>
+<span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="openPicker()" title="Добави магазин, който днешният разнос не е заредил">+ Магазин</button></span>
 <span class="grp"><label>Партида</label><input id="pdate" type="date" lang="bg-BG" title="Партида L.<тази дата>, срок +3 дни"><b class="dlab" id="plab"></b></span>
 <span class="grp"><button class="prod" onclick="doProduce()">① Производство</button><button class="acc" onclick="doAccounts()">② Сметки</button><button class="acc" onclick="doStokova()">③ Стокова</button></span></header>
 <div class="wrap"><div id="msg" class="msg"></div><div class="scroll"><table id="grid"></table></div><div id="planbox"></div></div>
+<div id="picker" class="pickwrap" style="display:none"><div class="pickbox">
+<div class="pickhd"><b>Добави магазин</b><span class="pickhint">двоен клик върху ред → добавя се долу в решетката</span><button class="alt" onclick="closePicker()">Затвори</button></div>
+<input id="pickfilter" placeholder="търси магазин…" oninput="renderPick()">
+<div id="picklist" class="picklist"></div></div></div>
 <script>
 var MENU=${JSON.stringify(MENU)};var shops=[];var LASTACC=[];var $=function(id){return document.getElementById(id)};
 (function(){var urlk='';try{urlk=new URLSearchParams(location.search).get('k')||new URLSearchParams(location.search).get('token')||''}catch(e){}
@@ -980,6 +994,13 @@ function loadByLot(){var d=$('date').value;var lot='L.'+(d?d.split('-').reverse(
 function doStokova(){var sel=selShops().filter(function(s){return s.account_id});if(!sel.length){msg('Няма сметки за стокова. Натисни „↻ Зареди по партида" (или ② Сметки), после тикни обектите.','err');return}var pd=$('pdate').value||$('date').value;if(!confirm('Ще СЪЗДАМ стокови за '+sel.length+' обекта (една по една), с дата '+pd+'.\\nПродължавам?'))return;var i=0,okc=0,errs=[];
 function nextStok(){if(i>=sel.length){msg('✓ Стокови: '+okc+'/'+sel.length+' готови'+(errs.length?(' · грешки: '+errs.join(' | ')):''),errs.length?'err':'ok');return}var s=sel[i];msg('Правя стокова '+(i+1)+'/'+sel.length+' ('+shortName(s.client,s.rep)+')…');api({action:'create_stokova',account_id:s.account_id,date:pd}).then(function(j){if(j.ok)okc++;else errs.push('#'+s.account_id+': '+(j.error||''));i++;nextStok()}).catch(function(e){errs.push('#'+s.account_id+': мрежа');i++;nextStok()})}
 nextStok()}
+var OBJECTS=[];
+function openPicker(){msg('Зареждам магазините…');api({action:'list_objects'}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}OBJECTS=j.objects||[];$('pickfilter').value='';renderPick();$('picker').style.display='flex';$('pickfilter').focus();msg('')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function closePicker(){$('picker').style.display='none'}
+function pickLabel(o){return (o.client||'')+(o.rep?(' · '+o.rep):'')}
+function inShops(o){return shops.some(function(s){return String(s.client_id||'')===String(o.client_id||'')&&String(s.person_id||'')===String(o.person_id||'')})}
+function renderPick(){var f=($('pickfilter').value||'').toLowerCase();var h='';OBJECTS.forEach(function(o,idx){var lab=pickLabel(o);if(f&&lab.toLowerCase().indexOf(f)<0)return;var has=inShops(o);h+='<div class="pick'+(has?' has':'')+'" ondblclick="addShop('+idx+')" title="двоен клик за добавяне">'+esc(lab)+(has?' <span class="tag">вече е долу</span>':'')+'</div>'});$('picklist').innerHTML=h||'<div class="pick" style="opacity:.6;cursor:default">няма съвпадения</div>'}
+function addShop(idx){var o=OBJECTS[idx];if(!o)return;if(inShops(o)){msg('„'+pickLabel(o)+'" вече е в решетката.','err');return}collect();shops.push({client:o.client,rep:o.rep,client_id:o.client_id,person_id:o.person_id,order:{},scheduled:true});renderGrid();renderPick();msg('Добавен „'+pickLabel(o)+'". Попълни количествата и натисни „Изчисли".','ok');var sc=document.querySelector('.scroll');if(sc)sc.scrollTop=sc.scrollHeight}
 function renderCreated(cr){var h='<h2>Създадени сметки</h2><table><tr><th class="shop">Магазин</th><th>сметка №</th><th>артикули</th><th>статус</th></tr>';cr.forEach(function(c){var full=(c.client||'')+(c.rep?(' · '+c.rep):'');h+='<tr><td class="shop" title="'+esc(full)+'">'+esc(shortName(c.client,c.rep))+'</td><td>'+(c.account_id||'—')+'</td><td>'+(c.items||0)+'</td><td>'+(c.ok?'✓':esc(c.skipped||'грешка'))+'</td></tr>'});$('planbox').innerHTML=h+'</table>'}
 </script></body></html>`;
 }
@@ -1134,6 +1155,29 @@ module.exports = async function handler(req, res) {
       .map(a => ({ account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, close_date: a.close_date, create_date: a.create_date }))
       .sort((x, y) => (x.client_id || 0) - (y.client_id || 0) || (x.person_id || 0) - (y.person_id || 0));
     res.status(200).json({ ok: true, date, count: closed.length, closed });
+    return;
+  }
+
+  // ── Списък на ВСИЧКИ обекти от регистъра (за бутона „+ Магазин") ──
+  // Връща по един ред на обект (client_id:person_id от CEX_OBJECTS) с име, за да
+  // може собственикът да добави магазин, който днешният разнос не е заредил.
+  if (body.action === "list_objects") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 2000 }, user, pass);
+    let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
+    const byKey = {};
+    for (const a of all) {
+      if (String(a.account_alias || "").includes("CLTEST")) continue;
+      const key = cexKey(a);
+      if (!CEX_OBJECTS[key] || byKey[key]) continue; // подредено по account_id desc → първата е най-скорошната
+      byKey[key] = { key, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null,
+        rep: a.person_name || null, group: (CEX_OBJECTS[key] || {}).group || "adhoc",
+        last: String(a.close_date || a.create_date || "").slice(0, 10) };
+    }
+    const objects = Object.values(byKey).sort((x, y) =>
+      (x.client || "").localeCompare(y.client || "", "bg") || (x.rep || "").localeCompare(y.rep || "", "bg"));
+    res.status(200).json({ ok: true, count: objects.length, objects });
     return;
   }
 
