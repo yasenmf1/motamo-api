@@ -721,10 +721,10 @@ body{margin:0;font:15px system-ui,Segoe UI,Roboto,sans-serif;background:#eef0f3;
 header{background:linear-gradient(135deg,#c8151f,#7a0c12);color:#fff;padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;box-shadow:0 2px 12px rgba(122,12,18,.3);flex:0 0 auto}
 header .brand{font-size:17px;font-weight:800;letter-spacing:.3px;display:flex;align-items:center;gap:9px}
 header .brand img{width:30px;height:30px;border-radius:7px;background:#fff;padding:2px}
-.tabs{display:flex;gap:8px}
-.tabs button{font:14px system-ui;font-weight:700;padding:9px 20px;border:0;border-radius:9px;cursor:pointer;background:rgba(255,255,255,.18);color:#fff;transition:background .12s}
+.tabs{display:flex;gap:10px}
+.tabs button{font:17px system-ui;font-weight:800;padding:11px 26px;border:2px solid rgba(255,255,255,.65);border-radius:11px;cursor:pointer;background:rgba(255,255,255,.12);color:#fff;letter-spacing:.3px;transition:all .12s}
 .tabs button:hover{background:rgba(255,255,255,.28)}
-.tabs button.on{background:#fff;color:#b3121b;box-shadow:0 2px 6px rgba(0,0,0,.15)}
+.tabs button.on{background:#fff;color:#b3121b;border-color:#fff;box-shadow:0 3px 10px rgba(0,0,0,.28);transform:translateY(-1px)}
 .frames{position:relative;flex:1 1 auto;min-height:0}
 .frames iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#eef0f3}
 .frames iframe[hidden]{display:none}
