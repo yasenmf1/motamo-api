@@ -1326,25 +1326,28 @@ module.exports = async function handler(req, res) {
     const toRows = (map) => Object.entries(map)
       .map(([name, qty]) => { const a = resolve(name); return a ? { article_id: a.id, article_name: a.name, amount: round(Number(qty)) } : null; })
       .filter(r => r && r.amount > 0);
-    // Наличността се чете, за да произведем НУЖНОТО + колкото ЛИПСВА (покрива минуси),
-    // та сметките после да минат (API потребителят не продава под нула).
+    // Наличността се чете, за да произведем САМО ЛИПСВАЩОТО = нужно − налично (но ≥0).
+    // Така: покрива минусите (сметките после минат — API потребителят не продава под
+    // нула) И не дублира вече наличното при повторно пускане (напр. само липсващата
+    // заготовка + сетовете, без пак да прави ролките).
     let sm = {};
     try { sm = await stockMap(user, pass); } catch (e) { sm = {}; }
-    const deficit = id => { const q = sm[String(id)]; const n = (q == null || isNaN(q)) ? 0 : q; return n < 0 ? -n : 0; };
-    // Сетове (CET*): поръчано + дефицит. Продават се като артикул → трябва да са в наличност.
+    const rawStock = id => { const q = sm[String(id)]; return (q == null || isNaN(q)) ? 0 : q; };
+    const short = (need, id) => round(Math.max(0, Number(need) - rawStock(id)));
+    // Сетове (CET*): липсващото до поръчаното. Продават се като артикул → трябва в наличност.
     const setProduce = {};
-    for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set && Number(qty) > 0) setProduce[name] = round(Number(qty) + deficit(a.id)); }
-    // Ролки/поке: директните поръчки + ролките за ПРОИЗВЕЖДАНИТЕ сетове, после + дефицит.
+    for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set && Number(qty) > 0) { const p = short(qty, a.id); if (p > 0) setProduce[name] = p; } }
+    // Ролки/поке: директните поръчки + ролките за ПРОИЗВЕЖДАНИТЕ сетове, после липсващото.
     const rollNeed = {};
     for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_menu && !a.is_set && Number(qty) > 0) rollNeed[name] = (rollNeed[name] || 0) + Number(qty); }
     for (const [name, qty] of Object.entries(explodeToRolls(setProduce))) { const a = resolve(name); if (a && a.is_menu && !a.is_set) rollNeed[name] = (rollNeed[name] || 0) + qty; }
     const rollProduce = {};
-    for (const [name, qty] of Object.entries(rollNeed)) { const a = resolve(name); if (a) rollProduce[name] = round(Number(qty) + deficit(a.id)); }
-    // ЗАГОТОВКИ: нужните за деня (заг. от рецептите) + дефицит (покрива минуса), за да са
-    // налични, преди да произведем ролките/сетовете, които ги консумират. По подразбиране
-    // ги произвеждаме (include_zag !== false), защото иначе липсват (майонези, сосове…).
+    for (const [name, qty] of Object.entries(rollNeed)) { const a = resolve(name); if (a) { const p = short(qty, a.id); if (p > 0) rollProduce[name] = p; } }
+    // ЗАГОТОВКИ: липсващото до дневната нужда (заг. от рецептите), за да са налични,
+    // преди да произведем ролките/сетовете, които ги консумират. По подразбиране ги
+    // произвеждаме (include_zag !== false), защото иначе липсват (майонези, сосове…).
     const zagProduce = {};
-    for (const [name, qty] of Object.entries(zag)) { const a = resolve(name); if (a && Number(qty) > 0) zagProduce[name] = round(Number(qty) + deficit(a.id)); }
+    for (const [name, qty] of Object.entries(zag)) { const a = resolve(name); if (a && Number(qty) > 0) { const p = short(qty, a.id); if (p > 0) zagProduce[name] = p; } }
     const doZag = body.include_zag !== false;
     // Произвеждаме заготовките ПЪРВО, после ролките, после сетовете (всяко следващо тегли предното).
     const zagRows = toRows(zagProduce).sort((a, b) => zagDepth(byId(a.article_id)) - zagDepth(byId(b.article_id)));
