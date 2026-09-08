@@ -180,7 +180,7 @@ async function shopFromAccount(a, user, pass) {
     if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + amt;
   }
   const group = (cexObj(a) || {}).group || "adhoc";
-  return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group, order, total: Math.round(total * 100) / 100 };
+  return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group, order, total: Math.round(total * 100) / 100, close_date: String(a.close_date || "").slice(0, 10) || null };
 }
 
 async function seedRazos(razosDate, user, pass, includeSameDay) {
@@ -946,7 +946,7 @@ h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.
 </style></head><body>
 <header><div class="brand"><img src="https://motamo.bg/icons/icon-192.png" alt="MOTAMO" onerror="this.style.display='none'"><h1>MOTAMO цех<small>производство · сметки · стокова</small></h1></div>
 <span id="tokwrap"><input id="tok" type="password" placeholder="токен" size="16"></span>
-<span class="grp"><label>Зареди</label><input id="date" type="date" lang="bg-BG"><b class="dlab" id="dlab"></b><button class="alt" onclick="seed()" title="Зарежда ТЕКУЩИТЕ сметки за деня (по дата, вкл. отворените, с количествата) — коригирай и прави ③ Стокова от тях.">Зареди сметки</button><button class="alt" onclick="loadByLot()" title="Зарежда сметките от партида L.[деня от Зареди] (±2 дни), през реалните движения. За референтен минал ден или преди ③ Стокова.">↻ По партида</button></span>
+<span class="grp"><label>Зареди</label><input id="date" type="date" lang="bg-BG"><b class="dlab" id="dlab"></b><button class="alt" onclick="loadRazos()" title="Зарежда РАЗНОСА за деня = отворените сметки (направени в навечерието/сутринта), без вчерашните затворени. За ③ Стокова.">Зареди сметки</button><button class="alt" onclick="loadByLot()" title="Зарежда сметките от партида L.[деня от Зареди] (±2 дни), през реалните движения. За референтен минал ден или преди ③ Стокова.">↻ По партида</button></span>
 <span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="openPicker()" title="Добави магазин, който днешният разнос не е заредил">+ Магазин</button></span>
 <span class="grp"><label>Партида</label><input id="pdate" type="date" lang="bg-BG" title="Партида L.<тази дата>, срок +3 дни"><b class="dlab" id="plab"></b></span>
 <span class="grp"><button class="prod" onclick="doProduce()">① Производство</button><button class="acc" onclick="doAccounts()">② Сметки</button><button class="acc" onclick="doStokova()">③ Стокова</button></span></header>
@@ -991,6 +991,8 @@ function doProduce(){if(!shops.length){msg('Първо натисни „Зар�
 function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value||$('date').value;var lot=pd?('L.'+pd.split('-').reverse().join('.')):'';if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy за '+sel.length+' магазина'+(lot?(', ВЕЧЕ с партида '+lot):'')+'.\\nЦените ги слага Barsy по правилото на клиента.\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;sel.forEach(function(s,i){if(cr[i]&&cr[i].account_id)s.account_id=cr[i].account_id});LASTACC=cr.filter(function(c){return c.ok&&c.account_id}).map(function(c){return c.account_id});msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. После натисни ③ Стокова.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 // Тегли сметките, ползвали производствената ПАРТИДА L.<деня от „Зареди"> (±2 дни).
 function loadByLot(){var d=$('date').value;var lot='L.'+(d?d.split('-').reverse().join('.'):'');msg('Търся сметките с партида '+lot+' (±2 дни)…');api({action:'load_by_lot',date:d}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}shops=j.shops||[];renderGrid();$('planbox').innerHTML='';if(!shops.length){msg('Няма сметки с партида '+(j.lot||lot)+'. (Провери деня в „Зареди" и че има производство с тази партида.)','err');return}var sc=shops.filter(function(s){return s.has_stokova}).length;msg('Партида '+(j.lot||lot)+': '+shops.length+' сметки я ползват. '+(sc?(sc+' вече имат стокова (червено „С", разтикнати). '):'')+'Тикни които искаш и натисни ③ Стокова.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+// Зарежда РАЗНОСА за деня = отворените сметки (направени в навечерието/сутринта), за ③ Стокова.
+function loadRazos(){var d=$('date').value;msg('Зареждам разноса за '+d+'…');api({action:'load_razos',date:d}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}shops=j.shops||[];renderGrid();$('planbox').innerHTML='';if(!shops.length){msg('Няма отворени сметки за '+d+'. (Първо ② Сметки, или провери деня.)','err');return}var sc=shops.filter(function(s){return s.has_stokova}).length;msg('Разнос '+d+': '+shops.length+' отворени сметки.'+(sc?(' '+sc+' вече имат стокова (червено „С", разтикнати).'):'')+' Тикни които искаш и натисни ③ Стокова.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function doStokova(){var sel=selShops().filter(function(s){return s.account_id});if(!sel.length){msg('Няма сметки за стокова. Натисни „↻ Зареди по партида" (или ② Сметки), после тикни обектите.','err');return}var pd=$('pdate').value||$('date').value;if(!confirm('Ще СЪЗДАМ стокови за '+sel.length+' обекта (една по една), с дата '+pd+'.\\nПродължавам?'))return;var i=0,okc=0,errs=[];
 function nextStok(){if(i>=sel.length){msg('✓ Стокови: '+okc+'/'+sel.length+' готови'+(errs.length?(' · грешки: '+errs.join(' | ')):''),errs.length?'err':'ok');return}var s=sel[i];msg('Правя стокова '+(i+1)+'/'+sel.length+' ('+shortName(s.client,s.rep)+')…');api({action:'create_stokova',account_id:s.account_id,date:pd}).then(function(j){if(j.ok)okc++;else errs.push('#'+s.account_id+': '+(j.error||''));i++;nextStok()}).catch(function(e){errs.push('#'+s.account_id+': мрежа');i++;nextStok()})}
 nextStok()}
@@ -1317,6 +1319,35 @@ module.exports = async function handler(req, res) {
     const hasStok = (sh) => { const arr = stok[sh.client_id]; if (!arr || !arr.length) return false; const i = arr.findIndex(t => Math.abs(t - (sh.total || 0)) < 0.05); if (i < 0) return false; arr.splice(i, 1); return true; };
     res.status(200).json({ ok: true, date, lot: s.lot, seeded_accounts: s.shops.length,
       shops: s.shops.map(x => { const hs = hasStok(x); return { account_id: x.account_id, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, total: x.total, has_stokova: hs, scheduled: !hs, order: sortObj(x.order || {}, 2) }; }) });
+    return;
+  }
+
+  // ── ЗАРЕЖДАНЕ НА РАЗНОСА (за ③ Стокова): ОТВОРЕНИТЕ сметки за деня (направени в
+  // навечерието или същата сутрин). Изключва вчерашните ЗАТВОРЕНИ (те са минал разнос),
+  // затова „по дата" вече не хваща вчерашните. Маркира и вече-издадена стокова („С").
+  if (body.action === "load_razos") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    let s;
+    try { s = await seedRazos(date, user, pass, true); }
+    catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    // само ОТВОРЕНИТЕ (черновите на разноса) — затворените са приключен минал разнос
+    const openShops = s.shops.filter(x => !x.close_date);
+    const okDates = {}; for (let k = -2; k <= 2; k++) okDates[isoPlusDays(date, k)] = 1;
+    let stok = {};
+    try {
+      const r = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 400 }, user, pass);
+      let inv = r.data; inv = Array.isArray(inv) ? inv : Object.values(inv || {});
+      for (const x of inv) {
+        if (String(x.type_id) !== "11" || String(x.is_anulate) === "1") continue;
+        if (!okDates[String(x.create_date || "").slice(0, 10)]) continue;
+        (stok[x.client_id] = stok[x.client_id] || []).push(Number(x.total_all) || 0);
+      }
+    } catch (e) { stok = {}; }
+    const hasStok = (sh) => { const arr = stok[sh.client_id]; if (!arr || !arr.length) return false; const i = arr.findIndex(t => Math.abs(t - (sh.total || 0)) < 0.05); if (i < 0) return false; arr.splice(i, 1); return true; };
+    res.status(200).json({ ok: true, date, seeded_accounts: openShops.length,
+      shops: openShops.map(x => { const hs = hasStok(x); return { account_id: x.account_id, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, total: x.total, has_stokova: hs, scheduled: !hs, order: sortObj(x.order || {}, 2) }; }) });
     return;
   }
 
