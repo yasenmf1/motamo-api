@@ -201,6 +201,8 @@ async function shopDashData(from, to, expenses, user, pass) {
 function page(data, k) {
   const bg = n => round(n).toLocaleString("bg-BG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const err = data && data.error;
+  const tot = err ? 0 : (data.total_neto || 0);
+  const pctOf = v => tot > 0 ? Math.round((Number(v) || 0) / tot * 100) + "%" : "—";
   const tips = err ? "" : (data.insights || []).map(x => `<li class="${x.t}"><span class="ic">${x.t === "good" ? "✅" : x.t === "warn" ? "⚠️" : x.t === "bad" ? "🔴" : "💡"}</span><span>${esc(x.text)}</span></li>`).join("");
   const pay = err ? { cash: {}, card: {}, other: {} } : data.pay;
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
@@ -246,6 +248,7 @@ td.c{text-align:right;color:#7a8087}tr:nth-child(even) td{background:#fafbfc}
 .tips li{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:10px;font-size:14px;line-height:1.35;background:#f7f8fa;border-left:5px solid #9aa0a6}
 .tips li .ic{font-size:16px;flex:0 0 auto}.tips li.good{background:#eaf6ee;border-color:#0a6b2e}.tips li.warn{background:#fdf3e3;border-color:#b06a00}
 .tips li.bad{background:#fdecec;border-color:#b3121b}.tips li.info{background:#eef3f8;border-color:#2b6ca3}
+.split{display:flex;gap:16px;flex-wrap:wrap;padding:8px 8px 14px}.split table{flex:1;min-width:240px;border:1px solid #eef0f3;border-radius:10px;overflow:hidden}
 .note{color:#7a8087;font-size:12px;text-align:center;margin:2px 0 20px}
 .err{background:#fff;border-radius:12px;padding:24px;text-align:center;color:#b3121b}
 @media(max-width:520px){th,td{padding:8px 10px;font-size:13px}.kpi .v{font-size:22px}}
@@ -269,6 +272,19 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
   <div class="kpi on"><div class="l">Онлайн (сайт)</div><div class="v">${bg(data.online_neto)} €</div><div class="s">${data.online_n || 0} поръчки · каса ${bg(data.counter_neto)} €</div></div>
   <div class="kpi card2"><div class="l">Плащане с карта</div><div class="v">${data.pay_used ? bg(pay.card.neto) + " €" : "—"}</div><div class="s">${data.pay_used ? "в брой " + bg(pay.cash.neto) + " €" : "няма данни за плащане"}</div></div>
 </div>
+<div class="card"><h2>Разбивка на оборота<span>${bg(data.total_neto)} € общо · без ДДС</span></h2>
+  <div class="split">
+    <table><thead><tr><th>По плащане</th><th class="q">Сума</th><th class="q">Дял</th><th class="q">Бр.</th></tr></thead><tbody>
+      <tr><td>💵 В брой</td><td class="q">${bg(pay.cash.neto)} €</td><td class="q">${pctOf(pay.cash.neto)}</td><td class="c">${pay.cash.n || 0}</td></tr>
+      <tr><td>💳 С карта</td><td class="q">${bg(pay.card.neto)} €</td><td class="q">${pctOf(pay.card.neto)}</td><td class="c">${pay.card.n || 0}</td></tr>
+      ${pay.other && pay.other.neto > 0 ? `<tr><td>Друго</td><td class="q">${bg(pay.other.neto)} €</td><td class="q">${pctOf(pay.other.neto)}</td><td class="c">${pay.other.n || 0}</td></tr>` : ""}
+    </tbody></table>
+    <table><thead><tr><th>По канал</th><th class="q">Сума</th><th class="q">Дял</th><th class="q">Бр.</th></tr></thead><tbody>
+      <tr><td>🏪 На място (каса)</td><td class="q">${bg(data.counter_neto)} €</td><td class="q">${pctOf(data.counter_neto)}</td><td class="c">${data.counter_n || 0}</td></tr>
+      <tr><td>🌐 Сайт (онлайн)</td><td class="q">${bg(data.online_neto)} €</td><td class="q">${pctOf(data.online_neto)}</td><td class="c">${data.online_n || 0}</td></tr>
+    </tbody></table>
+  </div>
+  ${data.pay_used ? "" : '<div class="note" style="margin:0 0 10px">⚠ Няма данни за начин на плащане по сметките за този период.</div>'}</div>
 ${tips ? `<div class="card"><h2>💡 Съвети / Наблюдения</h2><ul class="tips">${tips}</ul></div>` : ""}
 <div class="card"><h2>Оборот по период<span class="seg" id="seg"><button data-g="day">Ден</button><button data-g="week">Седмица</button><button data-g="month" class="on">Месец</button></span></h2>
   <div class="chartbox"><canvas id="cTrend" height="150"></canvas></div>
