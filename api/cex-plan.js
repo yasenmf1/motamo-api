@@ -19,6 +19,33 @@ const MENU = Object.values(ARTS).filter(a => a.is_menu)
 
 const CEX_API = "https://motamo.barsy.online", CEX_BID = 1, CEX_DEPOT = 1, TIMEOUT_MS = 9000;
 
+// ── Кухненски snapshot (Supabase) ────────────────────────────────────────────
+// Пази последно ИЗЧИСЛЕНОТО (магазини + въведени количества + производство), за да
+// го виждат момичетата на view=today до следващото „Изчисли", и за да е записано
+// какво е попълнил собственикът. Отделна изолирана таблица с RLS; anon ключът е
+// публичен по дизайн, а достъпът тук е само сървър-към-сървър.
+const SB_URL = "https://ptzgxreojfvdltbavlop.supabase.co";
+const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0emd4cmVvamZ2ZGx0YmF2bG9wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyNjIxNzksImV4cCI6MjEwMTgzODE3OX0.o4i60i2Q9eCEhEOjw8OLmNqAkXVXpnqYYvx9_9BrkPs";
+const SB_TABLE = "cex_kitchen_plan";
+const sbHeaders = () => ({ apikey: SB_ANON, Authorization: `Bearer ${SB_ANON}`, "Content-Type": "application/json" });
+async function sbSavePlan(forDate, shops, produce, note) {
+  return withTimeout(async (signal) => {
+    const row = [{ for_date: forDate, shops: shops || [], produce: produce || {}, note: note || null, updated_at: new Date().toISOString() }];
+    const r = await fetch(`${SB_URL}/rest/v1/${SB_TABLE}?on_conflict=for_date`, {
+      method: "POST", headers: { ...sbHeaders(), Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(row), signal });
+    return { ok: r.ok, status: r.status, raw: r.ok ? "" : String(await r.text()).slice(0, 200) };
+  });
+}
+async function sbGetPlan(forDate) {
+  return withTimeout(async (signal) => {
+    const get = async (u) => { const r = await fetch(u, { headers: sbHeaders(), signal }); return r.ok ? await r.json() : []; };
+    let d = forDate ? await get(`${SB_URL}/rest/v1/${SB_TABLE}?for_date=eq.${forDate}&limit=1`) : [];
+    if (!d || !d.length) d = await get(`${SB_URL}/rest/v1/${SB_TABLE}?order=updated_at.desc&limit=1`);
+    return (d && d[0]) || null;
+  });
+}
+
 // ── Цех лист (ЧЕРНОВА): срок (дни) + препоръчителна наличност + доставчик, по
 // ръчния лист на собственика (числата за проверка/корекция). Наличността се тегли
 // от Barsy по id. производство/заявка = препоръчителна − наличност.
@@ -984,7 +1011,7 @@ function syncRows(){document.querySelectorAll('#grid .selbox').forEach(function(
 function collect(){document.querySelectorAll('#grid input[data-n]').forEach(function(inp){var i=+inp.getAttribute('data-i'),n=inp.getAttribute('data-n'),v=parseFloat(inp.value)||0;if(!shops[i].order)shops[i].order={};if(v)shops[i].order[n]=v;else delete shops[i].order[n]})}
 // Взима САМО избраните магазини (тикнати), след като събере числата от решетката.
 function selShops(){collect();var out=[];document.querySelectorAll('#grid .selbox').forEach(function(cb){if(cb.checked){var i=+cb.getAttribute('data-i');if(shops[i])out.push(shops[i])}});return out}
-function calc(){var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}msg('Смятам…');api({shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}renderPlan(j);msg('Планът е готов за '+sel.length+' магазина.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function calc(){var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}msg('Смятам и записвам за кухнята…');var kd=$('pdate').value||$('date').value;api({shops:sel,publish_kitchen:true,kitchen_date:kd}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}renderPlan(j);var sv=j.kitchen_saved?(' Записано за кухнята ('+j.kitchen_saved+') — момичетата го виждат на екрана.'):(j.kitchen_saved===false?' (записът за кухнята не мина)':'');msg('Планът е готов за '+sel.length+' магазина.'+sv,'ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function tbl(t,o){var ks=Object.keys(o||{});if(!ks.length)return '';var h='<table><tr><th class="shop">'+t+'</th><th>кол.</th></tr>';ks.forEach(function(k){h+='<tr><td class="shop">'+esc(k)+'</td><td class="q">'+o[k]+'</td></tr>'});return h+'</table>'}
 function renderPlan(j){$('planbox').innerHTML='<h2>За производство</h2><div class="plan">'+tbl('Сетове',j.produce_sets)+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
 function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy за '+sel.length+' магазина:\\n• първо заготовки (майонези, сосове…), после ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (заготовки → ролки → сетове)');api({action:'produce_plan',shops:sel,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.zagotovki&&j.zagotovki.error)||(j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||j.error||j.message||''),'err');return}var zp=(j.zagotovki&&j.zagotovki.produced&&j.zagotovki.produced.length)||0,zs=(j.zagotovki&&j.zagotovki.skipped&&j.zagotovki.skipped.length)||0,ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;msg('✓ Производството е създадено. Партида '+j.lot+' · заготовки: '+zp+' произв.'+(zs?(' ('+zs+' без рецепта, прескочени)'):'')+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+'. Провери в касата и „Приключи", ако е ок.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
@@ -1044,12 +1071,21 @@ module.exports = async function handler(req, res) {
     if (!okV) { res.status(403).send(todayPage(`<div class="wrap"><h2>Няма достъп</h2><p>Липсва или грешен ключ в линка.</p></div>`)); return; }
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).send(todayPage(`<div class="wrap">Не е конфигуриран достъп до цеха.</div>`)); return; }
-    // Работим ДЕН НАПРЕД: екранът е за УТРЕШНИЯ разнос по подразбиране; чете сметките,
-    // направени днес (навечерието). ?date= задава изрично разнос ден.
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(q.date || "") ? q.date : isoPlusDays(sofiaToday(), 1);
-    let seed;
-    try { seed = await seedRazos(date, user, pass); }
-    catch (e) { res.status(200).send(todayPage(`<div class="wrap"><h2>Грешка</h2><p>Не мога да прочета сметките сега. Опитай пак след минута.</p></div>`)); return; }
+    // ПРЕДИМСТВО на записаното от „Изчисли" (собственикът маркира/коригира → пази се).
+    // Ако няма запис — fallback към сметките (както преди). ?date= задава изрично ден.
+    const reqDate = /^\d{4}-\d{2}-\d{2}$/.test(q.date || "") ? q.date : null;
+    let snap = null;
+    try { snap = await sbGetPlan(reqDate); } catch (e) {}
+    let seed, date, fromSnap = false, snapTime = null;
+    if (snap && Array.isArray(snap.shops) && snap.shops.length) {
+      date = snap.for_date || reqDate || isoPlusDays(sofiaToday(), 1);
+      seed = { shops: snap.shops, accounts: snap.shops.length };
+      fromSnap = true; snapTime = snap.updated_at || null;
+    } else {
+      date = reqDate || isoPlusDays(sofiaToday(), 1);
+      try { seed = await seedRazos(date, user, pass); }
+      catch (e) { res.status(200).send(todayPage(`<div class="wrap"><h2>Грешка</h2><p>Не мога да прочета сметките сега. Опитай пак след минута.</p></div>`)); return; }
+    }
     const { agg, rolls, zag } = compute(seed.shops);
     const sets = {}; for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set) sets[name] = qty; }
     const tbl = (obj) => Object.keys(obj).sort().map(k => `<tr><td>${esc(k)}</td><td class="q">${round(obj[k])}</td></tr>`).join("");
@@ -1066,7 +1102,7 @@ module.exports = async function handler(req, res) {
     const routeCard = activeCities.length ? `<div class="card route"><h2>По маршрут<span class="cnt">${activeCities.map(([, l]) => l).join(" · ")}</span></h2><div class="scroll"><table>${routeHead}${routeBody}</table></div></div>` : "";
     const empty = !Object.keys(rolls).length && !Object.keys(sets).length;
     res.status(200).send(todayPage(`
-      <header><h1>🍣 Цех · за разнос ${esc(date)}</h1><div class="d">производство днес · ${seed.accounts} магазина · обновено ${esc(sofiaTime())}</div></header>
+      <header><h1>🍣 Цех · за разнос ${esc(date)}</h1><div class="d">${fromSnap ? "по въведеното от собственика · " : ""}${seed.accounts} магазина · обновено ${esc(sofiaTime())}</div></header>
       <div class="wrap">${empty
         ? `<div class="empty"><h2>Още няма заявки за ${esc(date)}</h2><p>Когато направиш сметките за разноса, тук се показва какво да се произведе.<br>Страницата се обновява сама.</p></div>`
         : `${routeCard}${card("sets", "Сетове (общо)", sets)}${card("rolls", "Ролки / поке (общо)", rolls)}${card("zag", "Заготовки (общо)", zag)}
@@ -1490,9 +1526,19 @@ module.exports = async function handler(req, res) {
   // Сетовете = сборът по сметки на артикулите-сетове (както се поръчват/продават).
   const sets = {};
   for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set) sets[name] = qty; }
+  const shopsOut = shops.map(s => ({ client: s.client, rep: s.rep, client_id: s.client_id, person_id: s.person_id, account_id: s.account_id, order: sortObj(s.order || {}, 2) }));
+  const produceOut = { sets: sortObj(sets, 2), rolls: sortObj(rolls, 2), zagotovki: sortObj(zag, 3) };
+  // „Изчисли" пази последното изчислено за момичетата (view=today) + какво е попълнил
+  // собственикът — до следващото „Изчисли". Дата = kitchen_date (Партида/деня на разноса).
+  let kitchen_saved = null;
+  if (body.publish_kitchen) {
+    const kd = /^\d{4}-\d{2}-\d{2}$/.test(body.kitchen_date || "") ? body.kitchen_date : sofiaToday();
+    try { const sv = await sbSavePlan(kd, shopsOut, produceOut, body.kitchen_note || null); kitchen_saved = sv.ok ? kd : false; }
+    catch (e) { kitchen_saved = false; }
+  }
   res.status(200).json({
-    ok: true, seed_date: seedDate || null, seeded_accounts: seededAccounts,
-    shops: shops.map(s => ({ client: s.client, rep: s.rep, client_id: s.client_id, person_id: s.person_id, account_id: s.account_id, order: sortObj(s.order || {}, 2) })),
-    order_total: sortObj(agg, 2), produce_sets: sortObj(sets, 2), produce_rolls: sortObj(rolls, 2), produce_zagotovki: sortObj(zag, 3)
+    ok: true, seed_date: seedDate || null, seeded_accounts: seededAccounts, kitchen_saved,
+    shops: shopsOut,
+    order_total: sortObj(agg, 2), produce_sets: produceOut.sets, produce_rolls: produceOut.rolls, produce_zagotovki: produceOut.zagotovki
   });
 };
