@@ -149,7 +149,7 @@ function buildSetSummary(components) {
   const out = [];
   out.push(`Сетът е от ${n} вида ролки · ${bites} хапки.`);
   const protParts = Object.keys(prot).sort((a, b) => prot[b] - prot[a]).map(l => `${prot[l]} ${withPrep(l)}`);
-  if (protParts.length) out.push(`Протеини: ${protParts.join(", ")}.`);
+  if (protParts.length) out.push(`Съставки: ${protParts.join(", ")}.`);
   const commParts = [];
   for (const l of Object.keys(comm)) { const c = comm[l]; if (c === n && n > 1) commParts.push(`всички ${withPrep(l)}`); else if (c >= Math.ceil(n * 0.6) && c > 1) commParts.push(`повечето ${withPrep(l)}`); }
   if (commParts.length) { const s = commParts.join(", "); out.push(s.charAt(0).toUpperCase() + s.slice(1) + "."); }
