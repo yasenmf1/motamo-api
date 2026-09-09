@@ -466,9 +466,74 @@ function buildPriceMap(tree) {
   return map;
 }
 
+// ── Статус на поръчка (GET ?status=1&ref=W-XXXXX&acct=<account_id>) ──
+// Екранът с потвърждението пита периодично „къде е поръчката ми". Няма база:
+// сметката в Barsy Е записът. Двойката ref+acct е ключът — сметката се връща
+// само ако нейната бележка/надпис носи същия код, така никой не може да разгледа
+// чужда сметка, като налучква номера ѝ. Гледаме само сметки от последното
+// денонощие (старите са без значение и само шумят).
+const REF_LOOKUP = /(W-[A-Z0-9]{4,8}|WEB-[A-Z0-9]{4,12}-[A-Z0-9]{2,8})/;
+const STATUS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function pickAccount(data, acct) {
+  // Accounts_get връща или самата сметка, или {account:{...}}; getlist — списък.
+  if (!data) return null;
+  if (Array.isArray(data)) return data.find(a => a && Number(a.account_id) === acct) || null;
+  if (data.account && typeof data.account === "object") return data.account;
+  if (data.account_id != null) return data;
+  if (Array.isArray(data.list)) return data.list.find(a => a && Number(a.account_id) === acct) || null;
+  return null;
+}
+
+// Състояние за клиента. Касата движи сметката „Чака одобрение" → „Обслужена"
+// (готви се) → затворена (платена/взета). Затварянето е единственият сигурен
+// факт (close_date); останалото четем от името на статуса, ако Barsy го дава.
+function accountState(a) {
+  if (a.close_date) return "done";
+  const s = String(a.status_name || a.account_status_name || a.status || a.account_status || "");
+  if (/одобр|чака|нов/i.test(s)) return "pending";
+  if (/обслуж|приет|готв|готов|изпълн/i.test(s)) return "preparing";
+  return s ? "preparing" : "accepted";
+}
+
+async function orderStatus(req, res, user, pass) {
+  const q = req.query || {};
+  const ref = String(q.ref || "").trim().toUpperCase();
+  const acct = Number(q.acct);
+  if (!REF_PATTERN.test(ref) || !Number.isInteger(acct) || acct <= 0) {
+    fail(res, 400, "bad_request", "ref and acct are required");
+    return;
+  }
+  let a = null;
+  try {
+    const r = await authedCall("Accounts_get", { account_id: acct }, user, pass);
+    if (r.ok) a = pickAccount(r.data, acct);
+    if (!a) {
+      const l = await authedCall("Accounts_getlist", { order_by: "account_id desc", length: 300 }, user, pass);
+      if (l.ok) a = pickAccount(l.data, acct);
+    }
+  } catch (err) {
+    fail(res, 504, "barsy_unreachable", "No response from Barsy");
+    return;
+  }
+  if (!a) { fail(res, 404, "not_found", "No such order"); return; }
+  const m = REF_LOOKUP.exec(a.description || "") || REF_LOOKUP.exec(a.account_alias || "");
+  if (!m || m[1].toUpperCase() !== ref) { fail(res, 404, "not_found", "No such order"); return; }
+  const created = Date.parse(String(a.create_date || "").replace(" ", "T"));
+  if (created && (Date.now() - created) > STATUS_MAX_AGE_MS) { fail(res, 404, "not_found", "No such order"); return; }
+  res.status(200).json({
+    ok: true,
+    ref: ref,
+    state: accountState(a),
+    closed: !!a.close_date,
+    status_name: a.status_name || a.account_status_name || a.status || null,
+    paid: !!(a.paid_sum && Number(a.paid_sum) > 0) || !!a.close_date
+  });
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Cache-Control", "no-store");
 
@@ -476,15 +541,20 @@ module.exports = async function handler(req, res) {
     res.status(204).end();
     return;
   }
-  if (req.method !== "POST") {
-    fail(res, 405, "method_not_allowed", "Method not allowed");
-    return;
-  }
 
   const user = process.env.BARSY_USER;
   const pass = process.env.BARSY_PASS;
   if (!user || !pass) {
     fail(res, 500, "not_configured", "Barsy credentials are not configured");
+    return;
+  }
+
+  if (req.method === "GET" && req.query && req.query.status) {
+    await orderStatus(req, res, user, pass);
+    return;
+  }
+  if (req.method !== "POST") {
+    fail(res, 405, "method_not_allowed", "Method not allowed");
     return;
   }
 
