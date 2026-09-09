@@ -616,8 +616,11 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
       // ако липсва в дървото, падни към директната поръчка.
       const ord = orders.find(o => String(o.article_id) === String(a.id));
       const need = treeNeed[a.id] != null ? treeNeed[a.id] : (ord ? Number(ord.amount) : 0);
-      const short = Math.max(0, Math.ceil(need - cur) + 3); // буфер срещу закръгляне/FIFO/минуси
-      if (!(short > 0) || (toppedIds[a.id] || 0) >= 3) break; // не зацикляй на един артикул
+      // Голяма порция: рецептурната нужда подценява реалната консумация на Barsy (0.5-и и т.н.),
+      // затова добавяме +30 буфер над недостига — преизлишъкът в партидата е безвреден,
+      // а гарантира напредък дори когато „need" е сгрешено. Спираме по кап на артикул.
+      const short = Math.max(0, Math.ceil(need - cur)) + 30;
+      if ((toppedIds[a.id] || 0) >= 4) break; // не зацикляй безкрайно на един артикул
       try { await createProduction([{ article_id: a.id, article_name: a.name, amount: short, lot: lot, lot_exp: lotExp }], { lot: lot, lot_exp: lotExp, description: "авто-допроизводство за сметка" }, user, pass); }
       catch (e) { lastRaw = "авто-производство неуспешно: " + String(e && e.message); break; }
       topped++; toppedIds[a.id] = (toppedIds[a.id] || 0) + 1; toppedNames.push(a.name + " +" + short);
