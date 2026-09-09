@@ -1409,7 +1409,11 @@ module.exports = async function handler(req, res) {
           lot_value: r.lot_value || "", total_for_tax_2: String(r.total_for_tax_2 != null ? r.total_for_tax_2 : (r.total_price != null ? r.total_price : "0.00")),
           total_for_tax_1: "0.00", total_for_tax_3: "0.00", total_for_tax_4: "0.00", total_for_tax_12: "0.00", total_for_tax_100: "0.00",
           total_price: String(r.total_price != null ? r.total_price : ""), chooser: 0, article_id: String(r.article_id || "")
-        }));
+        }))
+        // Стоковата разписка е само за СТОКИ: махни не-стоковите редове (напр. „Авансово
+        // плащане - ф. №…"), които идват с празен article_id — иначе се праща ред без
+        // партида/артикул и замърсява/чупи документа.
+        .filter(r => r.article_id && r.article_id !== "");
       }
     } catch (e) { rowsRaw = { error: String(e && e.message) }; }
     let paymethodOpts = null;
