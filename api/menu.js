@@ -249,6 +249,7 @@ header h1{margin:0;font-size:19px;font-weight:800}header .d{font-size:13px;opaci
 .tip ul{margin:0;padding-left:20px}.tip li{margin:3px 0;line-height:1.4}
 .empty{color:#7a8087;text-align:center;padding:30px}
 .lb{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:100;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none}
+.lb[hidden]{display:none}
 .lb img{max-width:96%;max-height:88%;transform-origin:center center;user-select:none;-webkit-user-drag:none;touch-action:none}
 .lb .x{position:absolute;top:14px;right:14px;width:50px;height:50px;border-radius:50%;border:0;background:rgba(255,255,255,.92);font-size:22px;font-weight:800;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4)}
 .lb .ctrl{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);display:flex;gap:14px}
