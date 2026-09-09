@@ -1606,6 +1606,39 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // ── НЕДОСТИГ ЗА ДЕНЯ: сравнява днешната нужда (разнос → fullBOM консумация) срещу
+  // наличността и връща суровините/заготовките, които ЩЕ СВЪРШАТ днес (deficit > 0),
+  // най-лошото първо. Read-only (view токен). Това хваща напр. скаридите Маки Еби,
+  // които простата „наличност <= 0" справка изпуска в шума от нулите. ──
+  if (body.action === "shortage") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    let seed, stockRows;
+    try {
+      seed = await seedRazos(date, user, pass, true);
+      stockRows = await readStock(user, pass);
+    } catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    const agg = {};
+    for (const s of (seed.shops || [])) for (const [k, v] of Object.entries(s.order || {})) agg[k] = (agg[k] || 0) + (Number(v) || 0);
+    const demand = fullBOM(agg); // {article_id: кол} по цялото дърво (заготовки+суровини)
+    const stockById = {}; for (const r of stockRows) stockById[String(r.id)] = r.qty;
+    const EXCLUDE = new Set(["Опаковка", "Етикет Опаковка"]);
+    const items = [];
+    for (const [id, need] of Object.entries(demand)) {
+      if (!(need > 0)) continue;
+      const meta = byId(Number(id)); if (!meta || EXCLUDE.has(meta.name)) continue;
+      if (meta.cat !== "Суровини" && meta.cat !== "Заготовки") continue;
+      const have = stockById[String(id)];
+      const haveNum = (have == null || isNaN(have)) ? 0 : have;
+      const deficit = round(need - haveNum);
+      if (deficit > 0.0005) items.push({ id: Number(id), name: meta.name, cat: meta.cat, need: round(need), have: have == null ? null : round(have), deficit });
+    }
+    items.sort((a, b) => b.deficit - a.deficit);
+    res.status(200).json({ ok: true, date, razos_accounts: seed.accounts, shortages: items });
+    return;
+  }
+
   let shops = null, seededAccounts = null;
   const seedDate = body.seed_date || q.seed_date;
   const hasInput = (Array.isArray(body.shops) && body.shops.length) || (body.orders && typeof body.orders === "object") || seedDate;
