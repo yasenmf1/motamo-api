@@ -581,7 +581,9 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
   const out = [];
   // Партида на реда = същата като производството (L.<дата>), за да се роди сметката
   // ВЕЧЕ с партида (Accounts_place приема lot_value на реда). Празна → без партида.
-  const lot = (typeof lotOverride === "string") ? lotOverride : lotFor(date).lot;
+  const lf = lotFor(date);
+  const lot = (typeof lotOverride === "string") ? lotOverride : lf.lot;
+  const lotExp = lf.lot_exp;
   for (const s of shops) {
     const orders = Object.entries(s.order || {})
       .map(([name, qty]) => { const art = resolve(name); return art ? (lot ? { article_id: art.id, amount: Number(qty), lot_value: lot } : { article_id: art.id, amount: Number(qty) }) : null; })
@@ -593,12 +595,34 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
     };
     if (s.client_id) account.client_id = s.client_id;
     if (s.person_id) account.person_id = s.person_id;
-    let r;
-    try { r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass); }
-    catch (e) { out.push({ client: s.client, rep: s.rep, ok: false, error: String(e && e.message) }); continue; }
-    const accId = typeof r.data === "number" ? r.data : (r.data && (r.data.account_id || r.data.id)) || null;
-    out.push({ client: s.client, rep: s.rep, ok: !!r.ok, account_id: accId, items: orders.length,
-      error: r.ok ? undefined : String(r.raw || "").slice(0, 200) });
+    // Продажбата иска наличност ПО ПАРТИДА. Някои артикули (напр. НACHI ORO, който е и
+    // компонент на CET сетовете) остават под нужното след ① Производство. Затова: ако
+    // Accounts_place гръмне с „няма достатъчно наличност в партида", допроизвеждаме ТОЧНО
+    // липсващия артикул под същата партида и повтаряме (до 8 пъти, за няколко къси артикула).
+    let r = null, lastRaw = "", topped = 0;
+    const toppedNames = [];
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try { r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass); }
+      catch (e) { r = { ok: false, raw: String(e && e.message) }; }
+      if (r.ok) break;
+      lastRaw = String(r.raw || "");
+      const m = lot && lastRaw.match(/Артикул\s*"([^"]+)"[\s\S]*?в партида[\s\S]*?:\s*(-?[\d.,]+)/);
+      if (!m) break;
+      const a = resolve(m[1]);
+      const cur = parseFloat(String(m[2]).replace(/[^\d.,-]/g, "").replace(",", ".")) || 0;
+      if (!a) break;
+      const ord = orders.find(o => String(o.article_id) === String(a.id));
+      const need = ord ? Number(ord.amount) : 0;
+      const short = Math.max(0, Math.ceil(need - cur) + 1); // +1 буфер срещу закръгляне/FIFO
+      if (!(short > 0)) break;
+      try { await createProduction([{ article_id: a.id, article_name: a.name, amount: short, lot: lot, lot_exp: lotExp }], { lot: lot, lot_exp: lotExp, description: "авто-допроизводство за сметка" }, user, pass); }
+      catch (e) { lastRaw = "авто-производство неуспешно: " + String(e && e.message); break; }
+      topped++; toppedNames.push(a.name + " +" + short);
+    }
+    const accId = r && (typeof r.data === "number" ? r.data : (r.data && (r.data.account_id || r.data.id))) || null;
+    out.push({ client: s.client, rep: s.rep, ok: !!(r && r.ok), account_id: accId, items: orders.length,
+      topped: topped || undefined, topped_names: toppedNames.length ? toppedNames : undefined,
+      error: (r && r.ok) ? undefined : lastRaw.slice(0, 200) });
   }
   return out;
 }
