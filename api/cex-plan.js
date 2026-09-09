@@ -599,9 +599,10 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
     // компонент на CET сетовете) остават под нужното след ① Производство. Затова: ако
     // Accounts_place гръмне с „няма достатъчно наличност в партида", допроизвеждаме ТОЧНО
     // липсващия артикул под същата партида и повтаряме (до 8 пъти, за няколко къси артикула).
+    const treeNeed = fullNeeds(s.order); // нужда по цялото дърво (директна + като компонент)
     let r = null, lastRaw = "", topped = 0;
-    const toppedNames = [];
-    for (let attempt = 0; attempt < 8; attempt++) {
+    const toppedNames = [], toppedIds = {};
+    for (let attempt = 0; attempt < 20; attempt++) {
       try { r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass); }
       catch (e) { r = { ok: false, raw: String(e && e.message) }; }
       if (r.ok) break;
@@ -611,13 +612,15 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
       const a = resolve(m[1]);
       const cur = parseFloat(String(m[2]).replace(/[^\d.,-]/g, "").replace(",", ".")) || 0;
       if (!a) break;
+      // нужда = по цялото дърво (покрива и консумацията при производство на CET сетовете);
+      // ако липсва в дървото, падни към директната поръчка.
       const ord = orders.find(o => String(o.article_id) === String(a.id));
-      const need = ord ? Number(ord.amount) : 0;
-      const short = Math.max(0, Math.ceil(need - cur) + 1); // +1 буфер срещу закръгляне/FIFO
-      if (!(short > 0)) break;
+      const need = treeNeed[a.id] != null ? treeNeed[a.id] : (ord ? Number(ord.amount) : 0);
+      const short = Math.max(0, Math.ceil(need - cur) + 3); // буфер срещу закръгляне/FIFO/минуси
+      if (!(short > 0) || (toppedIds[a.id] || 0) >= 3) break; // не зацикляй на един артикул
       try { await createProduction([{ article_id: a.id, article_name: a.name, amount: short, lot: lot, lot_exp: lotExp }], { lot: lot, lot_exp: lotExp, description: "авто-допроизводство за сметка" }, user, pass); }
       catch (e) { lastRaw = "авто-производство неуспешно: " + String(e && e.message); break; }
-      topped++; toppedNames.push(a.name + " +" + short);
+      topped++; toppedIds[a.id] = (toppedIds[a.id] || 0) + 1; toppedNames.push(a.name + " +" + short);
     }
     const accId = r && (typeof r.data === "number" ? r.data : (r.data && (r.data.account_id || r.data.id))) || null;
     out.push({ client: s.client, rep: s.rep, ok: !!(r && r.ok), account_id: accId, items: orders.length,
@@ -625,6 +628,18 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
       error: (r && r.ok) ? undefined : lastRaw.slice(0, 200) });
   }
   return out;
+}
+// Пълна нужда по ЦЯЛОТО дърво (директна продажба + консумация като компонент), {id: кол}
+// за ВСЕКИ артикул (меню/заготовки/суровини). Ползва се от авто-допроизводството в ②.
+function fullNeeds(orderMap) {
+  const need = {};
+  const add = (art, qty) => {
+    if (!art || !(qty > 0)) return;
+    need[art.id] = (need[art.id] || 0) + qty;
+    for (const c of (art.components || [])) { const ca = c.id != null ? byId(c.id) : resolve(c.name); if (ca) add(ca, qty * (Number(c.qty) || 0)); }
+  };
+  for (const [k, v] of Object.entries(orderMap || {})) add(resolve(k), Number(v) || 0);
+  return need;
 }
 function explodeToRolls(order) {
   const rolls = {};
