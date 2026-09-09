@@ -621,8 +621,10 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
       // а гарантира напредък дори когато „need" е сгрешено. Спираме по кап на артикул.
       const short = Math.max(0, Math.ceil(need - cur)) + 30;
       if ((toppedIds[a.id] || 0) >= 4) break; // не зацикляй безкрайно на един артикул
-      try { await createProduction([{ article_id: a.id, article_name: a.name, amount: short, lot: lot, lot_exp: lotExp }], { lot: lot, lot_exp: lotExp, description: "авто-допроизводство за сметка" }, user, pass); }
-      catch (e) { lastRaw = "авто-производство неуспешно: " + String(e && e.message); break; }
+      let pr;
+      try { pr = await createProduction([{ article_id: a.id, article_name: a.name, amount: short, lot: lot, lot_exp: lotExp }], { lot: lot, lot_exp: lotExp, description: "авто-допроизводство за сметка" }, user, pass); }
+      catch (e) { lastRaw = "авто-производство хвърли: " + String(e && e.message); break; }
+      if (!pr || !pr.ok) { lastRaw = "допроизв. „" + a.name + "\" +" + short + " ОТКАЗАНО: " + String((pr && pr.error) || "неизвестно"); break; }
       topped++; toppedIds[a.id] = (toppedIds[a.id] || 0) + 1; toppedNames.push(a.name + " +" + short);
     }
     const accId = r && (typeof r.data === "number" ? r.data : (r.data && (r.data.account_id || r.data.id))) || null;
