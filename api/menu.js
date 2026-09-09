@@ -240,7 +240,7 @@ header h1{margin:0;font-size:19px;font-weight:800}header .d{font-size:13px;opaci
 .roll img{width:96px;height:96px;border-radius:10px;object-fit:cover;flex:0 0 auto;background:#eee}
 .roll .rb{flex:1;min-width:0}.roll .rn{font-weight:800;font-size:16px}
 .roll .cnt{display:inline-block;background:#fdecec;color:#b3121b;font-weight:800;font-size:13px;border-radius:8px;padding:1px 8px;margin-left:6px}
-.roll .lead{color:#374151;font-size:14px;line-height:1.35;margin:4px 0}
+.roll .lead{color:#1f2937;font-size:16px;line-height:1.4;margin:5px 0;font-weight:500}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
 .chip{background:#fff3e0;color:#b06a00;border:1px solid #f0d9b5;border-radius:14px;padding:3px 10px;font-size:12px;font-weight:700}
 .chip.al{background:#eef3f8;color:#2b6ca3;border-color:#d3e2f0}
@@ -265,7 +265,7 @@ header h1{margin:0;font-size:19px;font-weight:800}header .d{font-size:13px;opaci
 var SETS=${J(data.sets)};var ROLLS=${J(data.rolls)};var MODE='sets';var CUR=null;
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function chips(sauces,al){var h='';(sauces||[]).forEach(function(s){h+='<span class="chip">🥢 '+esc(s)+'</span>'});(al||[]).forEach(function(a){h+='<span class="chip al">⚠ '+esc(a)+'</span>'});return h?'<div class="chips">'+h+'</div>':''}
-function rollCard(r,count){var lead=r.lead||r.composition||'';var img=r.image?'<img src="'+esc(r.image)+'" loading="lazy" style="cursor:zoom-in" onclick="openLB(this.src)" onerror="this.style.visibility=\\'hidden\\'">':'<img>';
+function rollCard(r,count){var lead=r.composition||'';var img=r.image?'<img src="'+esc(r.image)+'" loading="lazy" style="cursor:zoom-in" onclick="openLB(this.src)" onerror="this.style.visibility=\\'hidden\\'">':'<img>';
  return '<div class="roll">'+img+'<div class="rb"><div class="rn">'+esc(r.name||'?')+(count?'<span class="cnt">×'+count+'</span>':'')+'</div>'+(lead?'<div class="lead">'+esc(lead)+'</div>':'')+chips(r.sauces,r.allergens)+'</div></div>'}
 function setDetail(s){var h='<button class="back" onclick="CUR=null;render()">‹ Назад</button>';
  h+='<div class="hero"><img src="'+esc(s.image)+'" style="cursor:zoom-in" onclick="openLB(this.src)" onerror="this.style.display=\\'none\\'"><div class="b"><h2>'+esc(s.name)+'</h2><div class="meta">'+(s.bites?s.bites+' хапки · ':'')+(s.weight?s.weight+' · ':'')+(s.price?s.price.toFixed(2)+' €':'')+'</div>'+(s.lead?'<p>'+esc(s.lead)+'</p>':'')+'</div></div>';
