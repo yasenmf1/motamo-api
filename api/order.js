@@ -488,12 +488,24 @@ function pickAccount(data, acct) {
 // Състояние за клиента. Касата движи сметката „Чака одобрение" → „Обслужена"
 // (готви се) → затворена (платена/взета). Затварянето е единственият сигурен
 // факт (close_date); останалото четем от името на статуса, ако Barsy го дава.
+// Проверено на живо (S15, сметка 304): кухненският статус е `service_status_id` /
+// `service_status_name` („Чака одобрение" → „Обслужена"), НЕ `status` (той е 1 и за
+// отворена, и за затворена). Картовата сметка (`paymethod_id` 8 „Карта site") се затваря
+// още при плащането, затова за нея `close_date` не значи „готова" — гледаме само
+// кухненския статус; при плащане в брой затварянето = взета и платена.
+const CARD_PAYMETHOD = 8;
+function isCardAccount(a) {
+  return Number(a.paymethod_id) === CARD_PAYMETHOD || /карта/i.test(String(a.payment_name || ""));
+}
 function accountState(a) {
-  if (a.close_date) return "done";
-  const s = String(a.status_name || a.account_status_name || a.status || a.account_status || "");
-  if (/одобр|чака|нов/i.test(s)) return "pending";
-  if (/обслуж|приет|готв|готов|изпълн/i.test(s)) return "preparing";
-  return s ? "preparing" : "accepted";
+  const card = isCardAccount(a);
+  const svc = String(a.service_status_name || "");
+  let step = null;
+  if (/одобр|чака|нов/i.test(svc)) step = "pending";
+  else if (/обслуж|приет|готв|готов|изпълн|прикл/i.test(svc)) step = "preparing";
+  if (!card && a.close_date) return "done";
+  if (step) return step;
+  return a.close_date ? "preparing" : "accepted";
 }
 
 async function orderStatus(req, res, user, pass) {
@@ -526,16 +538,17 @@ async function orderStatus(req, res, user, pass) {
     ref: ref,
     state: accountState(a),
     closed: !!a.close_date,
-    status_name: a.status_name || a.account_status_name || a.status || null,
-    paid: !!(a.paid_sum && Number(a.paid_sum) > 0) || !!a.close_date,
+    card: isCardAccount(a),
+    service_status_id: a.service_status_id != null ? a.service_status_id : null,
+    service_status_name: a.service_status_name || null,
+    paid: isCardAccount(a) ? !!a.close_date : !!(a.total_paid && Number(a.total_paid) > 0),
     // ?debug=1 — само служебните полета (без име/телефон), за да сверим как Barsy
     // описва статуса и затварянето; ref+acct пак са задължителни.
     debug: q.debug === "1" ? {
       src: src, keys: Object.keys(a),
       close_date: a.close_date, create_date: a.create_date, ref_date: a.ref_date,
-      status: a.status, status_id: a.status_id, status_name: a.status_name,
-      account_status: a.account_status, account_status_id: a.account_status_id, account_status_name: a.account_status_name,
-      paid_sum: a.paid_sum, paymethod_id: a.paymethod_id, is_closed: a.is_closed, closed: a.closed
+      status: a.status, service_status_id: a.service_status_id, service_status_name: a.service_status_name,
+      payment_name: a.payment_name, paymethod_id: a.paymethod_id, total_paid: a.total_paid, total_remain: a.total_remain
     } : undefined
   });
 }
