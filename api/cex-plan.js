@@ -600,13 +600,15 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
     // Accounts_place гръмне с „няма достатъчно наличност в партида", допроизвеждаме ТОЧНО
     // липсващия артикул под същата партида и повтаряме (до 8 пъти, за няколко къси артикула).
     const treeNeed = fullNeeds(s.order); // нужда по цялото дърво (директна + като компонент)
-    let r = null, lastRaw = "", topped = 0;
+    let r = null, lastRaw = "", topped = 0, existed = false;
     const toppedNames = [], toppedIds = {};
     for (let attempt = 0; attempt < 20; attempt++) {
       try { r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass); }
       catch (e) { r = { ok: false, raw: String(e && e.message) }; }
       if (r.ok) break;
       lastRaw = String(r.raw || "");
+      // Дублиране на UUID = сметката за този ден+магазин ВЕЧЕ съществува → не е грешка.
+      if (/[Дд]ублиране/.test(lastRaw) && /UUID/i.test(lastRaw)) { existed = true; break; }
       const m = lot && lastRaw.match(/Артикул\s*"([^"]+)"[\s\S]*?в партида[\s\S]*?:\s*(-?[\d.,]+)/);
       if (!m) break;
       const a = resolve(m[1]);
@@ -628,9 +630,9 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
       topped++; toppedIds[a.id] = (toppedIds[a.id] || 0) + 1; toppedNames.push(a.name + " +" + short);
     }
     const accId = r && (typeof r.data === "number" ? r.data : (r.data && (r.data.account_id || r.data.id))) || null;
-    out.push({ client: s.client, rep: s.rep, ok: !!(r && r.ok), account_id: accId, items: orders.length,
+    out.push({ client: s.client, rep: s.rep, ok: !!(r && r.ok) || existed, existed: existed || undefined, account_id: accId, items: orders.length,
       topped: topped || undefined, topped_names: toppedNames.length ? toppedNames : undefined,
-      error: (r && r.ok) ? undefined : lastRaw.slice(0, 200) });
+      error: (r && r.ok) || existed ? undefined : lastRaw.slice(0, 200) });
   }
   return out;
 }
