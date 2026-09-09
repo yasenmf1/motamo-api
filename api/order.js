@@ -504,13 +504,13 @@ async function orderStatus(req, res, user, pass) {
     fail(res, 400, "bad_request", "ref and acct are required");
     return;
   }
-  let a = null;
+  let a = null, src = null;
   try {
     const r = await authedCall("Accounts_get", { account_id: acct }, user, pass);
-    if (r.ok) a = pickAccount(r.data, acct);
+    if (r.ok) { a = pickAccount(r.data, acct); if (a) src = "get"; }
     if (!a) {
       const l = await authedCall("Accounts_getlist", { order_by: "account_id desc", length: 300 }, user, pass);
-      if (l.ok) a = pickAccount(l.data, acct);
+      if (l.ok) { a = pickAccount(l.data, acct); if (a) src = "list"; }
     }
   } catch (err) {
     fail(res, 504, "barsy_unreachable", "No response from Barsy");
@@ -527,7 +527,16 @@ async function orderStatus(req, res, user, pass) {
     state: accountState(a),
     closed: !!a.close_date,
     status_name: a.status_name || a.account_status_name || a.status || null,
-    paid: !!(a.paid_sum && Number(a.paid_sum) > 0) || !!a.close_date
+    paid: !!(a.paid_sum && Number(a.paid_sum) > 0) || !!a.close_date,
+    // ?debug=1 — само служебните полета (без име/телефон), за да сверим как Barsy
+    // описва статуса и затварянето; ref+acct пак са задължителни.
+    debug: q.debug === "1" ? {
+      src: src, keys: Object.keys(a),
+      close_date: a.close_date, create_date: a.create_date, ref_date: a.ref_date,
+      status: a.status, status_id: a.status_id, status_name: a.status_name,
+      account_status: a.account_status, account_status_id: a.account_status_id, account_status_name: a.account_status_name,
+      paid_sum: a.paid_sum, paymethod_id: a.paymethod_id, is_closed: a.is_closed, closed: a.closed
+    } : undefined
   });
 }
 
