@@ -141,12 +141,22 @@ async function createProduction(rows, opts, user, pass) {
 async function producedUnderLot(lot, user, pass) {
   const out = {};
   if (!lot) return out;
-  const r = await cexCall("Storeproductions_getlist", { filters: {}, extra_properties: ["all", "details"], length: 3000, limit: 3000 }, user, pass);
-  let list = r.data && (r.data.list || r.data) || []; if (!Array.isArray(list)) list = Object.values(list);
-  for (const x of list) for (const d of (x.details || [])) {
-    if (String(d.lot_value || "") !== String(lot)) continue;
-    const q = Number(d.amount_prod != null ? d.amount_prod : d.amount) || 0;
-    out[String(d.article_id)] = (out[String(d.article_id)] || 0) + q;
+  // Storeproductions_getlist НЕ връща партидата по ред → четем справката за партиди:
+  // редовете тип „AP" (производство, ref_id = № на производството) носят article_id + amount
+  // (анулиращият документ е с минус). Страници по 50.
+  for (let pg = 1; pg <= 12; pg++) {
+    let d = null;
+    for (let t = 0; t < 3 && d === null; t++) {
+      try {
+        const r = await cexCall("Reports_lot_list_details", { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { lot_value: String(lot) } }, user, pass);
+        if (r && r.ok && r.data) d = r.data;
+      } catch (e) {}
+      if (d === null) await new Promise(res => setTimeout(res, 200 * (t + 1)));
+    }
+    if (!d) break;
+    const rows = Array.isArray(d.rows) ? d.rows : [];
+    for (const x of rows) { if (x.operation_ref_type === "AP" && x.article_id != null) out[String(x.article_id)] = (out[String(x.article_id)] || 0) + (Number(x.amount) || 0); }
+    if (rows.length < 50) break;
   }
   return out;
 }
@@ -1712,9 +1722,10 @@ module.exports = async function handler(req, res) {
     const produced = {};
     for (const d of docs) for (const r of d.rows) produced[r.name || r.article_id] = (produced[r.name || r.article_id] || 0) + r.amount;
     if (body.raw) { res.status(200).json({ ok: true, date, sample: list.slice(0, 2) }); return; }
-    if (body.lot) { // движения по партида (диагностика): какво връща Reports_lot_list_details
-      const r2 = await cexCall("Reports_lot_list_details", { active_struct_id: "eStructList_1", action_type: "values", page_num: Number(body.page) || 1, filters: { lot_value: String(body.lot) } }, user, pass);
-      res.status(200).json({ ok: r2.ok, status: r2.status, data: r2.data }); return;
+    if (body.lot) { // произведено под партида (нето, по справката за партиди) — това вижда и ①
+      const ul = await producedUnderLot(String(body.lot), user, pass);
+      const named = {}; for (const [id, q] of Object.entries(ul)) { const a = ARTS[String(id)]; named[a ? a.name : id] = round(q); }
+      res.status(200).json({ ok: true, lot: body.lot, produced_under_lot: sortObj(named, 2) }); return;
     }
     res.status(200).json({ ok: true, date, count: docs.length, produced: sortObj(produced, 2), docs });
     return;
