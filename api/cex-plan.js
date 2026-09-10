@@ -600,7 +600,7 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
     // Accounts_place гръмне с „няма достатъчно наличност в партида", допроизвеждаме ТОЧНО
     // липсващия артикул под същата партида и повтаряме (до 8 пъти, за няколко къси артикула).
     const treeNeed = fullNeeds(s.order); // нужда по цялото дърво (директна + като компонент)
-    let r = null, lastRaw = "", topped = 0, existed = false;
+    let r = null, lastRaw = "", topped = 0, existed = false, sm = null;
     const toppedNames = [], toppedIds = {};
     for (let attempt = 0; attempt < 20; attempt++) {
       try { r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass); }
@@ -623,8 +623,14 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
       // а гарантира напредък дори когато „need" е сгрешено. Спираме по кап на артикул.
       const short = Math.max(0, Math.ceil(need - cur)) + 30;
       if ((toppedIds[a.id] || 0) >= 4) break; // не зацикляй безкрайно на един артикул
+      // Barsy отказва производство без РЕАЛНА наличност на компонентите (сет → НACHI ролки,
+      // ролка → заготовки). Затова първо допроизвеждаме липсващите компоненти (рекурсивно,
+      // от най-дълбокото), после самия артикул — иначе ② пада, ако ① не е пуснато.
       let pr;
-      try { pr = await createProduction([{ article_id: a.id, article_name: a.name, amount: short, lot: lot, lot_exp: lotExp }], { lot: lot, lot_exp: lotExp, description: "авто-допроизводство за сметка" }, user, pass); }
+      try {
+        if (!sm) sm = await stockMap(user, pass).catch(() => ({}));
+        pr = await produceDeep(a, short, lot, lotExp, user, pass, sm, toppedNames, 0);
+      }
       catch (e) { lastRaw = "авто-производство хвърли: " + String(e && e.message); break; }
       if (!pr || !pr.ok) { lastRaw = "допроизв. „" + a.name + "\" +" + short + " ОТКАЗАНО: " + String((pr && pr.error) || "неизвестно"); break; }
       topped++; toppedIds[a.id] = (toppedIds[a.id] || 0) + 1; toppedNames.push(a.name + " +" + short);
@@ -635,6 +641,31 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
       error: (r && r.ok) || existed ? undefined : lastRaw.slice(0, 200) });
   }
   return out;
+}
+// Произвежда `qty` от `art` под партидата, като ПРЕДИ това допроизвежда всеки компонент
+// (ролка/сет/заготовка), чиято реална наличност е под нужното — рекурсивно, най-дълбокото
+// първо. Суровините не се произвеждат (липсата им се вижда от отказа на Barsy). `sm` е
+// картата {id: наличност} и се обновява с произведеното; `log` събира „име +кол".
+async function produceDeep(art, qty, lot, lotExp, user, pass, sm, log, depth) {
+  if (depth > 6) return { ok: false, error: "рецептата е твърде дълбока" };
+  for (const c of (art.components || [])) {
+    const ca = c.id != null ? byId(c.id) : resolve(c.name);
+    if (!ca || ca.cat === "Суровини") continue;
+    if (!(ca.is_menu || ca.is_set || ca.cat === "Заготовки")) continue;
+    const need = qty * (Number(c.qty) || 0);
+    const cur = Number(sm[String(ca.id)]) || 0;
+    if (need <= cur) continue;
+    const amt = Math.ceil((need - cur) * 100) / 100 + (ca.cat === "Заготовки" ? 0.5 : 2); // малък буфер
+    const rr = await produceDeep(ca, amt, lot, lotExp, user, pass, sm, log, depth + 1);
+    if (!rr || !rr.ok) {
+      if (ca.cat === "Заготовки") continue; // заготовка без рецепта → best-effort, Barsy ще каже
+      return { ok: false, error: "компонент „" + ca.name + "\" +" + amt + ": " + String(rr && rr.error || "неизвестно") };
+    }
+    sm[String(ca.id)] = cur + amt; log.push(ca.name + " +" + amt);
+  }
+  const pr = await createProduction([{ article_id: art.id, article_name: art.name, amount: qty, lot: lot, lot_exp: lotExp }], { lot: lot, lot_exp: lotExp, description: "авто-допроизводство за сметка" }, user, pass);
+  if (pr && pr.ok) sm[String(art.id)] = (Number(sm[String(art.id)]) || 0) + qty;
+  return pr;
 }
 // Пълна нужда по ЦЯЛОТО дърво (директна продажба + консумация като компонент), {id: кол}
 // за ВСЕКИ артикул (меню/заготовки/суровини). Ползва се от авто-допроизводството в ②.
