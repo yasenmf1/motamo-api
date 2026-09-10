@@ -1668,6 +1668,38 @@ module.exports = async function handler(req, res) {
   }
 
   // ── Наличности суровини+заготовки (JSON) ──
+  // ── Производства за ден (четящо): кои документи, какво е произведено, описание ──
+  if (body.action === "productions") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    let list;
+    try {
+      const r = await cexCall("Storeproductions_getlist", { filters: {}, extra_properties: ["all", "details"], order_by: "store_production_id desc", length: Number(body.length) || 300 }, user, pass);
+      list = r.data && (r.data.list || r.data) || [];
+      if (!Array.isArray(list)) list = Object.values(list);
+    } catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    const dOf = x => String(x.doc_date || x.create_date || x.date || "").slice(0, 10);
+    const docs = list.filter(x => !body.date || dOf(x) === date).map(x => ({
+      id: x.store_production_id || x.id, date: dOf(x), created: x.create_date || null, status: x.status != null ? x.status : (x.item_status != null ? x.item_status : null),
+      annulled: x.is_anulate != null ? String(x.is_anulate) === "1" : undefined, description: x.description || "", lot: (x.details && x.details[0] && x.details[0].lot_value) || x.lot_value || null,
+      rows: (x.details || []).map(d => ({ article_id: d.article_id, name: (ARTS[String(d.article_id)] || {}).name || d.article_name || null, amount: Number(d.amount_prod != null ? d.amount_prod : d.amount) || 0, lot: d.lot_value || null }))
+    }));
+    const produced = {};
+    for (const d of docs) if (!d.annulled) for (const r of d.rows) produced[r.name || r.article_id] = (produced[r.name || r.article_id] || 0) + r.amount;
+    if (body.raw) { res.status(200).json({ ok: true, date, sample: list.slice(0, 2) }); return; }
+    res.status(200).json({ ok: true, date, count: docs.length, produced: sortObj(produced, 2), docs });
+    return;
+  }
+  // ── Движения на едно производство (четящо): изтеглени съставки + произведено ──
+  if (body.action === "production_movements") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const id = Number(body.id); if (!id) { res.status(400).json({ ok: false, error: "no_id" }); return; }
+    try { const r = await cexCall("Storeproductions_movements", { id, store_production_id: id }, user, pass); res.status(200).json({ ok: r.ok, data: r.data }); }
+    catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); }
+    return;
+  }
   if (body.action === "stock") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
