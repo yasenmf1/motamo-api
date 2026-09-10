@@ -1700,6 +1700,33 @@ module.exports = async function handler(req, res) {
   }
 
   // ── Наличности суровини+заготовки (JSON) ──
+  // ── Вътрешна форма на артикул (четящо, диагностика): рецептата НЕ е в публичния API,
+  // но формата за редакция в adminx я носи → викаме вътрешния метод с Basic auth
+  // (както invoices_edit). host: cex (цех) | shop (точката). Само четене.
+  if (body.action === "article_form") {
+    const host = body.host === "shop" ? "https://motamoshop.barsy.online" : CEX_API;
+    const user = body.host === "shop" ? process.env.BARSY_USER : process.env.BARSY_CEX_USER;
+    const pass = body.host === "shop" ? process.env.BARSY_PASS : process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
+    const id = Number(body.id); if (!id) { res.status(400).json({ ok: false, error: "no_id" }); return; }
+    const method = String(body.method || "articles_edit").replace(/[^a-zA-Z_]/g, "");
+    const auth = Buffer.from(`${user}:${pass}`).toString("base64");
+    const params = Object.assign({ bid: 1, article_id: id, id: id }, body.params || {});
+    try {
+      const r = await withTimeout(async (signal) => {
+        const rr = await fetch(`${host}/endpoints/json?bid=1`, { method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json; charset=UTF-8" },
+          body: JSON.stringify({ [method]: { params } }), signal });
+        const text = await rr.text(); let d = null; try { d = JSON.parse(text); } catch (e) {}
+        return { ok: rr.ok, status: rr.status, data: d, raw: text };
+      });
+      const txt = String(r.raw || "");
+      // Изрежи само интересното: редове с article/amount/recipe, за да не връщаме 200 KB.
+      const hits = []; const re = /"(recipe|composite|components|ingredients|rows|amount|article_name|article_id|measure|unit|qty|quantity)"\s*:/g; let m; let n = 0;
+      while ((m = re.exec(txt)) && n < 400) { hits.push(txt.slice(Math.max(0, m.index - 20), m.index + 160)); n++; }
+      res.status(200).json({ ok: r.ok, status: r.status, method, length: txt.length, keys: r.data && typeof r.data === "object" ? Object.keys(r.data) : null, head: txt.slice(0, Number(body.head) || 1500), hits: body.hits ? hits.slice(0, 200) : undefined });
+    } catch (e) { res.status(504).json({ ok: false, error: "unreachable", message: String(e && e.message) }); }
+    return;
+  }
   // ── Производства за ден (четящо): кои документи, какво е произведено, описание ──
   if (body.action === "productions") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
