@@ -1712,6 +1712,10 @@ module.exports = async function handler(req, res) {
     const produced = {};
     for (const d of docs) for (const r of d.rows) produced[r.name || r.article_id] = (produced[r.name || r.article_id] || 0) + r.amount;
     if (body.raw) { res.status(200).json({ ok: true, date, sample: list.slice(0, 2) }); return; }
+    if (body.lot) { // движения по партида (диагностика): какво връща Reports_lot_list_details
+      const r2 = await cexCall("Reports_lot_list_details", { active_struct_id: "eStructList_1", action_type: "values", page_num: Number(body.page) || 1, filters: { lot_value: String(body.lot) } }, user, pass);
+      res.status(200).json({ ok: r2.ok, status: r2.status, data: r2.data }); return;
+    }
     res.status(200).json({ ok: true, date, count: docs.length, produced: sortObj(produced, 2), docs });
     return;
   }
