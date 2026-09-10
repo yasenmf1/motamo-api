@@ -241,9 +241,9 @@ function fail(res, status, code, message) {
   res.status(status).json({ ok: false, code: code, message: message });
 }
 
-async function withTimeout(run) {
+async function withTimeout(run, ms) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), BARSY_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), ms || BARSY_TIMEOUT_MS);
   try {
     return await run(controller.signal);
   } finally {
@@ -263,16 +263,40 @@ async function readResponse(barsyRes) {
 }
 
 // Public endpoint: action in the JSON envelope, no credentials.
-function publicCall(action, params) {
-  return withTimeout(async function (signal) {
-    const barsyRes = await fetch(BARSY_PUBLIC, {
-      method: "POST",
-      headers: { "Content-Type": "application/json; charset=UTF-8" },
-      body: JSON.stringify({ [action]: params }),
-      signal: signal
-    });
-    return readResponse(barsyRes);
-  });
+// 10.09.2026: from Vercel the public host (*.barsyonline.menu) hung for an hour (10 s
+// timeouts → every order 503) while the authenticated host answered. The same envelope
+// posted to the authenticated ROOT endpoint (/endpoints/json?bid=1, Basic auth) returns
+// the same tree (ids, current_price, article_name_public, categories), so it is the
+// fallback: public first (4.5 s), then authenticated (4.5 s) — both fit Vercel's 10 s.
+const PUBLIC_MS = 4500;
+async function publicCall(action, params) {
+  try {
+    const r = await withTimeout(async function (signal) {
+      const barsyRes = await fetch(BARSY_PUBLIC, {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
+        body: JSON.stringify({ [action]: params }),
+        signal: signal
+      });
+      return readResponse(barsyRes);
+    }, PUBLIC_MS);
+    if (r.ok && r.data && r.data[action]) return r;
+    throw new Error("public host answered " + r.status);
+  } catch (err) {
+    const user = process.env.BARSY_USER, pass = process.env.BARSY_PASS;
+    console.error(JSON.stringify({ event: "public_host_fallback", action: action, error: String(err && err.message).slice(0, 120), has_creds: !!(user && pass) }));
+    if (!user || !pass) throw err;
+    const auth = Buffer.from(`${user}:${pass}`).toString("base64");
+    return withTimeout(async function (signal) {
+      const barsyRes = await fetch(`${BARSY_API}/endpoints/json?bid=${BARSY_ID}`, {
+        method: "POST",
+        headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json; charset=UTF-8" },
+        body: JSON.stringify({ [action]: params }),
+        signal: signal
+      });
+      return readResponse(barsyRes);
+    }, PUBLIC_MS);
+  }
 }
 
 // Authenticated endpoint: action in the URL path, bare params as the body.
