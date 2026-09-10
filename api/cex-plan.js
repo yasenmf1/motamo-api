@@ -1715,7 +1715,7 @@ module.exports = async function handler(req, res) {
     try {
       const r = await withTimeout(async (signal) => {
         const rr = await fetch(`${host}/endpoints/json?bid=1`, { method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json; charset=UTF-8" },
-          body: JSON.stringify({ [method]: { params } }), signal });
+          body: JSON.stringify({ [method]: Object.assign({ params }, body.top || {}) }), signal });
         const text = await rr.text(); let d = null; try { d = JSON.parse(text); } catch (e) {}
         return { ok: rr.ok, status: rr.status, data: d, raw: text };
       });
@@ -1723,7 +1723,10 @@ module.exports = async function handler(req, res) {
       // Изрежи само интересното: редове с article/amount/recipe, за да не връщаме 200 KB.
       const hits = []; const re = /"(recipe|composite|components|ingredients|rows|amount|article_name|article_id|measure|unit|qty|quantity)"\s*:/g; let m; let n = 0;
       while ((m = re.exec(txt)) && n < 400) { hits.push(txt.slice(Math.max(0, m.index - 20), m.index + 160)); n++; }
-      res.status(200).json({ ok: r.ok, status: r.status, method, length: txt.length, keys: r.data && typeof r.data === "object" ? Object.keys(r.data) : null, head: txt.slice(0, Number(body.head) || 1500), hits: body.hits ? hits.slice(0, 200) : undefined });
+      const inner = r.data && r.data[method];
+      res.status(200).json({ ok: r.ok, status: r.status, method, length: txt.length, keys: r.data && typeof r.data === "object" ? Object.keys(r.data) : null,
+        inner_id: inner && inner.id, subnav: inner && inner.subnav, page_title: inner && (inner.page_title || inner.object_title),
+        head: txt.slice(0, Number(body.head) || 1500), hits: body.hits ? hits.slice(0, 200) : undefined });
     } catch (e) { res.status(504).json({ ok: false, error: "unreachable", message: String(e && e.message) }); }
     return;
   }
