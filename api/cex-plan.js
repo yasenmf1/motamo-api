@@ -1728,7 +1728,12 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     let rows;
-    try { rows = await readStock(user, pass); }
+    try {
+      if (body.all) { // и менюто (ролки/поке/сетове), не само суровини+заготовки
+        const sm = await stockMap(user, pass);
+        rows = Object.entries(sm).map(([id, qty]) => { const a = ARTS[String(id)]; return a ? { id: Number(id), name: a.name, cat: a.cat, is_menu: !!a.is_menu, is_set: !!a.is_set, qty } : null; }).filter(Boolean);
+      } else rows = await readStock(user, pass);
+    }
     catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
     res.status(200).json({ ok: true, rows });
     return;
