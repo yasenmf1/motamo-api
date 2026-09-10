@@ -1675,14 +1675,15 @@ module.exports = async function handler(req, res) {
     const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
     let list;
     try {
-      const r = await cexCall("Storeproductions_getlist", { filters: {}, extra_properties: ["all", "details"], order_by: "store_production_id desc", length: Number(body.length) || 300 }, user, pass);
+      const r = await cexCall("Storeproductions_getlist", { filters: {}, extra_properties: ["all", "details"], order_by: "store_production_id desc", length: Number(body.length) || 3000, limit: Number(body.length) || 3000 }, user, pass);
       list = r.data && (r.data.list || r.data) || [];
       if (!Array.isArray(list)) list = Object.values(list);
     } catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
     const dOf = x => String(x.doc_date || x.create_date || x.date || "").slice(0, 10);
+    list.sort((a, b) => Number(b.store_production_id || b.id) - Number(a.store_production_id || a.id));
     const docs = list.filter(x => !body.date || dOf(x) === date).map(x => ({
       id: x.store_production_id || x.id, date: dOf(x), created: x.create_date || null, status: x.status != null ? x.status : (x.item_status != null ? x.item_status : null),
-      annulled: x.is_anulate != null ? String(x.is_anulate) === "1" : undefined, description: x.description || "", lot: (x.details && x.details[0] && x.details[0].lot_value) || x.lot_value || null,
+      annulled: x.anulate_flag != null ? String(x.anulate_flag) === "1" : (x.is_anulate != null ? String(x.is_anulate) === "1" : undefined), description: x.description || "", lot: (x.details && x.details[0] && x.details[0].lot_value) || x.lot_value || null,
       rows: (x.details || []).map(d => ({ article_id: d.article_id, name: (ARTS[String(d.article_id)] || {}).name || d.article_name || null, amount: Number(d.amount_prod != null ? d.amount_prod : d.amount) || 0, lot: d.lot_value || null }))
     }));
     const produced = {};
