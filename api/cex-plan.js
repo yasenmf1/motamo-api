@@ -207,7 +207,7 @@ async function shopFromAccount(a, user, pass) {
     if (art && art.is_menu) order[art.name] = (order[art.name] || 0) + amt;
   }
   const group = (cexObj(a) || {}).group || "adhoc";
-  return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group, order, total: Math.round(total * 100) / 100, close_date: String(a.close_date || "").slice(0, 10) || null };
+  return { account_id: a.account_id, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null, rep: a.person_name || null, group, order, total: Math.round(total * 100) / 100, close_date: String(a.close_date || "").slice(0, 10) || null, create_date: String(a.create_date || "").slice(0, 10) || null };
 }
 
 async function seedRazos(razosDate, user, pass, includeSameDay) {
@@ -1213,16 +1213,51 @@ module.exports = async function handler(req, res) {
     const reqDate = /^\d{4}-\d{2}-\d{2}$/.test(q.date || "") ? q.date : null;
     let snap = null;
     try { snap = await sbGetPlan(reqDate); } catch (e) {}
-    let seed, date, fromSnap = false, snapTime = null;
-    if (snap && Array.isArray(snap.shops) && snap.shops.length) {
-      date = snap.for_date || reqDate || isoPlusDays(sofiaToday(), 1);
-      seed = { shops: snap.shops, accounts: snap.shops.length };
-      fromSnap = true; snapTime = snap.updated_at || null;
-    } else {
-      date = reqDate || isoPlusDays(sofiaToday(), 1);
-      try { seed = await seedRazos(date, user, pass); }
-      catch (e) { res.status(200).send(todayPage(`<div class="wrap"><h2>Грешка</h2><p>Не мога да прочета сметките сега. Опитай пак след минута.</p></div>`)); return; }
+    // ИСТИНАТА за деня са СМЕТКИТЕ (от тях тръгват стоковите). Снимката от „Изчисли" е
+    // само последната решетка на собственика — ако сметките са правени на два пъти
+    // (снощи + сутринта) или количествата са сменени след „Изчисли", тя се разминава със
+    // стоковите (10.09: 8 обекта/33 ТОКЕ в снимката срещу 10 сметки/56 ТОКЕ). Затова:
+    // обект СЪС сметка → по сметката; обект от снимката БЕЗ сметка → по снимката.
+    let seed, date, fromSnap = false, snapTime = null, extraSnap = 0;
+    const snapShops = (snap && Array.isArray(snap.shops)) ? snap.shops : [];
+    date = reqDate || (snapShops.length && snap.for_date) || isoPlusDays(sofiaToday(), 1);
+    let real = null;
+    try { real = await seedRazos(date, user, pass, true); } catch (e) { real = null; }
+    // Сметка, направена ВЧЕРА сутринта за ВЧЕРАШНИЯ разнос (и още отворена), не е за днес:
+    // ако вече има стокова от вчера (клиент+сума, както „С" в инструмента) — вън.
+    if (real && real.shops.length) {
+      try {
+        const prevD = isoPlusDays(date, -1), prev2 = isoPlusDays(date, -2);
+        const r = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 300 }, user, pass);
+        let inv = r.data; inv = Array.isArray(inv) ? inv : Object.values(inv || {});
+        const stok = {};
+        for (const x of inv) {
+          if (String(x.type_id) !== "11" || String(x.is_anulate) === "1") continue;
+          const cd = String(x.create_date || "").slice(0, 10);
+          if (cd !== prevD && cd !== prev2) continue;
+          (stok[x.client_id] = stok[x.client_id] || []).push(Number(x.total_all) || 0);
+        }
+        real.shops = real.shops.filter(sh => {
+          if (sh.create_date !== prevD || sh.close_date) return true;
+          const arr = stok[sh.client_id]; if (!arr || !arr.length) return true;
+          const i = arr.findIndex(t => Math.abs(t - (sh.total || 0)) < 0.05);
+          if (i < 0) return true; arr.splice(i, 1); return false;
+        });
+        real.accounts = real.shops.length;
+      } catch (e) {}
     }
+    if (real && real.shops.length) {
+      const have = new Set(real.shops.map(cexKey));
+      const extra = snapShops.filter(s => !have.has(cexKey(s))).map(s => ({ ...s, group: s.group || ((cexObj(s) || {}).group) || "adhoc" }));
+      extraSnap = extra.length;
+      seed = { shops: real.shops.concat(extra), accounts: real.shops.length };
+      fromSnap = extraSnap > 0; snapTime = snap && snap.updated_at || null;
+    } else if (snapShops.length) {
+      seed = { shops: snapShops.map(s => ({ ...s, group: s.group || ((cexObj(s) || {}).group) || "adhoc" })), accounts: snapShops.length };
+      fromSnap = true; snapTime = snap.updated_at || null;
+    } else if (real) {
+      seed = real;
+    } else { res.status(200).send(todayPage(`<div class="wrap"><h2>Грешка</h2><p>Не мога да прочета сметките сега. Опитай пак след минута.</p></div>`)); return; }
     const { agg, rolls, zag } = compute(seed.shops);
     const sets = {}; for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set) sets[name] = qty; }
     const tbl = (obj) => Object.keys(obj).sort().map(k => `<tr><td>${esc(k)}</td><td class="q">${round(obj[k])}</td></tr>`).join("");
@@ -1239,7 +1274,7 @@ module.exports = async function handler(req, res) {
     const routeCard = activeCities.length ? `<div class="card route"><h2>По маршрут<span class="cnt">${activeCities.map(([, l]) => l).join(" · ")}</span></h2><div class="scroll"><table>${routeHead}${routeBody}</table></div></div>` : "";
     const empty = !Object.keys(rolls).length && !Object.keys(sets).length;
     res.status(200).send(todayPage(`
-      <header><h1>🍣 Цех · за разнос ${esc(date)}</h1><div class="d">${fromSnap ? "по въведеното от собственика · " : ""}${seed.accounts} магазина · обновено ${esc(sofiaTime())}</div></header>
+      <header><h1>🍣 Цех · за разнос ${esc(date)}</h1><div class="d">${real && real.shops.length ? `по сметките (${seed.accounts})${extraSnap ? ` + ${extraSnap} по въведеното` : ""} · ` : (fromSnap ? "по въведеното от собственика · " : "")}${seed.shops.length} магазина · обновено ${esc(sofiaTime())}</div></header>
       <div class="wrap">${empty
         ? `<div class="empty"><h2>Още няма заявки за ${esc(date)}</h2><p>Когато направиш сметките за разноса, тук се показва какво да се произведе.<br>Страницата се обновява сама.</p></div>`
         : `${routeCard}${card("sets", "Сетове (общо)", sets)}${card("rolls", "Ролки / поке (общо)", rolls)}${card("zag", "Заготовки (общо)", zag)}
