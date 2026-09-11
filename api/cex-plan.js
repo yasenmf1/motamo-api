@@ -634,7 +634,15 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
       lastRaw = String(r.raw || "");
       // Дублиране на UUID = сметката за този ден+магазин ВЕЧЕ съществува → не е грешка.
       if (/[Дд]ублиране/.test(lastRaw) && /UUID/i.test(lastRaw)) { existed = true; break; }
-      const m = lot && lastRaw.match(/Артикул\s*"([^"]+)"[\s\S]*?в партида[\s\S]*?:\s*(-?[\d.,]+)/);
+      // Barsy връща ДВА различни текста за липса, ловим и двата:
+      //  (1) „…няма наличност в ПАРТИДА … : N"  — липсва под L (продажбата иска партида),
+      //  (2) „…без реална складова наличност. Текуща наличност в СКЛАДА: N"  — липсва в
+      //      общия склад (ролята няма право да продава на минус). И двата се лекуват с
+      //      допроизводство на СЪЩИЯ артикул под партидата — то вдига И партидата, И склада.
+      const m = lot && (
+        lastRaw.match(/Артикул\s*"([^"]+)"[\s\S]*?в партида[\s\S]*?:\s*(-?[\d.,]+)/) ||
+        lastRaw.match(/Артикул\s*"([^"]+)"[\s\S]*?(?:складов[аи][\s\S]*?наличност|в склада)[\s\S]*?:\s*(-?[\d.,]+)/)
+      );
       if (!m) break;
       const a = resolve(m[1]);
       const cur = parseFloat(String(m[2]).replace(/[^\d.,-]/g, "").replace(",", ".")) || 0;
@@ -688,7 +696,29 @@ async function produceDeep(art, qty, lot, lotExp, user, pass, sm, log, depth) {
     }
     sm[String(ca.id)] = cur + amt; log.push(ca.name + " +" + amt);
   }
-  const pr = await createProduction([{ article_id: art.id, article_name: art.name, amount: qty, lot: lot, lot_exp: lotExp }], { lot: lot, lot_exp: lotExp, description: "авто-допроизводство за сметка" }, user, pass);
+  // Опитваме производството; ако Barsy откаже заради конкретен компонент без реален склад
+  // („…Артикул „X" има текуща наличност „N""), допроизвеждаме ТОЧНО този компонент и
+  // повтаряме. Това хваща случаите, в които `sm` е разминат с реалния склад на Barsy.
+  let pr = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    pr = await createProduction([{ article_id: art.id, article_name: art.name, amount: qty, lot: lot, lot_exp: lotExp }], { lot: lot, lot_exp: lotExp, description: "авто-допроизводство за сметка" }, user, pass);
+    if (pr && pr.ok) break;
+    const raw = String((pr && pr.error) || "");
+    const mm = raw.match(/Артикул\s*[„"]?([^„""\n]+?)[""]?\s*има текуща наличност\s*[„"]?(-?[\d.,]+)/);
+    if (!mm) break;
+    const comp = resolve(mm[1].trim());
+    const have = parseFloat(String(mm[2]).replace(/[^\d.,-]/g, "").replace(",", ".")) || 0;
+    if (!comp || comp.cat === "Суровини") break; // суровина → не можем да произведем, спираме
+    // колко от компонента иска рецептата за `qty` от art (ако е директен компонент)
+    const cc = (art.components || []).find(c => String(c.id != null ? c.id : (resolve(c.name) || {}).id) === String(comp.id));
+    const per = cc ? (Number(cc.qty) || 0) : 0;
+    const compNeed = (per > 0 ? qty * per : qty); // ако не е директен компонент, поне толкова
+    const compAmt = Math.max(0, Math.ceil(compNeed - have)) + (comp.cat === "Заготовки" ? 1 : 3);
+    if (compAmt <= 0) break;
+    const rr = await produceDeep(comp, compAmt, lot, lotExp, user, pass, sm, log, depth + 1);
+    if (!rr || !rr.ok) { if (comp.cat === "Заготовки") continue; return { ok: false, error: "компонент „" + comp.name + "\" +" + compAmt + ": " + String(rr && rr.error || "неизвестно") }; }
+    sm[String(comp.id)] = (Number(sm[String(comp.id)]) || 0) + compAmt; log.push(comp.name + " +" + compAmt);
+  }
   if (pr && pr.ok) sm[String(art.id)] = (Number(sm[String(art.id)]) || 0) + qty;
   return pr;
 }
