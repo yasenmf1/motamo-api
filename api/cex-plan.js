@@ -609,6 +609,10 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
   const lf = lotFor(date);
   const lot = (typeof lotOverride === "string") ? lotOverride : lf.lot;
   const lotExp = lf.lot_exp;
+  // Складът се чете ВЕДНЪЖ за целия пакет и се споделя между магазините: така
+  // допроизведеното за един магазин се знае при следващия (не дублираме и не
+  // четем склада по 20 пъти → по-малко заявки, не удряме timeout-а).
+  let sm = null;
   for (const s of shops) {
     const orders = Object.entries(s.order || {})
       .map(([name, qty]) => { const art = resolve(name); return art ? (lot ? { article_id: art.id, amount: Number(qty), lot_value: lot } : { article_id: art.id, amount: Number(qty) }) : null; })
@@ -625,7 +629,7 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
     // Accounts_place гръмне с „няма достатъчно наличност в партида", допроизвеждаме ТОЧНО
     // липсващия артикул под същата партида и повтаряме (до 8 пъти, за няколко къси артикула).
     const treeNeed = fullNeeds(s.order); // нужда по цялото дърво (директна + като компонент)
-    let r = null, lastRaw = "", topped = 0, existed = false, sm = null;
+    let r = null, lastRaw = "", topped = 0, existed = false;
     const toppedNames = [], toppedIds = {};
     for (let attempt = 0; attempt < 20; attempt++) {
       try { r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass); }
