@@ -1697,8 +1697,21 @@ module.exports = async function handler(req, res) {
     const rollProduce = {};
     for (const name of new Set([...Object.keys(directRoll), ...Object.keys(setRolls)])) {
       const a = resolve(name); if (!a || !a.is_menu || a.is_set) continue;
-      const direct = Math.max(0, (directRoll[name] || 0) - already(a.id));
-      const p = round(direct + shortfall(setRolls[name] || 0, a.id));
+      const directFull = directRoll[name] || 0;
+      const setNeed = setRolls[name] || 0;
+      const alreadyL = already(a.id);
+      // „Оспорвана" ролка = продава се САМОСТОЯТЕЛНО И е компонент на сет (НАЧИ ORO/AMO/
+      // KAI/RAY). CET производството ИЗЯЖДА НАЧИ, затова разчитането на стар склад оставя
+      // самостоятелната продажба под L без наличност (сутрин 11.09 → ② кърпи, timeout,
+      // объркани стокови). Решение: за оспорвана ролка произвеждаме ПЪЛНО под L =
+      // самостоятелно + колкото изяждат сетовете. После CET-ите ядат setNeed → под L остава
+      // directFull за продажба. Излишъкът е само старият склад (в други партиди), безвреден
+      // и се пази от дублиране чрез `alreadyL`. За чисто-компонентните ролки — както досега
+      // (само липсващото до наличността, без свръхпроизводство).
+      const contested = directFull > 0 && setNeed > 0;
+      const p = contested
+        ? round(Math.max(0, directFull + setNeed - alreadyL))
+        : round(Math.max(0, directFull - alreadyL) + shortfall(setNeed, a.id));
       if (p > 0) rollProduce[name] = p;
     }
     // ЗАГОТОВКИ: тегли се от производството → само липсващото до дневната нужда (покрива
