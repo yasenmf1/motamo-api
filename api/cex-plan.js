@@ -767,6 +767,31 @@ function orderToZag(orderMap) {
   for (const [k, v] of Object.entries(orderMap || {})) walk(resolve(k), Number(v) || 0);
   return zag;
 }
+// Заготовки, които висят ДИРЕКТНО под сет (напр. заг. под CET MORI) — БЕЗ да слизаме
+// през ролките (те са в rollProduce и минават през orderToZag(rollProduce)), иначе бихме
+// броили заготовките в ролките два пъти. Влизаме само във вложени сетове и в самите заготовки.
+function setDirectZag(setMap) {
+  const zag = {};
+  const walkZag = (art, qty) => {
+    for (const c of (art.components || [])) {
+      const ca = c.id != null ? byId(c.id) : resolve(c.name);
+      if (ca && ca.cat === "Заготовки") { const n = qty * (Number(c.qty) || 0); zag[ca.name] = (zag[ca.name] || 0) + n; walkZag(ca, n); }
+    }
+  };
+  const walkSet = (art, qty) => {
+    if (!art) return;
+    for (const c of (art.components || [])) {
+      const ca = c.id != null ? byId(c.id) : resolve(c.name);
+      if (!ca) continue;
+      const need = qty * (Number(c.qty) || 0);
+      if (ca.cat === "Заготовки") { zag[ca.name] = (zag[ca.name] || 0) + need; walkZag(ca, need); }
+      else if (ca.is_set) walkSet(ca, need); // вложен сет → пак само директните му заготовки
+      // is_menu (ролка) → ПРОПУСКАМЕ: ролките са в rollProduce
+    }
+  };
+  for (const [k, v] of Object.entries(setMap || {})) walkSet(resolve(k), Number(v) || 0);
+  return zag;
+}
 // Дълбочина на заготовка в рецептата (1 = само суровини вътре). Произвеждаме
 // заготовките от НАЙ-ДЪЛБОКАТА към плитката, та вложената да е налична преди
 // родителя (заг. Марината → заг. Сварен ориз → заг. ХОСОМАКИ).
@@ -1193,7 +1218,7 @@ function selShops(){collect();var out=[];document.querySelectorAll('#grid .selbo
 function calc(){var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}msg('Смятам и записвам за кухнята…');var kd=$('pdate').value||$('date').value;api({shops:sel,publish_kitchen:true,kitchen_date:kd}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}renderPlan(j);var sv=j.kitchen_saved?(' Записано за кухнята ('+j.kitchen_saved+') — момичетата го виждат на екрана.'):(j.kitchen_saved===false?' (записът за кухнята не мина)':'');msg('Планът е готов за '+sel.length+' магазина.'+sv,'ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function tbl(t,o){var ks=Object.keys(o||{});if(!ks.length)return '';var h='<table><tr><th class="shop">'+t+'</th><th>кол.</th></tr>';ks.forEach(function(k){h+='<tr><td class="shop">'+esc(k)+'</td><td class="q">'+o[k]+'</td></tr>'});return h+'</table>'}
 function renderPlan(j){$('planbox').innerHTML='<h2>За производство</h2><div class="plan">'+tbl('Сетове',j.produce_sets)+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
-function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy за '+sel.length+' магазина:\\n• първо заготовки (майонези, сосове…), после ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (заготовки → ролки → сетове)');api({action:'produce_plan',shops:sel,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.zagotovki&&j.zagotovki.error)||(j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||j.error||j.message||''),'err');return}var zp=(j.zagotovki&&j.zagotovki.produced&&j.zagotovki.produced.length)||0,zs=(j.zagotovki&&j.zagotovki.skipped&&j.zagotovki.skipped.length)||0,ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;var al=j.already_under_lot||{},alk=Object.keys(al);var alTxt=alk.length?(' · ВЕЧЕ произведено под партидата (приспаднато): '+alk.map(function(k){return k+' '+al[k]}).join(', ')):'';if(!ri&&!si){msg('Нищо ново за производство — всичко поръчано вече е произведено под партида '+j.lot+'.'+alTxt,'ok');return}msg('✓ Производството е създадено. Партида '+j.lot+' · заготовки: '+zp+' произв.'+(zs?(' ('+zs+' без рецепта, прескочени)'):'')+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+alTxt+'. Провери в касата и „Приключи", ако е ок.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy за '+sel.length+' магазина:\\n• първо заготовки (майонези, сосове…), после ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (заготовки → ролки → сетове)');api({action:'produce_plan',shops:sel,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.zagotovki&&j.zagotovki.error)||(j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||j.error||j.message||''),'err');return}var zp=(j.zagotovki&&j.zagotovki.produced&&j.zagotovki.produced.length)||0,zs=(j.zagotovki&&j.zagotovki.skipped&&j.zagotovki.skipped.length)||0,zf=(j.zagotovki&&j.zagotovki.failed)||[],ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;var al=j.already_under_lot||{},alk=Object.keys(al);var alTxt=alk.length?(' · ВЕЧЕ произведено под партидата (приспаднато): '+alk.map(function(k){return k+' '+al[k]}).join(', ')):'';var zfTxt=zf.length?(' · ⚠️ НЕ излязоха заготовки (недостиг — направи ги ПРЕДИ ②): '+zf.map(function(f){return f.name+(f.reason?(' — '+f.reason):'')}).join(' | ')):'';if(!ri&&!si&&!zf.length){msg('Нищо ново за производство — всичко поръчано вече е произведено под партида '+j.lot+'.'+alTxt,'ok');return}msg((zf.length?'⚠️ ':'✓ ')+'Производство · партида '+j.lot+' · заготовки: '+zp+' произв.'+(zs?(' ('+zs+' без рецепта)'):'')+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+alTxt+zfTxt+'. Провери в касата и „Приключи".',zf.length?'err':'ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value||$('date').value;var lot=pd?('L.'+pd.split('-').reverse().join('.')):'';if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy за '+sel.length+' магазина'+(lot?(', ВЕЧЕ с партида '+lot):'')+'.\\nЦените ги слага Barsy по правилото на клиента.\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;sel.forEach(function(s,i){if(cr[i]&&cr[i].account_id)s.account_id=cr[i].account_id});saveGrid();LASTACC=cr.filter(function(c){return c.ok&&c.account_id}).map(function(c){return c.account_id});msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. После натисни ③ Стокова.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 // Тегли сметките, ползвали производствената ПАРТИДА L.<деня от „Зареди"> (±2 дни).
 function loadByLot(){var d=$('date').value;var lot='L.'+(d?d.split('-').reverse().join('.'):'');msg('Търся сметките с партида '+lot+' (±2 дни)…');api({action:'load_by_lot',date:d}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}shops=j.shops||[];renderGrid();$('planbox').innerHTML='';if(!shops.length){msg('Няма сметки с партида '+(j.lot||lot)+'. (Провери деня в „Зареди" и че има производство с тази партида.)','err');return}var sc=shops.filter(function(s){return s.has_stokova}).length;msg('Партида '+(j.lot||lot)+': '+shops.length+' сметки я ползват. '+(sc?(sc+' вече имат стокова (червено „С", разтикнати). '):'')+'Тикни които искаш и натисни ③ Стокова.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
@@ -1666,7 +1691,7 @@ module.exports = async function handler(req, res) {
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     const shopsIn = Array.isArray(body.shops) ? body.shops.map(s => ({ order: s.order || {} })) : [];
     if (!shopsIn.length) { res.status(400).json({ ok: false, error: "no_shops" }); return; }
-    const { agg, rolls, zag } = compute(shopsIn);
+    const { agg } = compute(shopsIn);
     const prodDate = /^\d{4}-\d{2}-\d{2}$/.test(body.prod_date || "") ? body.prod_date : sofiaToday();
     const auto = body.auto_lot === true; // авто-партида (същия ден) → празна партида
     const { lot, lot_exp } = auto ? { lot: "", lot_exp: null } : lotFor(prodDate);
@@ -1713,10 +1738,16 @@ module.exports = async function handler(req, res) {
         : round(Math.max(0, directFull - alreadyL) + shortfall(setNeed, a.id));
       if (p > 0) rollProduce[name] = p;
     }
-    // ЗАГОТОВКИ: тегли се от производството → само липсващото до дневната нужда (покрива
-    // и минусите). Произвеждат се ПЪРВО и от най-дълбоката, преди ролките/сетовете.
+    // ЗАГОТОВКИ: нуждата се смята от РЕАЛНО произвежданото от ① (ролки+сетове), НЕ от
+    // поръчката — иначе при „оспорвани" ролки (произвеждат се ПЪЛНО) заготовки като раците
+    // свършват после (S18 фикс). = заготовки в произвежданите ролки (orderToZag(rollProduce))
+    // + директните заготовки под сетовете (setDirectZag, без през ролките → без двойно броене).
+    // Тегли се от ОБЩАТА наличност (FIFO), не по партида. Произвеждат се ПЪРВО, най-дълбоката преди.
+    const zagNeed = {};
+    for (const src of [orderToZag(rollProduce), setDirectZag(setProduce)])
+      for (const [k, v] of Object.entries(src)) zagNeed[k] = (zagNeed[k] || 0) + v;
     const zagProduce = {};
-    for (const [name, qty] of Object.entries(zag)) { const a = resolve(name); if (a && Number(qty) > 0) { const p = round(shortfall(Number(qty), a.id)); if (p > 0) zagProduce[name] = p; } }
+    for (const [name, qty] of Object.entries(zagNeed)) { const a = resolve(name); if (a && Number(qty) > 0) { const p = round(shortfall(Number(qty), a.id)); if (p > 0) zagProduce[name] = p; } }
     const doZag = body.include_zag !== false;
     // Произвеждаме заготовките ПЪРВО, после ролките, после сетовете (всяко следващо тегли предното).
     const zagRows = toRows(zagProduce).sort((a, b) => zagDepth(byId(a.article_id)) - zagDepth(byId(b.article_id)));
@@ -1728,11 +1759,17 @@ module.exports = async function handler(req, res) {
       // Заготовките — ЕДНА ПО ЕДНА (best-effort): някои нямат производствена рецепта в
       // Barsy (напр. „заг. Марината за ориз") и се прескачат, без да чупят процеса.
       if (doZag && zagRows.length) {
-        const z = { ok: true, produced: [], skipped: [] };
+        // produced = излезли; failed = РЕАЛЕН недостиг (суровина/наличност) → червено, коригирай
+        // ПРЕДИ ② ; skipped = безобидни (ръчна заготовка без производствена рецепта, напр. Марината).
+        const z = { ok: true, produced: [], skipped: [], failed: [] };
         for (const r of zagRows) {
-          let rr; try { rr = await createProduction([r], { lot, lot_exp }, user, pass); } catch (e) { rr = { ok: false }; }
-          if (rr && rr.ok) z.produced.push(r.article_name); else z.skipped.push(r.article_name);
+          let rr; try { rr = await createProduction([r], { lot, lot_exp }, user, pass); } catch (e) { rr = { ok: false, error: String(e && e.message) }; }
+          if (rr && rr.ok) { z.produced.push(r.article_name); continue; }
+          const err = String((rr && rr.error) || "");
+          if (/наличност|служебн|партид/i.test(err)) z.failed.push({ name: r.article_name, qty: r.amount, reason: err.slice(0, 160) });
+          else z.skipped.push({ name: r.article_name, qty: r.amount, reason: err ? err.slice(0, 120) : "няма производствена рецепта" });
         }
+        z.ok = z.failed.length === 0;
         out.zagotovki = z;
       }
       if (rollRows.length) out.rolls = await createProduction(rollRows, { lot, lot_exp }, user, pass);
