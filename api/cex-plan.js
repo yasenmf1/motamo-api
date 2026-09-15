@@ -1591,16 +1591,30 @@ module.exports = async function handler(req, res) {
     const gridBlock = content.find(c => c && c.type === "eStructListForm");
     const gridId = gridBlock && gridBlock.id;
     let rowsInfo = null, tgt = gridBlock && gridBlock.data && gridBlock.data.data_source && gridBlock.data.data_source.target;
+    let forcedInfo = null, rawSample = null;
+    const findRows = (node) => { let best = null; (function w(x) { if (!x || typeof x !== "object") return; if (Array.isArray(x)) { if (x.length && x[0] && typeof x[0] === "object" && (x[0].article_id != null || x[0].item_id != null || x[0].row_id != null || x[0].order_id != null)) { if (!best || x.length > best.length) best = x; } return x.forEach(w); } for (const k in x) w(x[k]); })(node); return best || []; };
     if (tgt) {
       try {
         const rr = await cexCallRoot(tgt, user, pass);
-        const findRows = (node) => { let best = null; (function w(x) { if (!x || typeof x !== "object") return; if (Array.isArray(x)) { if (x.length && x[0] && typeof x[0] === "object" && (x[0].article_id != null || x[0].item_id != null || x[0].row_id != null)) { if (!best || x.length > best.length) best = x; } return x.forEach(w); } for (const k in x) w(x[k]); })(node); return best || []; };
+        rawSample = String(rr.raw || "").slice(0, 1200);
         const rws = findRows(rr.data);
         rowsInfo = { count: rws.length, keys: rws[0] ? Object.keys(rws[0]) : [], first: rws[0] || null, second: rws[1] || null };
       } catch (e) { rowsInfo = { error: String(e && e.message) }; }
+      // Опит с force_data_request — гридовете връщат само id-та, докато не поискаш данните.
+      try {
+        const mk = Object.keys(tgt)[0];
+        const forced = JSON.parse(JSON.stringify(tgt));
+        if (mk && forced[mk] && typeof forced[mk] === "object") {
+          forced[mk].force_data_request = true;
+          forced[mk].params = Object.assign({}, forced[mk].params, { force_data_request: true, bid: CEX_BID });
+        }
+        const fr = await cexCallRoot(forced, user, pass);
+        const frows = findRows(fr.data);
+        forcedInfo = { method: mk, sent: forced[mk], raw: String(fr.raw || "").slice(0, 1500), count: frows.length, keys: frows[0] ? Object.keys(frows[0]) : [], first: frows[0] || null, second: frows[1] || null };
+      } catch (e) { forcedInfo = { error: String(e && e.message) }; }
     }
     const fields = []; (function w(n) { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(w); if (typeof n.name === "string" && Object.prototype.hasOwnProperty.call(n, "value")) fields.push(n.name); for (const k in n) if (k !== "data_source" && k !== "elements" && k !== "tax_groups_by_country" && k !== "all_tax_groups" && k !== "countries") w(n[k]); })(inner);
-    res.status(200).json({ ok: true, account_id: acc, page_title: inner.page_title || inner.object_title, top_keys: Object.keys(inner), grid_id: gridId, active_struct_id: inner.active_struct_id || (gridBlock && gridBlock.data && gridBlock.data.active_struct_id) || null, actions: actions.slice(0, 20), grid_target: tgt || null, rows: rowsInfo, header_fields: Array.from(new Set(fields)).slice(0, 80) });
+    res.status(200).json({ ok: true, account_id: acc, page_title: inner.page_title || inner.object_title, top_keys: Object.keys(inner), grid_id: gridId, active_struct_id: inner.active_struct_id || (gridBlock && gridBlock.data && gridBlock.data.active_struct_id) || null, actions: actions.slice(0, 20), grid_target: tgt || null, rows: rowsInfo, rows_raw: rawSample, forced: forcedInfo, header_fields: Array.from(new Set(fields)).slice(0, 80) });
     return;
   }
 
