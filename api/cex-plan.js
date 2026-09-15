@@ -1790,7 +1790,11 @@ module.exports = async function handler(req, res) {
         // ПРЕДИ ② ; skipped = безобидни (ръчна заготовка без производствена рецепта, напр. Марината).
         const z = { ok: true, produced: [], skipped: [], failed: [] };
         for (const r of zagRows) {
-          let rr; try { rr = await createProduction([r], { lot, lot_exp }, user, pass); } catch (e) { rr = { ok: false, error: String(e && e.message) }; }
+          // Заготовките се произвеждат БЕЗ партида: теглят се от общата наличност (FIFO)
+          // за ролките/сетовете, а базовите (Марината/Зеле/Сварен ориз/Ориз Поке) не са
+          // настроени за партиди в Barsy → под L даваха „не е настроено ползване на партиди"
+          // → фалшиво ЧЕРВЕНО. Партида L е само за крайната продажба (ролки/сетове).
+          let rr; try { rr = await createProduction([r], { lot: "", lot_exp: null }, user, pass); } catch (e) { rr = { ok: false, error: String(e && e.message) }; }
           if (rr && rr.ok) { z.produced.push(r.article_name); continue; }
           const err = String((rr && rr.error) || "");
           if (/наличност|служебн|партид/i.test(err)) z.failed.push({ name: r.article_name, qty: r.amount, reason: err.slice(0, 160) });
