@@ -1577,6 +1577,33 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // ── ДИАГНОСТИК за „Замести сметка" (само четене): Accounts_edit + редовете + save-метод ──
+  if (body.action === "account_inspect") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const acc = Number(body.account_id); if (!acc) { res.status(400).json({ ok: false, error: "no_account_id" }); return; }
+    const load = await cexCallRoot({ Accounts_edit: { account_id: acc, params: { bid: 1 } } }, user, pass);
+    const inner = load.data && load.data.Accounts_edit;
+    if (!inner) { res.status(502).json({ ok: false, error: "load_failed", raw: String(load.raw || "").slice(0, 400) }); return; }
+    const content = Array.isArray(inner.content) ? inner.content : [];
+    const actions = [];
+    (function w(n) { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(w); if (n.type === "action" && n.target) actions.push({ target: n.target, title: n.title, active_struct_id: n.active_struct_id || null }); for (const k in n) w(n[k]); })(inner);
+    const gridBlock = content.find(c => c && c.type === "eStructListForm");
+    const gridId = gridBlock && gridBlock.id;
+    let rowsInfo = null, tgt = gridBlock && gridBlock.data && gridBlock.data.data_source && gridBlock.data.data_source.target;
+    if (tgt) {
+      try {
+        const rr = await cexCallRoot(tgt, user, pass);
+        const findRows = (node) => { let best = null; (function w(x) { if (!x || typeof x !== "object") return; if (Array.isArray(x)) { if (x.length && x[0] && typeof x[0] === "object" && (x[0].article_id != null || x[0].item_id != null || x[0].row_id != null)) { if (!best || x.length > best.length) best = x; } return x.forEach(w); } for (const k in x) w(x[k]); })(node); return best || []; };
+        const rws = findRows(rr.data);
+        rowsInfo = { count: rws.length, keys: rws[0] ? Object.keys(rws[0]) : [], first: rws[0] || null, second: rws[1] || null };
+      } catch (e) { rowsInfo = { error: String(e && e.message) }; }
+    }
+    const fields = []; (function w(n) { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(w); if (typeof n.name === "string" && Object.prototype.hasOwnProperty.call(n, "value")) fields.push(n.name); for (const k in n) if (k !== "data_source" && k !== "elements" && k !== "tax_groups_by_country" && k !== "all_tax_groups" && k !== "countries") w(n[k]); })(inner);
+    res.status(200).json({ ok: true, account_id: acc, page_title: inner.page_title || inner.object_title, top_keys: Object.keys(inner), grid_id: gridId, active_struct_id: inner.active_struct_id || (gridBlock && gridBlock.data && gridBlock.data.active_struct_id) || null, actions: actions.slice(0, 20), grid_target: tgt || null, rows: rowsInfo, header_fields: Array.from(new Set(fields)).slice(0, 80) });
+    return;
+  }
+
   // ── ЗАРЕЖДАНЕ ПО ГРАФИК (чете; връща обектите за деня + последните им количества) ──
   if (body.action === "schedule_seed") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
