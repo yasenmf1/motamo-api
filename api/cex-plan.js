@@ -1429,9 +1429,12 @@ module.exports = async function handler(req, res) {
   // Пишещите действия искат силен токен; „stock" е само четене → и CEX_VIEW_TOKEN.
   const strong = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN];
   // Само ПИШЕЩИТЕ действия искат силен токен; четенето/смятането приемат и четящия.
-  const writeActions = ["create_accounts", "produce_plan", "create_production", "create_stokova"];
-  // create_stokova с dry:true само СГЛОБЯВА (не записва) → приема и четящия токен.
-  const isWrite = writeActions.includes(body.action) && !(body.action === "create_stokova" && body.dry === true);
+  const writeActions = ["create_accounts", "produce_plan", "create_production", "create_stokova", "replace_account"];
+  // create_stokova/replace_account с dry само СГЛОБЯВАТ (не записват) → приемат и четящия токен.
+  // replace_account е DRY по подразбиране (пише само при изричен dry:false).
+  const isWrite = writeActions.includes(body.action)
+    && !(body.action === "create_stokova" && body.dry === true)
+    && !(body.action === "replace_account" && body.dry !== false);
   const allowed = isWrite ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
@@ -1618,6 +1621,100 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // ── ЗАМЕСТИ СМЕТКА (делта запис): чете текущите редове + шапката, смята делти
+  //    (target − current) и сглобява „Accounts_save". DRY по подразбиране (не пише).
+  //    Протоколът е разкодиран от Network на adminx (S20) — виж memory motamo-cex-api-map:
+  //    в записа `amount` е ДЕЛТА, не абсолютно; праща се само променéният ред с order_id.
+  //    target: { "<article_id|име>": <абсолютно к-во> | {amount, price, lot} }.
+  //    Пише само при изричен dry:false (иначе връща `save_body` за преглед). РИСКОВО на реална.
+  if (body.action === "replace_account") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const acc = Number(body.account_id); if (!acc) { res.status(400).json({ ok: false, error: "no_account_id" }); return; }
+    const dry = body.dry !== false; // по подразбиране DRY
+    const closeIt = body.close === true;
+    const targetIn = (body.target && typeof body.target === "object") ? body.target : null;
+    if (!targetIn) { res.status(400).json({ ok: false, error: "no_target" }); return; }
+    // 1) шапката (values) от страницата на сметката
+    let page; try { page = await cexCallRoot({ accounts_edit: { id: acc, params: { bid: CEX_BID } } }, user, pass); }
+    catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    const inner = page.data && page.data.accounts_edit;
+    if (!inner) { res.status(502).json({ ok: false, error: "page_load_failed", raw: String(page.raw || "").slice(0, 300) }); return; }
+    const fmap = {};
+    (function w(n) { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(w);
+      if (typeof n.name === "string" && Object.prototype.hasOwnProperty.call(n, "value")) fmap[n.name] = n.value;
+      for (const k in n) if (k !== "data_source" && k !== "elements" && k !== "tax_groups_by_country" && k !== "all_tax_groups" && k !== "countries") w(n[k]); })(inner);
+    const gv = (k, d) => (fmap[k] !== undefined && fmap[k] !== null ? fmap[k] : d);
+    const values = {
+      user_id: gv("user_id", null), user_name: gv("user_name", ""), place_id: gv("place_id", "1"),
+      ref_date: gv("ref_date", null), client_id: gv("client_id", null), client_name: gv("client_name", ""),
+      deal_id: gv("deal_id", null), deal_title: gv("deal_title", ""), discount: gv("discount", "0"),
+      person_id: gv("person_id", null), person_name: gv("person_name", ""), lang_id: gv("lang_id", "bg_BG"),
+      delivery_date: gv("delivery_date", null), currency_id: gv("currency_id", "1"),
+      account_alias: gv("account_alias", ""), description: gv("description", ""), notes: gv("notes", ""),
+      delivery_address: { delivery_type: "no", delivery_type_title: "Без доставка" },
+      phone: gv("phone", ""), speditor_id: gv("speditor_id", null), tracking_number: gv("tracking_number", null),
+      reason_id: gv("reason_id", null), currency_rate: gv("currency_rate", "1"), paymethod_id: gv("paymethod_id", null),
+      skip_account_discount_recalculate_flag: null, linked_accounts: ""
+    };
+    // 2) текущите редове
+    let rr; try { rr = await cexCallRoot({ accounts_edit: { id: acc, action_type: "values", active_struct_id: "eStructListForm_1", params: { id: acc, bid: CEX_BID }, rows: 5000 } }, user, pass); }
+    catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    const curRows = (rr.data && rr.data.accounts_edit && Array.isArray(rr.data.accounts_edit.rows)) ? rr.data.accounts_edit.rows : [];
+    const curByArt = {}; for (const r of curRows) curByArt[String(r.article_id)] = r;
+    // 3) нормализирай target → article_id → {amount, price?, lot?}
+    const tgt = {};
+    for (const [k, v] of Object.entries(targetIn)) {
+      const a = resolve(k); const id = a ? String(a.id) : String(k);
+      const amount = (v && typeof v === "object") ? Number(v.amount) : Number(v);
+      const price = (v && typeof v === "object" && v.price != null) ? Number(v.price) : null;
+      const lot = (v && typeof v === "object" && v.lot != null) ? String(v.lot) : null;
+      if (isNaN(amount) || amount < 0) continue;
+      tgt[id] = { amount, price, lot };
+    }
+    // 4) делти (target − current); премахнат = делта до 0; нов = +target (иска цена)
+    const saveRows = [], needPrice = [], plan = [];
+    const ids = new Set([...Object.keys(curByArt), ...Object.keys(tgt)]);
+    for (const id of ids) {
+      const cur = curByArt[id]; const curAmt = cur ? Number(cur.amount) : 0;
+      const want = tgt[id] ? tgt[id].amount : 0;
+      const delta = round(want - curAmt);
+      if (delta === 0) continue;
+      const art = byId(id);
+      const name = (cur && cur.article_name) || (art && art.name) || String(id);
+      let price = cur ? Number(cur.current_price) : (tgt[id] && tgt[id].price != null ? tgt[id].price : null);
+      if (price == null || isNaN(price)) { needPrice.push({ article_id: id, name, want }); plan.push({ article_id: id, name, current: curAmt, target: want, delta, note: "нужна цена (нов артикул)" }); continue; }
+      const row = {
+        article_name: name, article_id: String(id), amount: delta,
+        package_name: "", package_ratio: "",
+        current_price: price.toFixed(2), original_current_price: price.toFixed(2),
+        system_current_price: cur ? String(cur.system_current_price) : String(price),
+        discount: "0", total_price: (want * price).toFixed(2),
+        tax_id: cur ? String(cur.tax_id) : String(gv("tax_id", "2")),
+        depot_id: cur ? String(cur.depot_id) : String(CEX_DEPOT),
+        delivery_price: cur ? String(cur.delivery_price) : "0",
+        lot_value: cur ? (cur.lot_value || "") : ((tgt[id] && tgt[id].lot) || ""),
+        start_service_date: "", currency_id: cur ? String(cur.currency_id) : "1",
+        pricelist_id: cur ? String(cur.pricelist_id) : "3"
+      };
+      if (cur) row.order_id = cur.order_id; // съществуващ ред → носи order_id
+      saveRows.push(row); plan.push({ article_id: id, name, current: curAmt, target: want, delta });
+    }
+    const saveBody = { Accounts_save: { id: acc, action_type: closeIt ? "save_and_close" : "save_and_continue", values, rows: saveRows } };
+    const out = { ok: true, account_id: acc, dry, client: values.client_name, alias: values.account_alias,
+      current: curRows.map(r => ({ article_id: r.article_id, name: r.article_name, amount: r.amount, lot: r.lot_value })),
+      plan, need_price: needPrice, rows_to_save: saveRows.length, save_body: saveBody };
+    if (dry) { res.status(200).json(out); return; }
+    if (needPrice.length) { res.status(400).json({ ok: false, error: "need_price", need_price: needPrice, hint: "подай target:{<id>:{amount,price}}" }); return; }
+    if (!saveRows.length) { res.status(200).json({ ok: true, account_id: acc, noop: true, message: "няма промени" }); return; }
+    let wr; try { wr = await cexCallRoot(saveBody, user, pass); }
+    catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    out.write = { ok: wr.ok, status: wr.status, raw: String(wr.raw || "").slice(0, 400), data: wr.data };
+    out.ok = !!wr.ok;
+    res.status(wr.ok ? 200 : 502).json(out);
+    return;
+  }
+
   // ── ЗАРЕЖДАНЕ ПО ГРАФИК (чете; връща обектите за деня + последните им количества) ──
   if (body.action === "schedule_seed") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
@@ -1767,15 +1864,18 @@ module.exports = async function handler(req, res) {
       const alreadyL = already(a.id);
       // „Оспорвана" ролка = продава се САМОСТОЯТЕЛНО И е компонент на сет (НАЧИ ORO/AMO/
       // KAI/RAY). CET производството ИЗЯЖДА НАЧИ, затова разчитането на стар склад оставя
-      // самостоятелната продажба под L без наличност (сутрин 11.09 → ② кърпи, timeout,
-      // объркани стокови). Решение: за оспорвана ролка произвеждаме ПЪЛНО под L =
-      // самостоятелно + колкото изяждат сетовете. После CET-ите ядат setNeed → под L остава
-      // directFull за продажба. Излишъкът е само старият склад (в други партиди), безвреден
-      // и се пази от дублиране чрез `alreadyL`. За чисто-компонентните ролки — както досега
-      // (само липсващото до наличността, без свръхпроизводство).
+      // самостоятелната продажба под L без наличност. Трябва: обща наличност ≥ directFull+setNeed
+      // (сетовете изяждат setNeed → остава ≥ directFull под L за продажбата).
+      // ★ S20 фикс: смятаме спрямо РЕАЛНАТА текуща наличност (rawStock), НЕ спрямо
+      // произведеното под партида (alreadyL). Причина: произведените НАЧИ се ИЗЯЖДАТ от
+      // сетовете в същия/предишен цикъл, но `producedUnderLot` пак ги брои → изваждахме твърде
+      // много → произвеждахме малко → при второ ① сетовете гърмяха „трябват 8, има 5" (16.09).
+      // rawStock е живата наличност → самокоригира се при повторно ① (произвежда пак липсата)
+      // и НЕ може да подцени. Пази от дублиране естествено: ако НАЧИ вече е налично (не изядено),
+      // rawStock е високо → не произвежда пак. Чисто-компонентните ролки — както досега.
       const contested = directFull > 0 && setNeed > 0;
       const p = contested
-        ? round(Math.max(0, directFull + setNeed - alreadyL))
+        ? round(Math.max(0, directFull + setNeed - rawStock(a.id)))
         : round(Math.max(0, directFull - alreadyL) + shortfall(setNeed, a.id));
       if (p > 0) rollProduce[name] = p;
     }
