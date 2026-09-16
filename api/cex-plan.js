@@ -817,6 +817,63 @@ function fullBOM(orderMap) {
   for (const [name, qty] of Object.entries(orderMap || {})) add(resolve(name), Number(qty) || 0);
   return need;
 }
+// ★ S20 — ПРЕД-ПОЛЕТЕН план за „Изчисли": какви СУРОВИНИ да заредиш и какви
+// ЗАГОТОВКИ да произведеш ПРЕДИ ①, за да не гръмне производството насред процеса.
+// Огледало на ① (produce_plan): продаваните ролки/сетове/поке се произвеждат ПЪЛНО
+// (не се нетират срещу стар готов склад — иначе заготовки/суровини се подценяват);
+// оспорваните НАЧИ = directFull+setNeed − наличност; чисто-компонентните = недостиг;
+// заготовките = нетно срещу наличност. После смятаме суровинната консумация на РЕАЛНО
+// произвежданото и връщаме недостига (за зареждане). GPT-прегледано (нетна MRP; тук
+// финалните продажби НЕ се нетират, за да съвпадне с ①).
+function preflightPlan(agg, stock) {
+  const st = id => { const q = stock[String(id)]; return (q == null || isNaN(q)) ? 0 : Number(q); };
+  const shortfall = (need, id) => Math.max(0, Number(need) - st(id));
+  // 1) сетове (пълно) + директни ролки/поке (пълно)
+  const setProduce = {}, directRoll = {};
+  for (const [name, qty] of Object.entries(agg)) {
+    const a = resolve(name); if (!a || !(Number(qty) > 0)) continue;
+    if (a.is_set) setProduce[name] = (setProduce[name] || 0) + Number(qty);
+    else if (a.is_menu) directRoll[name] = (directRoll[name] || 0) + Number(qty);
+  }
+  // 2) ролки: оспорвани (продавани + компонент) ПЪЛНО спрямо наличност; иначе недостиг
+  const setRolls = explodeToRolls(setProduce);
+  const rollProduce = {};
+  for (const name of new Set([...Object.keys(directRoll), ...Object.keys(setRolls)])) {
+    const a = resolve(name); if (!a || !a.is_menu || a.is_set) continue;
+    const directFull = directRoll[name] || 0, setNeed = setRolls[name] || 0;
+    const contested = directFull > 0 && setNeed > 0;
+    const p = contested ? round(Math.max(0, directFull + setNeed - st(a.id)))
+                        : round(directFull + shortfall(setNeed, a.id));
+    if (p > 0) rollProduce[name] = p;
+  }
+  // 3) заготовки: нужда от реалното производство (ролки + директни под сет), нетно
+  const zagNeed = {};
+  for (const src of [orderToZag(rollProduce), setDirectZag(setProduce)])
+    for (const [k, v] of Object.entries(src)) zagNeed[k] = (zagNeed[k] || 0) + v;
+  const zagProduce = {};
+  for (const [name, qty] of Object.entries(zagNeed)) { const a = resolve(name); if (a && Number(qty) > 0) { const p = round(shortfall(Number(qty), a.id)); if (p > 0) zagProduce[name] = p; } }
+  // 4) суровинна консумация на ВСИЧКО реално произвеждано (директните суровини на всеки
+  //    произвеждан артикул; вложените заготовки/ролки се броят при своето производство).
+  const rawUse = {};
+  const addDirectRaw = (art, q) => {
+    if (!art || !(q > 0)) return;
+    for (const c of (art.components || [])) {
+      const ca = c.id != null ? byId(c.id) : resolve(c.name);
+      if (ca && (ca.cat === "Суровини")) rawUse[ca.id] = (rawUse[ca.id] || 0) + q * (Number(c.qty) || 0);
+    }
+  };
+  for (const [name, q] of Object.entries(setProduce)) addDirectRaw(resolve(name), q);
+  for (const [name, q] of Object.entries(rollProduce)) addDirectRaw(resolve(name), q);
+  for (const [name, q] of Object.entries(zagProduce)) addDirectRaw(resolve(name), q);
+  const EXCLUDE_RAW = new Set(["Опаковка", "Етикет Опаковка"]);
+  const loadRaw = {};
+  for (const [id, use] of Object.entries(rawUse)) {
+    const a = byId(id); if (!a || EXCLUDE_RAW.has(a.name)) continue;
+    const deficit = round(use - st(id));
+    if (deficit > 0.0005) loadRaw[id] = deficit;
+  }
+  return { zagProduce, rollProduce, setProduce, loadRaw };
+}
 const round = n => Math.round(n * 1000) / 1000;
 function sortObj(o, d) { const out = {}; Object.keys(o || {}).sort().forEach(k => out[k] = Math.round(o[k] * 10 ** d) / 10 ** d); return out; }
 const sofiaToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Sofia" }).format(new Date());
@@ -1217,7 +1274,8 @@ function collect(){document.querySelectorAll('#grid input[data-n]').forEach(func
 function selShops(){collect();var out=[];document.querySelectorAll('#grid .selbox').forEach(function(cb){if(cb.checked){var i=+cb.getAttribute('data-i');if(shops[i])out.push(shops[i])}});return out}
 function calc(){var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}msg('Смятам и записвам за кухнята…');var kd=$('pdate').value||$('date').value;api({shops:sel,publish_kitchen:true,kitchen_date:kd}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}renderPlan(j);var sv=j.kitchen_saved?(' Записано за кухнята ('+j.kitchen_saved+') — момичетата го виждат на екрана.'):(j.kitchen_saved===false?' (записът за кухнята не мина)':'');msg('Планът е готов за '+sel.length+' магазина.'+sv,'ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function tbl(t,o){var ks=Object.keys(o||{});if(!ks.length)return '';var h='<table><tr><th class="shop">'+t+'</th><th>кол.</th></tr>';ks.forEach(function(k){h+='<tr><td class="shop">'+esc(k)+'</td><td class="q">'+o[k]+'</td></tr>'});return h+'</table>'}
-function renderPlan(j){$('planbox').innerHTML='<h2>За производство</h2><div class="plan">'+tbl('Сетове',j.produce_sets)+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
+function preBox(pf){if(!pf)return '';if(pf.error)return '<div class="prewarn" style="background:#fff8e1;border:1px solid #f0c36d;color:#7a5b00;padding:8px 10px;border-radius:8px;margin-bottom:10px">⚠ Не можах да прочета склада за проверка ('+esc(pf.message||'')+'). Плана по-долу е наред, но провери суровините ръчно.</div>';var lr=pf.load_raw||{},lk=Object.keys(lr);var zg=pf.produce_zagotovki||{};var h='';if(lk.length){h+='<div class="prebad" style="background:#fdecea;border:1px solid #e0a0a0;color:#8a1c1c;padding:10px 12px;border-radius:8px;margin-bottom:10px"><b>⚠ ЗАРЕДИ ПЪРВО (суровини — не могат да се произведат):</b><table style="margin-top:6px">'+lk.map(function(k){return '<tr><td class="shop">'+esc(k)+'</td><td class="q">'+lr[k]+'</td></tr>'}).join('')+'</table><div style="margin-top:4px;font-size:12px">Зареди тези, инак производството ще гръмне насред процеса.</div></div>'}else{h+='<div class="preok" style="background:#e9f7ec;border:1px solid #a5d6b0;color:#1c6b2e;padding:8px 12px;border-radius:8px;margin-bottom:10px">✓ Всички суровини са налични за днешното производство.</div>'}h+=tbl('Произведи заготовки ПЪРВО',zg);return h?('<div style="margin-bottom:6px">'+h+'</div>'):''}
+function renderPlan(j){$('planbox').innerHTML=preBox(j.preflight)+'<h2>За производство</h2><div class="plan">'+tbl('Сетове',j.produce_sets)+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
 function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy за '+sel.length+' магазина:\\n• първо заготовки (майонези, сосове…), после ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (заготовки → ролки → сетове)');api({action:'produce_plan',shops:sel,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.zagotovki&&j.zagotovki.error)||(j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||j.error||j.message||''),'err');return}var zp=(j.zagotovki&&j.zagotovki.produced&&j.zagotovki.produced.length)||0,zs=(j.zagotovki&&j.zagotovki.skipped&&j.zagotovki.skipped.length)||0,zf=(j.zagotovki&&j.zagotovki.failed)||[],ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;var al=j.already_under_lot||{},alk=Object.keys(al);var alTxt=alk.length?(' · ВЕЧЕ произведено под партидата (приспаднато): '+alk.map(function(k){return k+' '+al[k]}).join(', ')):'';var zfTxt=zf.length?(' · ⚠️ НЕ излязоха заготовки (недостиг — направи ги ПРЕДИ ②): '+zf.map(function(f){return f.name+(f.reason?(' — '+f.reason):'')}).join(' | ')):'';if(!ri&&!si&&!zf.length){msg('Нищо ново за производство — всичко поръчано вече е произведено под партида '+j.lot+'.'+alTxt,'ok');return}msg((zf.length?'⚠️ ':'✓ ')+'Производство · партида '+j.lot+' · заготовки: '+zp+' произв.'+(zs?(' ('+zs+' без рецепта)'):'')+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+alTxt+zfTxt+'. Провери в касата и „Приключи".',zf.length?'err':'ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value||$('date').value;var lot=pd?('L.'+pd.split('-').reverse().join('.')):'';if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy за '+sel.length+' магазина'+(lot?(', ВЕЧЕ с партида '+lot):'')+'.\\nЦените ги слага Barsy по правилото на клиента.\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;sel.forEach(function(s,i){if(cr[i]&&cr[i].account_id)s.account_id=cr[i].account_id});saveGrid();LASTACC=cr.filter(function(c){return c.ok&&c.account_id}).map(function(c){return c.account_id});msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. После натисни ③ Стокова.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 // Тегли сметките, ползвали производствената ПАРТИДА L.<деня от „Зареди"> (±2 дни).
@@ -2081,9 +2139,29 @@ module.exports = async function handler(req, res) {
     try { const sv = await sbSavePlan(kd, shopsOut, produceOut, body.kitchen_note || null); kitchen_saved = sv.ok ? kd : false; }
     catch (e) { kitchen_saved = false; }
   }
+  // ★ S20 — ПРЕД-ПОЛЕТЕН план: чете живия склад и връща какво да заредиш (суровини) и
+  // произведеш (заготовки) ПРЕДИ ①, за да не гръмне производството. Само ако има Barsy
+  // креденшъли; при проблем със склада връщаме preflight:null (не чупим „Изчисли").
+  let preflight = null;
+  if (body.preflight !== false) {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (user && pass) {
+      try {
+        const sm = await stockMap(user, pass);
+        const pf = preflightPlan(agg, sm);
+        // ключовете идват смесени: loadRaw е по ID, zagProduce по ИМЕ → resolve хваща и двете.
+        const named = (m, d) => { const o = {}; for (const [k, q] of Object.entries(m)) { const a = resolve(k); o[a ? a.name : k] = Math.round(q * 10 ** d) / 10 ** d; } return o; };
+        preflight = {
+          load_raw: named(pf.loadRaw, 3),        // СУРОВИНИ за зареждане (недостиг)
+          produce_zagotovki: named(pf.zagProduce, 3), // ЗАГОТОВКИ за производство (нетно)
+          ok: Object.keys(pf.loadRaw).length === 0 // true = нищо не липсва → чисто минаване
+        };
+      } catch (e) { preflight = { error: "stock_read_failed", message: String(e && e.message).slice(0, 120) }; }
+    }
+  }
   res.status(200).json({
     ok: true, seed_date: seedDate || null, seeded_accounts: seededAccounts, kitchen_saved,
-    shops: shopsOut,
+    shops: shopsOut, preflight,
     order_total: sortObj(agg, 2), produce_sets: produceOut.sets, produce_rolls: produceOut.rolls, produce_zagotovki: produceOut.zagotovki
   });
 };
