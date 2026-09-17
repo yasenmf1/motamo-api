@@ -624,20 +624,44 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
     };
     if (s.client_id) account.client_id = s.client_id;
     if (s.person_id) account.person_id = s.person_id;
-    // ★ S20 — ② САМО отваря сметката. БЕЗ допроизводство/буфер (self-heal махнат: трупаше вечен
-    // излишък). Ако липсва наличност → ① Производство не е пуснато/пълно за деня → връщаме ясна
-    // грешка „пусни ① пак", вместо да произвеждаме тук. Дублиране на UUID = сметката вече същест.
-    let r = null, lastRaw = "", existed = false;
-    try { r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass); }
-    catch (e) { r = { ok: false, raw: String(e && e.message) }; }
-    if (!r.ok) {
+    // ★ S20 ден2 — ② отваря сметката; при липса допроизвежда ТОЧНО колкото Barsy казва, че
+    // липсва (той знае свободното под партида — вкл. запазеното от отворени сметки, което
+    // справката НЕ показва) — **БЕЗ БУФЕР** (буферът трупаше излишъка; ① прави основното).
+    // Дублиране на UUID = сметката вече съществува → не е грешка.
+    const treeNeed = fullNeeds(s.order);
+    let r = null, lastRaw = "", topped = 0, existed = false;
+    const toppedNames = [], toppedIds = {};
+    for (let attempt = 0; attempt < 20; attempt++) {
+      try { r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass); }
+      catch (e) { r = { ok: false, raw: String(e && e.message) }; }
+      if (r.ok) break;
       lastRaw = String(r.raw || "");
-      if (/[Дд]ублиране/.test(lastRaw) && /UUID/i.test(lastRaw)) existed = true;
+      if (/[Дд]ублиране/.test(lastRaw) && /UUID/i.test(lastRaw)) { existed = true; break; }
+      // Barsy дава СВОБОДНОТО (реалното, вкл. запазеното): „…в партида…: N" или „…в склада: N".
+      const m = lot && (
+        lastRaw.match(/Артикул\s*"([^"]+)"[\s\S]*?в партида[\s\S]*?:\s*(-?[\d.,]+)/) ||
+        lastRaw.match(/Артикул\s*"([^"]+)"[\s\S]*?(?:складов[аи][\s\S]*?наличност|в склада)[\s\S]*?:\s*(-?[\d.,]+)/)
+      );
+      if (!m) break;
+      const a = resolve(m[1]); if (!a) break;
+      const cur = parseFloat(String(m[2]).replace(/[^\d.,-]/g, "").replace(",", ".")) || 0;
+      const ord = orders.find(o => String(o.article_id) === String(a.id));
+      const need = treeNeed[a.id] != null ? treeNeed[a.id] : (ord ? Number(ord.amount) : 0);
+      const short = Math.ceil((need - cur) * 100) / 100; // ТОЧНО липсата, БЕЗ буфер
+      if (short <= 0) break;
+      if ((toppedIds[a.id] || 0) >= 4) break; // не зацикляй на един артикул
+      let pr;
+      try {
+        if (!sm) sm = await stockMap(user, pass).catch(() => ({}));
+        pr = await produceDeep(a, short, lot, lotExp, user, pass, sm, toppedNames, 0);
+      } catch (e) { lastRaw = "авто-производство хвърли: " + String(e && e.message); break; }
+      if (!pr || !pr.ok) { lastRaw = "допроизв. „" + a.name + "\" +" + short + " ОТКАЗАНО: " + String((pr && pr.error) || "неизвестно"); break; }
+      topped++; toppedIds[a.id] = (toppedIds[a.id] || 0) + 1; toppedNames.push(a.name + " +" + short);
     }
     const accId = r && (typeof r.data === "number" ? r.data : (r.data && (r.data.account_id || r.data.id))) || null;
-    const shortM = !r.ok && !existed && lastRaw.match(/Артикул\s*"([^"]+)"/);
     out.push({ client: s.client, rep: s.rep, ok: !!(r && r.ok) || existed, existed: existed || undefined, account_id: accId, items: orders.length,
-      error: (r && r.ok) || existed ? undefined : (shortM ? ("НЕДОСТИГ на „" + shortM[1] + "\" — пусни ① Производство за деня и опитай пак") : lastRaw.slice(0, 200)) });
+      topped: topped || undefined, topped_names: toppedNames.length ? toppedNames : undefined,
+      error: (r && r.ok) || existed ? undefined : lastRaw.slice(0, 200) });
   }
   return out;
 }
@@ -654,7 +678,7 @@ async function produceDeep(art, qty, lot, lotExp, user, pass, sm, log, depth) {
     const need = qty * (Number(c.qty) || 0);
     const cur = Number(sm[String(ca.id)]) || 0;
     if (need <= cur) continue;
-    const amt = Math.ceil((need - cur) * 100) / 100 + (ca.cat === "Заготовки" ? 0.5 : 2); // малък буфер
+    const amt = Math.ceil((need - cur) * 100) / 100; // ТОЧНО липсата, БЕЗ буфер (буферът трупаше излишък)
     const rr = await produceDeep(ca, amt, lot, lotExp, user, pass, sm, log, depth + 1);
     if (!rr || !rr.ok) {
       if (ca.cat === "Заготовки") continue; // заготовка без рецепта → best-effort, Barsy ще каже
@@ -679,7 +703,7 @@ async function produceDeep(art, qty, lot, lotExp, user, pass, sm, log, depth) {
     const cc = (art.components || []).find(c => String(c.id != null ? c.id : (resolve(c.name) || {}).id) === String(comp.id));
     const per = cc ? (Number(cc.qty) || 0) : 0;
     const compNeed = (per > 0 ? qty * per : qty); // ако не е директен компонент, поне толкова
-    const compAmt = Math.max(0, Math.ceil(compNeed - have)) + (comp.cat === "Заготовки" ? 1 : 3);
+    const compAmt = Math.max(0, Math.ceil((compNeed - have) * 100) / 100); // ТОЧНО липсата, БЕЗ буфер
     if (compAmt <= 0) break;
     const rr = await produceDeep(comp, compAmt, lot, lotExp, user, pass, sm, log, depth + 1);
     if (!rr || !rr.ok) { if (comp.cat === "Заготовки") continue; return { ok: false, error: "компонент „" + comp.name + "\" +" + compAmt + ": " + String(rr && rr.error || "неизвестно") }; }
