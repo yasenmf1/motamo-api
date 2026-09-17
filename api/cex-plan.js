@@ -847,7 +847,10 @@ const RAWCATS = new Set(["Суровини", "Консумативи", "Нека
 function dayPlan(agg, total, underL) {
   const aT = {}; for (const k in (total || {})) aT[k] = Number(total[k]) || 0;
   const aL = {}; for (const k in (underL || {})) aL[k] = Number(underL[k]) || 0;
-  const gT = id => aT[String(id)] || 0, gL = id => aL[String(id)] || 0;
+  // МИНУС наличност (счетоводен артефакт от анулирани буфери / незаписано зареждане) се
+  // третира като 0: произвеждаме ТОЧНО нуждата за деня, БЕЗ да „запълваме" дупката → без
+  // свръхпроизводство. Цехът е прясно производство всеки ден (Barsy позволява произв. под нула).
+  const gT = id => Math.max(0, aT[String(id)] || 0), gL = id => Math.max(0, aL[String(id)] || 0);
   const produce = {}, loadRaw = {}, seen = new Set();
   function consumeTotal(art, qty) {
     if (!art || qty <= 1e-9) return;
