@@ -2011,6 +2011,25 @@ module.exports = async function handler(req, res) {
     return;
   }
   // ── Движения на едно производство (четящо): изтеглени съставки + произведено ──
+  // ДИАГНОСТИКА (S20 ден2): суровите движения по партида — типове/знаци, за да смятам НЕТНО.
+  if (body.action === "lot_net") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const lot = String(body.lot || ""); if (!lot) { res.status(400).json({ ok: false, error: "no_lot" }); return; }
+    const artId = body.article_id != null ? String(body.article_id) : null;
+    const all = [];
+    for (let pg = 1; pg <= 12; pg++) {
+      let d = null;
+      try { const r = await cexCall("Reports_lot_list_details", { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { lot_value: lot } }, user, pass); if (r && r.ok) d = r.data; } catch (e) {}
+      if (!d) break; const rows = Array.isArray(d.rows) ? d.rows : []; all.push(...rows); if (rows.length < 50) break;
+    }
+    const types = {}; for (const x of all) { const t = x.operation_ref_type || x.operation_type || "?"; types[t] = (types[t] || 0) + 1; }
+    const forArt = artId ? all.filter(x => String(x.article_id) === artId) : [];
+    res.status(200).json({ ok: true, lot, total_rows: all.length, ref_types: types,
+      sample: all.slice(0, 4),
+      article_rows: forArt.map(x => ({ type: x.operation_ref_type, amount: x.amount, ref_id: x.ref_id, keys: Object.keys(x).slice(0, 20) })).slice(0, 40) });
+    return;
+  }
   if (body.action === "production_movements") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
