@@ -624,58 +624,20 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
     };
     if (s.client_id) account.client_id = s.client_id;
     if (s.person_id) account.person_id = s.person_id;
-    // Продажбата иска наличност ПО ПАРТИДА. Някои артикули (напр. НACHI ORO, който е и
-    // компонент на CET сетовете) остават под нужното след ① Производство. Затова: ако
-    // Accounts_place гръмне с „няма достатъчно наличност в партида", допроизвеждаме ТОЧНО
-    // липсващия артикул под същата партида и повтаряме (до 8 пъти, за няколко къси артикула).
-    const treeNeed = fullNeeds(s.order); // нужда по цялото дърво (директна + като компонент)
-    let r = null, lastRaw = "", topped = 0, existed = false;
-    const toppedNames = [], toppedIds = {};
-    for (let attempt = 0; attempt < 20; attempt++) {
-      try { r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass); }
-      catch (e) { r = { ok: false, raw: String(e && e.message) }; }
-      if (r.ok) break;
+    // ★ S20 — ② САМО отваря сметката. БЕЗ допроизводство/буфер (self-heal махнат: трупаше вечен
+    // излишък). Ако липсва наличност → ① Производство не е пуснато/пълно за деня → връщаме ясна
+    // грешка „пусни ① пак", вместо да произвеждаме тук. Дублиране на UUID = сметката вече същест.
+    let r = null, lastRaw = "", existed = false;
+    try { r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass); }
+    catch (e) { r = { ok: false, raw: String(e && e.message) }; }
+    if (!r.ok) {
       lastRaw = String(r.raw || "");
-      // Дублиране на UUID = сметката за този ден+магазин ВЕЧЕ съществува → не е грешка.
-      if (/[Дд]ублиране/.test(lastRaw) && /UUID/i.test(lastRaw)) { existed = true; break; }
-      // Barsy връща ДВА различни текста за липса, ловим и двата:
-      //  (1) „…няма наличност в ПАРТИДА … : N"  — липсва под L (продажбата иска партида),
-      //  (2) „…без реална складова наличност. Текуща наличност в СКЛАДА: N"  — липсва в
-      //      общия склад (ролята няма право да продава на минус). И двата се лекуват с
-      //      допроизводство на СЪЩИЯ артикул под партидата — то вдига И партидата, И склада.
-      const m = lot && (
-        lastRaw.match(/Артикул\s*"([^"]+)"[\s\S]*?в партида[\s\S]*?:\s*(-?[\d.,]+)/) ||
-        lastRaw.match(/Артикул\s*"([^"]+)"[\s\S]*?(?:складов[аи][\s\S]*?наличност|в склада)[\s\S]*?:\s*(-?[\d.,]+)/)
-      );
-      if (!m) break;
-      const a = resolve(m[1]);
-      const cur = parseFloat(String(m[2]).replace(/[^\d.,-]/g, "").replace(",", ".")) || 0;
-      if (!a) break;
-      // нужда = по цялото дърво (покрива и консумацията при производство на CET сетовете);
-      // ако липсва в дървото, падни към директната поръчка.
-      const ord = orders.find(o => String(o.article_id) === String(a.id));
-      const need = treeNeed[a.id] != null ? treeNeed[a.id] : (ord ? Number(ord.amount) : 0);
-      // Голяма порция: рецептурната нужда подценява реалната консумация на Barsy (0.5-и и т.н.),
-      // затова добавяме +10 буфер над недостига (беше +30 → 90 излишни поке на 10.09) — преизлишъкът в партидата е безвреден,
-      // а гарантира напредък дори когато „need" е сгрешено. Спираме по кап на артикул.
-      const short = Math.max(0, Math.ceil(need - cur)) + 10;
-      if ((toppedIds[a.id] || 0) >= 4) break; // не зацикляй безкрайно на един артикул
-      // Barsy отказва производство без РЕАЛНА наличност на компонентите (сет → НACHI ролки,
-      // ролка → заготовки). Затова първо допроизвеждаме липсващите компоненти (рекурсивно,
-      // от най-дълбокото), после самия артикул — иначе ② пада, ако ① не е пуснато.
-      let pr;
-      try {
-        if (!sm) sm = await stockMap(user, pass).catch(() => ({}));
-        pr = await produceDeep(a, short, lot, lotExp, user, pass, sm, toppedNames, 0);
-      }
-      catch (e) { lastRaw = "авто-производство хвърли: " + String(e && e.message); break; }
-      if (!pr || !pr.ok) { lastRaw = "допроизв. „" + a.name + "\" +" + short + " ОТКАЗАНО: " + String((pr && pr.error) || "неизвестно"); break; }
-      topped++; toppedIds[a.id] = (toppedIds[a.id] || 0) + 1; toppedNames.push(a.name + " +" + short);
+      if (/[Дд]ублиране/.test(lastRaw) && /UUID/i.test(lastRaw)) existed = true;
     }
     const accId = r && (typeof r.data === "number" ? r.data : (r.data && (r.data.account_id || r.data.id))) || null;
+    const shortM = !r.ok && !existed && lastRaw.match(/Артикул\s*"([^"]+)"/);
     out.push({ client: s.client, rep: s.rep, ok: !!(r && r.ok) || existed, existed: existed || undefined, account_id: accId, items: orders.length,
-      topped: topped || undefined, topped_names: toppedNames.length ? toppedNames : undefined,
-      error: (r && r.ok) || existed ? undefined : lastRaw.slice(0, 200) });
+      error: (r && r.ok) || existed ? undefined : (shortM ? ("НЕДОСТИГ на „" + shortM[1] + "\" — пусни ① Производство за деня и опитай пак") : lastRaw.slice(0, 200)) });
   }
   return out;
 }
@@ -873,6 +835,44 @@ function preflightPlan(agg, stock) {
     if (deficit > 0.0005) loadRaw[id] = deficit;
   }
   return { zagProduce, rollProduce, setProduce, loadRaw };
+}
+// ★ S20 — ЕДИННА нетна MRP (двунивова), БЕЗ буфер, идемпотентна. Ползва се и от ① и от „Изчисли".
+// `total` = обща наличност {id:кол}; `underL` = произведено под партида L {id:кол} (за продажбата
+// под L + идемпотентност при повторно ①). Правило (GPT-прегледано):
+//  • ПРОДАВАНИ (ролки/сетове от заявката) → нужда ПОД партида L: произведи max(0, поръчка − underL).
+//  • КОМПОНЕНТИ/ЗАГОТОВКИ → нетно спрямо ОБЩАТА наличност.
+//  • СУРОВИНИ → недостиг = зареди (не се произвеждат).
+// Повторно ① с пресни данни → нищо (не дублира → не трупа излишък). Без никакъв буфер.
+const RAWCATS = new Set(["Суровини", "Консумативи", "Некатегоризирани"]);
+function dayPlan(agg, total, underL) {
+  const aT = {}; for (const k in (total || {})) aT[k] = Number(total[k]) || 0;
+  const aL = {}; for (const k in (underL || {})) aL[k] = Number(underL[k]) || 0;
+  const gT = id => aT[String(id)] || 0, gL = id => aL[String(id)] || 0;
+  const produce = {}, loadRaw = {}, seen = new Set();
+  function consumeTotal(art, qty) {
+    if (!art || qty <= 1e-9) return;
+    const id = String(art.id);
+    const have = gT(id), use = Math.min(have, qty); aT[id] = have - use;
+    const deficit = qty - use; if (deficit <= 1e-9) return;
+    if (RAWCATS.has(art.cat)) { loadRaw[id] = (loadRaw[id] || 0) + deficit; return; }
+    if (seen.has(id)) return; seen.add(id);
+    produce[id] = (produce[id] || 0) + deficit;
+    for (const c of (art.components || [])) { const ca = c.id != null ? byId(c.id) : resolve(c.name); if (ca) consumeTotal(ca, deficit * (Number(c.qty) || 0)); }
+    seen.delete(id);
+  }
+  function sellLine(art, qty) {
+    const id = String(art.id);
+    const haveL = gL(id), useL = Math.min(haveL, qty); aL[id] = haveL - useL;
+    aT[id] = Math.max(0, gT(id) - useL); // продадените под-L бройки напускат и общото
+    const np = qty - useL; if (np <= 1e-9) return;
+    produce[id] = (produce[id] || 0) + np;
+    for (const c of (art.components || [])) { const ca = c.id != null ? byId(c.id) : resolve(c.name); if (ca) consumeTotal(ca, np * (Number(c.qty) || 0)); }
+  }
+  for (const [name, qty] of Object.entries(agg || {})) {
+    const art = resolve(name), q = Number(qty) || 0; if (!art || q <= 0) continue;
+    if (art.is_menu || art.is_set) sellLine(art, q); else consumeTotal(art, q);
+  }
+  return { produce, loadRaw };
 }
 const round = n => Math.round(n * 1000) / 1000;
 function sortObj(o, d) { const out = {}; Object.keys(o || {}).sort().forEach(k => out[k] = Math.round(o[k] * 10 ** d) / 10 ** d); return out; }
@@ -1276,7 +1276,7 @@ function calc(){var sel=selShops();if(!sel.length){msg('Избери поне е
 function tbl(t,o){var ks=Object.keys(o||{});if(!ks.length)return '';var h='<table><tr><th class="shop">'+t+'</th><th>кол.</th></tr>';ks.forEach(function(k){h+='<tr><td class="shop">'+esc(k)+'</td><td class="q">'+o[k]+'</td></tr>'});return h+'</table>'}
 function preBox(pf){if(!pf)return '';if(pf.error)return '<div class="prewarn" style="background:#fff8e1;border:1px solid #f0c36d;color:#7a5b00;padding:8px 10px;border-radius:8px;margin-bottom:10px">⚠ Не можах да прочета склада за проверка ('+esc(pf.message||'')+'). Плана по-долу е наред, но провери суровините ръчно.</div>';var lr=pf.load_raw||{},lk=Object.keys(lr);var zg=pf.produce_zagotovki||{};var h='';if(lk.length){h+='<div class="prebad" style="background:#fdecea;border:1px solid #e0a0a0;color:#8a1c1c;padding:10px 12px;border-radius:8px;margin-bottom:10px"><b>⚠ ЗАРЕДИ ПЪРВО (суровини — не могат да се произведат):</b><table style="margin-top:6px">'+lk.map(function(k){return '<tr><td class="shop">'+esc(k)+'</td><td class="q">'+lr[k]+'</td></tr>'}).join('')+'</table><div style="margin-top:4px;font-size:12px">Зареди тези, инак производството ще гръмне насред процеса.</div></div>'}else{h+='<div class="preok" style="background:#e9f7ec;border:1px solid #a5d6b0;color:#1c6b2e;padding:8px 12px;border-radius:8px;margin-bottom:10px">✓ Всички суровини са налични за днешното производство.</div>'}h+=tbl('Произведи заготовки ПЪРВО',zg);return h?('<div style="margin-bottom:6px">'+h+'</div>'):''}
 function renderPlan(j){$('planbox').innerHTML=preBox(j.preflight)+'<h2>За производство</h2><div class="plan">'+tbl('Сетове',j.produce_sets)+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
-function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy за '+sel.length+' магазина:\\n• първо заготовки (майонези, сосове…), после ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (заготовки → ролки → сетове)');api({action:'produce_plan',shops:sel,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.zagotovki&&j.zagotovki.error)||(j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||j.error||j.message||''),'err');return}var zp=(j.zagotovki&&j.zagotovki.produced&&j.zagotovki.produced.length)||0,zs=(j.zagotovki&&j.zagotovki.skipped&&j.zagotovki.skipped.length)||0,zf=(j.zagotovki&&j.zagotovki.failed)||[],ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;var al=j.already_under_lot||{},alk=Object.keys(al);var alTxt=alk.length?(' · ВЕЧЕ произведено под партидата (приспаднато): '+alk.map(function(k){return k+' '+al[k]}).join(', ')):'';var zfTxt=zf.length?(' · ⚠️ НЕ излязоха заготовки (недостиг — направи ги ПРЕДИ ②): '+zf.map(function(f){return f.name+(f.reason?(' — '+f.reason):'')}).join(' | ')):'';if(!ri&&!si&&!zf.length){msg('Нищо ново за производство — всичко поръчано вече е произведено под партида '+j.lot+'.'+alTxt,'ok');return}msg((zf.length?'⚠️ ':'✓ ')+'Производство · партида '+j.lot+' · заготовки: '+zp+' произв.'+(zs?(' ('+zs+' без рецепта)'):'')+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+alTxt+zfTxt+'. Провери в касата и „Приключи".',zf.length?'err':'ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function doProduce(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('Ще СЪЗДАМ производство в Barsy за '+sel.length+' магазина:\\n• първо заготовки (майонези, сосове…), после ролки/поке, после сетове\\n• партида '+lot+' (срок +3 дни)\\nПродължавам?'))return;msg('Правя производството… (заготовки → ролки → сетове)');api({action:'produce_plan',shops:sel,prod_date:pd}).then(function(j){if(!j.ok){msg('Грешка при производство: '+((j.zagotovki&&j.zagotovki.error)||(j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||j.error||j.message||''),'err');return}var zp=(j.zagotovki&&j.zagotovki.produced&&j.zagotovki.produced.length)||0,zs=(j.zagotovki&&j.zagotovki.skipped&&j.zagotovki.skipped.length)||0,zf=(j.zagotovki&&j.zagotovki.failed)||[],ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;var al=j.already_under_lot||{},alk=Object.keys(al);var alTxt=alk.length?(' · ВЕЧЕ произведено под партидата (приспаднато): '+alk.map(function(k){return k+' '+al[k]}).join(', ')):'';var zfTxt=zf.length?(' · ⚠️ НЕ излязоха заготовки (недостиг — направи ги ПРЕДИ ②): '+zf.map(function(f){return f.name+(f.reason?(' — '+f.reason):'')}).join(' | ')):'';var lr=j.load_raw||{},lrk=Object.keys(lr);var lrTxt=lrk.length?(' · ⚠️ ЗАРЕДИ суровини ПРЕДИ продажба: '+lrk.map(function(k){return k+' '+lr[k]}).join(', ')):'';if(!ri&&!si&&!zf.length){msg('Нищо ново за производство — всичко поръчано вече е произведено под партида '+j.lot+'.'+alTxt+lrTxt,'ok');return}msg(((zf.length||lrk.length)?'⚠️ ':'✓ ')+'Производство · партида '+j.lot+' · заготовки: '+zp+' произв.'+(zs?(' ('+zs+' без рецепта)'):'')+' · ролки/поке №'+(ri||'—')+' · сетове №'+(si||'—')+alTxt+zfTxt+lrTxt+'. Провери в касата и „Приключи".',(zf.length||lrk.length)?'err':'ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value||$('date').value;var lot=pd?('L.'+pd.split('-').reverse().join('.')):'';if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy за '+sel.length+' магазина'+(lot?(', ВЕЧЕ с партида '+lot):'')+'.\\nЦените ги слага Barsy по правилото на клиента.\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;sel.forEach(function(s,i){if(cr[i]&&cr[i].account_id)s.account_id=cr[i].account_id});saveGrid();LASTACC=cr.filter(function(c){return c.ok&&c.account_id}).map(function(c){return c.account_id});msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. После натисни ③ Стокова.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 // Тегли сметките, ползвали производствената ПАРТИДА L.<деня от „Зареди"> (±2 дни).
 function loadByLot(){var d=$('date').value;var lot='L.'+(d?d.split('-').reverse().join('.'):'');msg('Търся сметките с партида '+lot+' (±2 дни)…');api({action:'load_by_lot',date:d}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}shops=j.shops||[];renderGrid();$('planbox').innerHTML='';if(!shops.length){msg('Няма сметки с партида '+(j.lot||lot)+'. (Провери деня в „Зареди" и че има производство с тази партида.)','err');return}var sc=shops.filter(function(s){return s.has_stokova}).length;msg('Партида '+(j.lot||lot)+': '+shops.length+' сметки я ползват. '+(sc?(sc+' вече имат стокова (червено „С", разтикнати). '):'')+'Тикни които искаш и натисни ③ Стокова.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
@@ -1898,61 +1898,22 @@ module.exports = async function handler(req, res) {
     try { sm = await stockMap(user, pass); } catch (e) { sm = {}; }
     const rawStock = id => { const q = sm[String(id)]; return (q == null || isNaN(q)) ? 0 : q; };
     const shortfall = (need, id) => Math.max(0, Number(need) - rawStock(id));
-    // ПРОДАВАНОТО (сетове + директни ролки/поке от заявката) се продава под ПАРТИДА
-    // L.<деня> в ② Сметки → произвеждаме ПЪЛНОТО поръчано под тази партида. Наличност
-    // в СТАРИ партиди не се брои (не се продава под L), затова тук НЕ гледаме склада.
-    // ... но ако ① е натиснато ВТОРИ път за същия ден (снощи + сутринта), вече произведеното
-    // под партидата се приспада — иначе количествата се удвояват (10.09: 124 Poke ТОКЕ в склада).
+    // ★ S20 — ЕДИННА нетна MRP (dayPlan): двунивова (общо vs под партида L), БЕЗ буфер,
+    // идемпотентна. Продаваните (ролки/сетове) се мерят под L (underLot → продажбата под L +
+    // без дублиране при повторно ①); заготовки/компоненти — нетно спрямо ОБЩАТА наличност;
+    // суровините — недостиг за зареждане. Повторно ① с пресни данни → нищо (не трупа излишък).
     let underLot = {};
     if (lot) { try { underLot = await producedUnderLot(lot, user, pass); } catch (e) { underLot = {}; } }
-    const already = id => Math.max(0, Number(underLot[String(id)]) || 0);
-    const setProduce = {};
-    for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_set && Number(qty) > 0) { const p = round(Math.max(0, Number(qty) - already(a.id))); if (p > 0) setProduce[name] = p; } }
-    // Директно продадени ролки/поке → пълно (продават се под L). Компонентните ролки за
-    // сетовете се ТЕГЛЯТ от производството (FIFO, коя да е партида) → само липсващото до
-    // наличността (не дублираме вече наличните ролки).
-    const directRoll = {};
-    for (const [name, qty] of Object.entries(agg)) { const a = resolve(name); if (a && a.is_menu && !a.is_set && Number(qty) > 0) directRoll[name] = (directRoll[name] || 0) + Number(qty); }
-    const setRolls = explodeToRolls(setProduce);
-    const rollProduce = {};
-    for (const name of new Set([...Object.keys(directRoll), ...Object.keys(setRolls)])) {
-      const a = resolve(name); if (!a || !a.is_menu || a.is_set) continue;
-      const directFull = directRoll[name] || 0;
-      const setNeed = setRolls[name] || 0;
-      const alreadyL = already(a.id);
-      // „Оспорвана" ролка = продава се САМОСТОЯТЕЛНО И е компонент на сет (НАЧИ ORO/AMO/
-      // KAI/RAY). CET производството ИЗЯЖДА НАЧИ, затова разчитането на стар склад оставя
-      // самостоятелната продажба под L без наличност. Трябва: обща наличност ≥ directFull+setNeed
-      // (сетовете изяждат setNeed → остава ≥ directFull под L за продажбата).
-      // ★ S20 фикс: смятаме спрямо РЕАЛНАТА текуща наличност (rawStock), НЕ спрямо
-      // произведеното под партида (alreadyL). Причина: произведените НАЧИ се ИЗЯЖДАТ от
-      // сетовете в същия/предишен цикъл, но `producedUnderLot` пак ги брои → изваждахме твърде
-      // много → произвеждахме малко → при второ ① сетовете гърмяха „трябват 8, има 5" (16.09).
-      // rawStock е живата наличност → самокоригира се при повторно ① (произвежда пак липсата)
-      // и НЕ може да подцени. Пази от дублиране естествено: ако НАЧИ вече е налично (не изядено),
-      // rawStock е високо → не произвежда пак. Чисто-компонентните ролки — както досега.
-      const contested = directFull > 0 && setNeed > 0;
-      const p = contested
-        ? round(Math.max(0, directFull + setNeed - rawStock(a.id)))
-        : round(Math.max(0, directFull - alreadyL) + shortfall(setNeed, a.id));
-      if (p > 0) rollProduce[name] = p;
-    }
-    // ЗАГОТОВКИ: нуждата се смята от РЕАЛНО произвежданото от ① (ролки+сетове), НЕ от
-    // поръчката — иначе при „оспорвани" ролки (произвеждат се ПЪЛНО) заготовки като раците
-    // свършват после (S18 фикс). = заготовки в произвежданите ролки (orderToZag(rollProduce))
-    // + директните заготовки под сетовете (setDirectZag, без през ролките → без двойно броене).
-    // Тегли се от ОБЩАТА наличност (FIFO), не по партида. Произвеждат се ПЪРВО, най-дълбоката преди.
-    const zagNeed = {};
-    for (const src of [orderToZag(rollProduce), setDirectZag(setProduce)])
-      for (const [k, v] of Object.entries(src)) zagNeed[k] = (zagNeed[k] || 0) + v;
-    const zagProduce = {};
-    for (const [name, qty] of Object.entries(zagNeed)) { const a = resolve(name); if (a && Number(qty) > 0) { const p = round(shortfall(Number(qty), a.id)); if (p > 0) zagProduce[name] = p; } }
+    const plan = dayPlan(agg, sm, underLot);
+    const zagProduce = {}, rollProduce = {}, setProduce = {}, loadRawNamed = {};
+    for (const [id, q] of Object.entries(plan.produce)) { const a = byId(id); if (!a || !(q > 0)) continue; if (a.is_set) setProduce[a.name] = round(q); else if (a.cat === "Заготовки") zagProduce[a.name] = round(q); else if (a.is_menu) rollProduce[a.name] = round(q); }
+    for (const [id, q] of Object.entries(plan.loadRaw)) { const a = byId(id); if (a && q > 0 && a.name !== "Опаковка" && a.name !== "Етикет Опаковка") loadRawNamed[a.name] = round(q); }
     const doZag = body.include_zag !== false;
-    // Произвеждаме заготовките ПЪРВО, после ролките, после сетовете (всяко следващо тегли предното).
+    // Ред: заготовки (най-дълбоката първо, БЕЗ партида) → ролки → сетове (под L).
     const zagRows = toRows(zagProduce).sort((a, b) => zagDepth(byId(a.article_id)) - zagDepth(byId(b.article_id)));
     const rollRows = toRows(rollProduce), setRows = toRows(setProduce);
     const alreadyNamed = {}; for (const [id, q] of Object.entries(underLot)) { const a = byId(id); if (a && q > 0) alreadyNamed[a.name] = round(q); }
-    const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate, already_under_lot: sortObj(alreadyNamed, 2), produced_zagotovki: sortObj(zagProduce, 2), produced_rolls: sortObj(rollProduce, 2), produced_sets: sortObj(setProduce, 2) };
+    const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate, already_under_lot: sortObj(alreadyNamed, 2), load_raw: sortObj(loadRawNamed, 3), produced_zagotovki: sortObj(zagProduce, 3), produced_rolls: sortObj(rollProduce, 2), produced_sets: sortObj(setProduce, 2) };
     // Ред: заготовки → ролки → сетове.
     try {
       // Заготовките — ЕДНА ПО ЕДНА (best-effort): някои нямат производствена рецепта в
@@ -2148,12 +2109,17 @@ module.exports = async function handler(req, res) {
     if (user && pass) {
       try {
         const sm = await stockMap(user, pass);
-        const pf = preflightPlan(agg, sm);
-        // ключовете идват смесени: loadRaw е по ID, zagProduce по ИМЕ → resolve хваща и двете.
+        // Същата dayPlan като ① → панелът показва ТОЧНО каквото ① ще произведе. underLot от
+        // деня на разноса (kitchen_date), за да е вярно продаваното под L и без дублаж.
+        const pfDay = /^\d{4}-\d{2}-\d{2}$/.test(body.kitchen_date || "") ? body.kitchen_date : sofiaToday();
+        let underLot = {};
+        try { underLot = await producedUnderLot(lotFor(pfDay).lot, user, pass); } catch (e) { underLot = {}; }
+        const pf = dayPlan(agg, sm, underLot);
+        const zag = {}; for (const [id, q] of Object.entries(pf.produce)) { const a = byId(id); if (a && a.cat === "Заготовки" && q > 0) zag[id] = q; }
         const named = (m, d) => { const o = {}; for (const [k, q] of Object.entries(m)) { const a = resolve(k); o[a ? a.name : k] = Math.round(q * 10 ** d) / 10 ** d; } return o; };
         preflight = {
           load_raw: named(pf.loadRaw, 3),        // СУРОВИНИ за зареждане (недостиг)
-          produce_zagotovki: named(pf.zagProduce, 3), // ЗАГОТОВКИ за производство (нетно)
+          produce_zagotovki: named(zag, 3),      // ЗАГОТОВКИ за производство (нетно)
           ok: Object.keys(pf.loadRaw).length === 0 // true = нищо не липсва → чисто минаване
         };
       } catch (e) { preflight = { error: "stock_read_failed", message: String(e && e.message).slice(0, 120) }; }
