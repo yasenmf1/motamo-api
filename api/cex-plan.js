@@ -647,7 +647,10 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
       const cur = parseFloat(String(m[2]).replace(/[^\d.,-]/g, "").replace(",", ".")) || 0;
       const ord = orders.find(o => String(o.article_id) === String(a.id));
       const need = treeNeed[a.id] != null ? treeNeed[a.id] : (ord ? Number(ord.amount) : 0);
-      const short = Math.ceil((need - cur) * 100) / 100; // ТОЧНО липсата, БЕЗ буфер
+      // Barsy показва БРУТНОТО в склада (не свободното — резервациите от отворени сметки са
+      // скрити), затова „точно колкото липсва" не е надеждно. Малък буфер връща надеждността
+      // (сметките се създават), с приемлив дребен излишък. (Върнато 18.09 след живо утро.)
+      const short = Math.max(0, Math.ceil(need - cur)) + 8;
       if (short <= 0) break;
       if ((toppedIds[a.id] || 0) >= 4) break; // не зацикляй на един артикул
       let pr;
@@ -678,7 +681,7 @@ async function produceDeep(art, qty, lot, lotExp, user, pass, sm, log, depth) {
     const need = qty * (Number(c.qty) || 0);
     const cur = Number(sm[String(ca.id)]) || 0;
     if (need <= cur) continue;
-    const amt = Math.ceil((need - cur) * 100) / 100; // ТОЧНО липсата, БЕЗ буфер (буферът трупаше излишък)
+    const amt = Math.ceil((need - cur) * 100) / 100 + (ca.cat === "Заготовки" ? 0.5 : 2); // малък буфер за надеждност
     const rr = await produceDeep(ca, amt, lot, lotExp, user, pass, sm, log, depth + 1);
     if (!rr || !rr.ok) {
       if (ca.cat === "Заготовки") continue; // заготовка без рецепта → best-effort, Barsy ще каже
@@ -703,7 +706,7 @@ async function produceDeep(art, qty, lot, lotExp, user, pass, sm, log, depth) {
     const cc = (art.components || []).find(c => String(c.id != null ? c.id : (resolve(c.name) || {}).id) === String(comp.id));
     const per = cc ? (Number(cc.qty) || 0) : 0;
     const compNeed = (per > 0 ? qty * per : qty); // ако не е директен компонент, поне толкова
-    const compAmt = Math.max(0, Math.ceil((compNeed - have) * 100) / 100); // ТОЧНО липсата, БЕЗ буфер
+    const compAmt = Math.max(0, Math.ceil(compNeed - have)) + (comp.cat === "Заготовки" ? 1 : 3); // малък буфер за надеждност
     if (compAmt <= 0) break;
     const rr = await produceDeep(comp, compAmt, lot, lotExp, user, pass, sm, log, depth + 1);
     if (!rr || !rr.ok) { if (comp.cat === "Заготовки") continue; return { ok: false, error: "компонент „" + comp.name + "\" +" + compAmt + ": " + String(rr && rr.error || "неизвестно") }; }
