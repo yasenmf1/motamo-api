@@ -1944,19 +1944,11 @@ module.exports = async function handler(req, res) {
     for (const [id, q] of Object.entries(plan.produce)) { const a = byId(id); if (!a || !(q > 0)) continue; if (a.is_set) setProduce[a.name] = round(q); else if (a.cat === "Заготовки") zagProduce[a.name] = round(q); else if (a.is_menu) rollProduce[a.name] = round(q); }
     for (const [id, q] of Object.entries(plan.loadRaw)) { const a = byId(id); if (a && q > 0 && a.name !== "Опаковка" && a.name !== "Етикет Опаковка") loadRawNamed[a.name] = round(q); }
     // ★ 2-стъпков поток: only:'zag' = само заготовки; only:'articles' = само ролки/сетове (под L).
+    // НЯМА гард за „мръсна партида" — нормално е няколко производства на ден под СЪЩАТА партида
+    // (различни магазини/вълни). Всяко ② Артикули прави ПЪЛНАТА поръчка на ИЗБРАНИТЕ магазини под
+    // L; ③ ги продава → произведено = продадено → без излишък. (Внимавай да НЕ пуснеш два пъти
+    // СЪЩИТЕ магазини — тогава ще произведеш двойно; сметките ще кажат „вече създадена".)
     const only = body.only === "zag" || body.only === "articles" ? body.only : null;
-    // ★ ГАРД „мръсна партида": ако под L ВЕЧЕ има произведени ПРОДАВАНИ артикули (ролки/сетове),
-    // втори „② Артикули" би удвоил → СПИРАМЕ и казваме да смени датата или анулира L. (Заготовките
-    // са без партида → не важи за тях.) Позволено с force:true (след ръчно анулиране).
-    if (only === "articles" && body.force !== true) {
-      const dirty = {};
-      for (const [id, q] of Object.entries(underLot)) { const a = byId(id); if (a && (a.is_menu || a.is_set) && q > 0.5) dirty[a.name] = round(q); }
-      if (Object.keys(dirty).length) {
-        res.status(200).json({ ok: false, error: "lot_dirty", lot, dirty: sortObj(dirty, 2),
-          message: "Партида " + lot + " ВЕЧЕ има произведени артикули (" + Object.keys(dirty).join(", ") + "). За да няма излишък: смени датата на Партида (нова, чиста) ИЛИ анулирай L в adminx, после пак натисни Артикули." });
-        return;
-      }
-    }
     const doZag = body.include_zag !== false && only !== "articles";
     const doArticles = only !== "zag";
     // Ред: заготовки (най-дълбоката първо, БЕЗ партида) → ролки → сетове (под L).
