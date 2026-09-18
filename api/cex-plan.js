@@ -193,6 +193,23 @@ async function stockMap(user, pass) {
   for (const a of list) { const id = a && (a.article_id || a.id); if (id != null) { const q = Number(a.store_amount); m[String(id)] = isNaN(q) ? null : Math.round(q * 1000) / 1000; } }
   return m;
 }
+// ★ S20 ден3 — ЗАПАЗЕНОТО от ОТВОРЕНИТЕ сметки. Barsy НЕ приспада наличност при отворена
+// сметка (само „запазва"), а справката/складът показват БРУТНО → производството подценяваше.
+// Тук сумираме поръчките на всички НЕзатворени сметки → реалното свободно = склад − запазено.
+async function reservedOpen(user, pass) {
+  const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 900 }, user, pass);
+  let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
+  const open = all.filter(a => !String(a.close_date || "").trim()
+    && String(a.is_anulate != null ? a.is_anulate : (a.anulate_flag != null ? a.anulate_flag : "0")) !== "1");
+  const reserved = {};
+  await mapLimit(open, 6, async (a) => {
+    try {
+      const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
+      for (const o of (rows.data || [])) { const id = String(o.article_id); if (id) reserved[id] = (reserved[id] || 0) + (Number(o.amount) || 0); }
+    } catch (e) {}
+  });
+  return { reserved, count: open.length };
+}
 async function seedShops(date, user, pass) {
   const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 900 }, user, pass);
   let all = list.data || [];
@@ -1939,7 +1956,14 @@ module.exports = async function handler(req, res) {
     // точно → нула излишък, нула провал. Пазим от ДВОЙНО производство с „мръсна партида" гард.
     let underLot = {};
     if (lot) { try { underLot = await producedUnderLot(lot, user, pass); } catch (e) { underLot = {}; } }
-    const plan = dayPlan(agg, sm, {}); // underL={} → продаваните ПЪЛНО под партидата
+    // ★ РЕАЛНО СВОБОДНО = склад − запазено от отворените сметки (Barsy не приспада при отворена
+    // сметка). Иначе компонентите (НАЧИ за сетовете) се подценяваха → последните сметки падаха.
+    let reserved = {};
+    try { const ro = await reservedOpen(user, pass); reserved = ro.reserved || {}; } catch (e) { reserved = {}; }
+    const freeStock = {};
+    for (const k in sm) freeStock[k] = (Number(sm[k]) || 0) - (Number(reserved[k]) || 0);
+    for (const k in reserved) if (!(k in freeStock)) freeStock[k] = -(Number(reserved[k]) || 0);
+    const plan = dayPlan(agg, freeStock, {}); // продаваните ПЪЛНО под L; компонентите нетно спрямо СВОБОДНОТО
     const zagProduce = {}, rollProduce = {}, setProduce = {}, loadRawNamed = {};
     for (const [id, q] of Object.entries(plan.produce)) { const a = byId(id); if (!a || !(q > 0)) continue; if (a.is_set) setProduce[a.name] = round(q); else if (a.cat === "Заготовки") zagProduce[a.name] = round(q); else if (a.is_menu) rollProduce[a.name] = round(q); }
     for (const [id, q] of Object.entries(plan.loadRaw)) { const a = byId(id); if (a && q > 0 && a.name !== "Опаковка" && a.name !== "Етикет Опаковка") loadRawNamed[a.name] = round(q); }
