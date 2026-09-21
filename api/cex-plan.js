@@ -2099,7 +2099,18 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     const id = Number(body.id); if (!id) { res.status(400).json({ ok: false, error: "no_id" }); return; }
-    try { const r = await cexCall("Storeproductions_movements", { id, store_production_id: id }, user, pass); res.status(200).json({ ok: r.ok, data: r.data }); }
+    // Barsy гридът връща само дефиниции на колони, докато не поискаш ДАННИТЕ с
+    // force_data_request. eStructList_1 = „Складови движения — заредени артикули"
+    // (ИЗТЕГЛЕНИТЕ суровини за това производство). Втора заявка изважда редовете.
+    const struct = body.struct || "eStructList_1";
+    const findRows = (node) => { let best = null; (function w(x) { if (!x || typeof x !== "object") return; if (Array.isArray(x)) { if (x.length && x[0] && typeof x[0] === "object" && ((x[0].amount != null && (x[0].article_name != null || x[0].article_id != null || x[0].article_name_prod != null)) || x[0].store_id != null)) { if (!best || x.length > best.length) best = x; } return x.forEach(w); } for (const k in x) w(x[k]); })(node); return best || []; };
+    try {
+      const rr = await cexCall("Storeproductions_movements", { id, store_production_id: id, action_type: "values", active_struct_id: struct, force_data_request: true, page_num: 1, rows: 5000, params: { id, store_production_id: id, bid: CEX_BID, force_data_request: true } }, user, pass);
+      const raw = findRows(rr.data);
+      const rows = raw.map(r => ({ produced: r.article_name_prod || null, withdrawn: r.article_name || null, withdrawn_id: r.article_id != null ? Number(r.article_id) : null, amount: Number(r.amount) || 0, cost: Number(r.avg_delivery_price_sum != null ? r.avg_delivery_price_sum : r.avg_delivery_price) || 0 }));
+      if (body.debug) { res.status(200).json({ ok: true, id, count: raw.length, sample_keys: raw[0] ? Object.keys(raw[0]) : [], rows, raw_sample: String(rr.raw || "").slice(0, 1000) }); return; }
+      res.status(200).json({ ok: true, id, count: raw.length, rows });
+    }
     catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); }
     return;
   }
