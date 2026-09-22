@@ -1463,13 +1463,22 @@ module.exports = async function handler(req, res) {
     const routeHead = `<tr><th class="n">Артикул</th>${activeCities.map(([, lbl]) => `<th class="q">${esc(lbl)}</th>`).join("")}<th class="q tot">Общо</th></tr>`;
     const routeBody = artNames.map(n => `<tr><td class="n">${esc(n)}</td>${activeCities.map(([g]) => { const v = (byCity[g] || {})[n] || 0; return `<td class="q${v ? "" : " zero"}">${v ? round(v) : "·"}</td>`; }).join("")}<td class="q tot">${round(agg[n])}</td></tr>`).join("");
     const routeCard = activeCities.length ? `<div class="card route"><h2>По маршрут<span class="cnt">${activeCities.map(([, l]) => l).join(" · ")}</span></h2><div class="scroll"><table>${routeHead}${routeBody}</table></div></div>` : "";
-    const empty = !Object.keys(rolls).length && !Object.keys(sets).length;
+    // Момичетата трябва да виждат КОЛКО ДА ПРОИЗВЕДАТ (нето, след наличното), не
+    // общо поръчаното. Нетото се записва при „Изчисли" в снимката (snap.produce).
+    // Има снимка → показваме нея; иначе fallback към общо поръчаното (докато не е смятал).
+    const prod = (snap && snap.produce && typeof snap.produce === "object") ? snap.produce : null;
+    const pSets = (prod && prod.sets) || {}, pRolls = (prod && prod.rolls) || {}, pZag = (prod && prod.zagotovki) || {};
+    const haveProd = !!(Object.keys(pSets).length || Object.keys(pRolls).length || Object.keys(pZag).length);
+    const empty = !haveProd && !Object.keys(rolls).length && !Object.keys(sets).length;
+    const prodCards = haveProd
+      ? `${card("sets", "Сетове · за производство", pSets)}${card("rolls", "Ролки / поке · за производство", pRolls)}${card("zag", "Заготовки · за производство", pZag)}`
+      : `${card("sets", "Сетове (общо поръчани)", sets)}${card("rolls", "Ролки / поке (общо поръчани)", rolls)}${card("zag", "Заготовки (общо поръчани)", zag)}`;
     res.status(200).send(todayPage(`
-      <header><h1>🍣 Цех · за разнос ${esc(date)}</h1><div class="d">${real && real.shops.length ? `по сметките (${seed.accounts})${extraSnap ? ` + ${extraSnap} по въведеното` : ""} · ` : (fromSnap ? "по въведеното от собственика · " : "")}${seed.shops.length} магазина · обновено ${esc(sofiaTime())}</div></header>
+      <header><h1>🍣 Цех · за производство ${esc(date)}</h1><div class="d">${real && real.shops.length ? `по сметките (${seed.accounts})${extraSnap ? ` + ${extraSnap} по въведеното` : ""} · ` : (fromSnap ? "по въведеното от собственика · " : "")}${seed.shops.length} магазина · обновено ${esc(sofiaTime())}</div></header>
       <div class="wrap">${empty
-        ? `<div class="empty"><h2>Още няма заявки за ${esc(date)}</h2><p>Когато направиш сметките за разноса, тук се показва какво да се произведе.<br>Страницата се обновява сама.</p></div>`
-        : `${routeCard}${card("sets", "Сетове (общо)", sets)}${card("rolls", "Ролки / поке (общо)", rolls)}${card("zag", "Заготовки (общо)", zag)}
-        <div class="note">Обновява се сам на всеки 3 минути · „По маршрут" = продуктите за всеки град · долните карти са общо за всички</div>`}</div>`));
+        ? `<div class="empty"><h2>Още няма план за ${esc(date)}</h2><p>Когато собственикът натисне „Изчисли", тук се показва колко да произведете.<br>Страницата се обновява сама.</p></div>`
+        : `${prodCards}${routeCard}
+        <div class="note">${haveProd ? "Числата са КОЛКО ДА ПРОИЗВЕДЕТЕ (след наличното в хладилника)." : "⚠ Още не е смятано днес — показано е ОБЩО поръчаното."} · „По маршрут" = продуктите за всеки град (за пакетиране) · обновява се на всеки 3 минути</div>`}</div>`));
     return;
   }
 
