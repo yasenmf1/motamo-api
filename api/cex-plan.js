@@ -1556,6 +1556,19 @@ module.exports = async function handler(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
 
+  // ── ДИАГНОСТИК (само четене): записаната „Изчисли" снимка (за кухнята) ──
+  if (body.action === "snapshot") {
+    let snap = null;
+    try { snap = await sbGetPlan(/^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : null); } catch (e) {}
+    if (!snap) { res.status(200).json({ ok: true, snapshot: null }); return; }
+    const shops = Array.isArray(snap.shops) ? snap.shops : [];
+    const art = body.article || null; // ако е зададено — разбивка по обект за този артикул
+    let breakdown = null, artTotal = 0;
+    if (art) { breakdown = []; for (const s of shops) { const v = (s.order || {})[art] || 0; if (v > 0) { artTotal += v; breakdown.push({ obj: (s.client || "") + (s.rep ? (" / " + s.rep) : ""), group: s.group || "adhoc", qty: v }); } } breakdown.sort((a, b) => b.qty - a.qty); }
+    res.status(200).json({ ok: true, for_date: snap.for_date, updated_at: snap.updated_at, shops_count: shops.length, produce: snap.produce || null, article: art, article_total: artTotal, breakdown });
+    return;
+  }
+
   // ── ДИАГНОСТИК (само четене): затворени сметки на дата (реалният разнос) ──
   if (body.action === "closed_on") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
