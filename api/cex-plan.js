@@ -1414,6 +1414,9 @@ module.exports = async function handler(req, res) {
     date = reqDate || (snapShops.length && snap.for_date) || isoPlusDays(sofiaToday(), 1);
     let real = null;
     try { real = await seedRazos(date, user, pass, true); } catch (e) { real = null; }
+    // Само ОТВОРЕНИТЕ (текущия батч за правене) — затворените вече са разнесени/готови и
+    // не са „за производство". Така „По маршрут" съвпада с картите за производство. (S21)
+    if (real && Array.isArray(real.shops)) { real.shops = real.shops.filter(sh => !sh.close_date); real.accounts = real.shops.length; }
     // Сметка, направена ВЧЕРА сутринта за ВЧЕРАШНИЯ разнос (и още отворена), не е за днес:
     // ако вече има стокова от вчера (клиент+сума, както „С" в инструмента) — вън.
     if (real && real.shops.length) {
