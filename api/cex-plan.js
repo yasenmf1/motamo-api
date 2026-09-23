@@ -1610,6 +1610,31 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // ── ДИАГНОСТИК (само четене): продажби по артикул за период (за анализ) ──
+  // body: {from:"YYYY-MM-DD", to:"YYYY-MM-DD"}. Връща на артикул: бройки, оборот
+  // без ДДС, себестойност без ДДС, печалба, маржин%. Нетна справка (Barsy).
+  if (body.action === "sales_articles") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(body.from || "") ? body.from : "2026-03-01";
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(body.to || "") ? body.to : sofiaToday();
+    let rep;
+    try { rep = await reportSalesByArticles(from, to, user, pass); }
+    catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    const arts = (rep.articles || []).map(a => {
+      const profit = a.revenue - a.cost;
+      return { id: a.article_id, name: a.name, cat: (ARTS[String(a.article_id)] || {}).cat || null,
+        units: Math.round(a.units * 1000) / 1000, revenue: Math.round(a.revenue * 100) / 100,
+        cost: Math.round(a.cost * 100) / 100, profit: Math.round(profit * 100) / 100,
+        margin_pct: a.revenue > 0 ? Math.round((profit / a.revenue) * 1000) / 10 : null };
+    }).sort((x, y) => y.units - x.units);
+    const tot = arts.reduce((s, a) => { s.units += a.units; s.revenue += a.revenue; s.cost += a.cost; s.profit += a.profit; return s; }, { units: 0, revenue: 0, cost: 0, profit: 0 });
+    res.status(200).json({ ok: true, from, to, incomplete: rep.incomplete, count: arts.length,
+      totals: { units: Math.round(tot.units * 1000) / 1000, revenue: Math.round(tot.revenue * 100) / 100, cost: Math.round(tot.cost * 100) / 100, profit: Math.round(tot.profit * 100) / 100 },
+      articles: arts });
+    return;
+  }
+
   // ── ③ СТОКОВА РАЗПИСКА: сглобява Invoices_create от формата на сметката ──
   // body: {account_id, date, dry?}. dry=true → връща сглобеното БЕЗ да записва.
   if (body.action === "create_stokova") {
