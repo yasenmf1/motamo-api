@@ -2189,17 +2189,18 @@ module.exports = async function handler(req, res) {
       if (body.debug) {
         // пробвай различни методи/грид-структури за РЕДОВЕТЕ на едно зареждане
         const one = ids[0];
+        const R = "Reports_lot_list_details";
         const probes = [
-          { m: "Storeloadsgoods_getlist", p: { filters: { store_load_id: one }, length: 5000 } },
-          { m: "Storeloadgoods_getlist", p: { filters: { store_load_id: one }, length: 5000 } },
-          { m: "Storeloads_getgood", p: { store_load_id: one } },
-          { m: "Reports_lot_list_details", p: { active_struct_id: "eStructList_1", action_type: "values", page_num: 1, filters: { article_id: id } } },
-          { m: "Reports_availability", p: { active_struct_id: "eStructList_1", action_type: "values", page_num: 1, filters: { article_id: id } } },
-          { m: "Revisions_getlist", p: { length: 500, order_by: "id desc" } }
+          { m: R, p: { active_struct_id: "eStructList_1", action_type: "values", page_num: 1, filters: { article_id: [id] } } },
+          { m: R, p: { active_struct_id: "eStructList_1", action_type: "values", page_num: 1, filters: { article_name: "Пиле Панирано" } } },
+          { m: R, p: { active_struct_id: "eStructList_1", action_type: "values", page_num: 1, filters: { articles: [id] } } },
+          { m: R, p: { active_struct_id: "eStructList_1", action_type: "values", page_num: 1, rows: 200, filters: { article_id: id } } },
+          { m: "Revisions_getlist", p: { filters: {}, length: 500, order_by: "id desc" } }
         ];
+        const summ = (r) => { const rr = findRows2(r.data); const only127 = rr.filter(x => Number(x.article_id) === id); const types = {}; for (const x of only127) { const t = x.operation_ref_type || "?"; types[t] = (types[t] || 0) + (Number(x.amount) || 0); } return { total_rows: rr.length, rows_127: only127.length, types_127: types, distinct_articles: [...new Set(rr.map(x => x.article_id))].slice(0, 8) }; };
         const out = [];
         for (const pr of probes) {
-          try { const r = await cexCall(pr.m, pr.p, user, pass); const rr = findRows2(r.data); out.push({ m: pr.m, p: JSON.stringify(pr.p).slice(0, 80), ok: r.ok, status: r.status, rows: rr.length, keys: rr[0] ? Object.keys(rr[0]).slice(0, 22) : [], raw: String(r.raw || "").slice(0, 220) }); } catch (e) { out.push({ m: pr.m, error: String(e && e.message) }); }
+          try { const r = await cexCall(pr.m, pr.p, user, pass); const s = summ(r); out.push({ m: pr.m, p: JSON.stringify(pr.p.filters || pr.p).slice(0, 60), ok: r.ok, status: r.status, ...s }); } catch (e) { out.push({ m: pr.m, error: String(e && e.message) }); }
         }
         res.status(200).json({ ok: true, id, heads_count: ids.length, first_id: one, probes: out });
         return;
