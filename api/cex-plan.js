@@ -2166,9 +2166,10 @@ module.exports = async function handler(req, res) {
     let rows = [];
     // Няколко варианта на параметрите — Barsy е капризен кой ключ приема.
     const variants = [
-      { method: "Storemoves_getlist", params: { filters: { article_id: id }, length: 5000, limit: 5000, order_by: "id desc" } },
-      { method: "Storemoves_getlist", params: { article_id: id, length: 5000, limit: 5000 } },
-      { method: "Storeloads_getlist", params: { filters: { article_id: id }, length: 5000, limit: 5000 } }
+      { method: "Storemoves_getlist", params: { filters: { article_id: id }, action_type: "values", active_struct_id: "eStructList_1", force_data_request: true, page_num: 1, rows: 5000, params: { article_id: id, bid: CEX_BID, force_data_request: true } } },
+      { method: "Reports_store_moves", params: { filters: { article_id: id }, action_type: "values", active_struct_id: "eStructList_1", force_data_request: true, page_num: 1, rows: 5000 } },
+      { method: "Reports_goods_movement", params: { filters: { article_id: id }, action_type: "values", active_struct_id: "eStructList_1", force_data_request: true, page_num: 1, rows: 5000 } },
+      { method: "Articledetails_getlist", params: { filters: { article_id: id }, length: 5000, limit: 5000 } }
     ];
     for (const v of variants) {
       try {
