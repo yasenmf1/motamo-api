@@ -2190,11 +2190,12 @@ module.exports = async function handler(req, res) {
         // пробвай различни методи/грид-структури за РЕДОВЕТЕ на едно зареждане
         const one = ids[0];
         const probes = [
-          { m: "Storemoves_getlist", p: {} },
-          { m: "Storemoves_getlist", p: { filters: { store_load_id: one } } },
-          { m: "Storemoves_getlist", p: { filters: { document_id: one } } },
-          { m: "Storeloads_get", p: { id: one, store_load_id: one } },
-          { m: "Storeloads_get", p: { id: one, store_load_id: one, action_type: "values", active_struct_id: "eStructListForm_1", force_data_request: true, page_num: 1, rows: 5000, params: { id: one, store_load_id: one, bid: CEX_BID, force_data_request: true, load_rows: true } } }
+          { m: "Storeloadsgoods_getlist", p: { filters: { store_load_id: one }, length: 5000 } },
+          { m: "Storeloadgoods_getlist", p: { filters: { store_load_id: one }, length: 5000 } },
+          { m: "Storeloads_getgood", p: { store_load_id: one } },
+          { m: "Reports_lot_list_details", p: { active_struct_id: "eStructList_1", action_type: "values", page_num: 1, filters: { article_id: id } } },
+          { m: "Reports_availability", p: { active_struct_id: "eStructList_1", action_type: "values", page_num: 1, filters: { article_id: id } } },
+          { m: "Revisions_getlist", p: { length: 500, order_by: "id desc" } }
         ];
         const out = [];
         for (const pr of probes) {
