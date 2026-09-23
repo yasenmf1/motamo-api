@@ -2179,6 +2179,30 @@ module.exports = async function handler(req, res) {
         if (found.length && (rows.length === 0)) rows = found;
       } catch (e) { attempts.push({ method: v.method, error: String(e && e.message) }); }
     }
+    // Ако не намерим движения по артикул — сглоби входа от документите за зареждане:
+    // Storeloads_getlist дава заглавията, Storeloads_get дава редовете (article_id+amount).
+    if (body.loads) {
+      let heads = [];
+      try { const hr = await cexCall("Storeloads_getlist", { length: 5000, limit: 5000, order_by: "store_load_id desc" }, user, pass); let L = hr.data || []; if (!Array.isArray(L)) L = Object.values(L); heads = L; } catch (e) {}
+      const findRows2 = (node) => { let best = null; (function w(x) { if (!x || typeof x !== "object") return; if (Array.isArray(x)) { if (x.length && x[0] && typeof x[0] === "object" && (x[0].article_id != null)) { if (!best || x.length > best.length) best = x; } return x.forEach(w); } for (const k in x) w(x[k]); })(node); return best || []; };
+      const ids = heads.map(h => h.store_load_id || h.id).filter(Boolean);
+      if (body.debug) {
+        // покажи структурата на ЕДИН документ, за да знам ключовете
+        const one = ids[0];
+        let dr = null; try { const r = await cexCall("Storeloads_get", { id: one, store_load_id: one, action_type: "values", active_struct_id: "eStructListForm_1", force_data_request: true, rows: 5000, params: { id: one, store_load_id: one, bid: CEX_BID, force_data_request: true } }, user, pass); dr = r; } catch (e) {}
+        res.status(200).json({ ok: true, id, heads_count: ids.length, first_id: one, one_keys: dr && dr.data ? Object.keys(dr.data).slice(0, 30) : [], one_rows: findRows2(dr && dr.data).slice(0, 4), raw_sample: String(dr && dr.raw || "").slice(0, 600) });
+        return;
+      }
+      let total = 0, docs = 0; const hits = [];
+      const details = await mapLimit(ids, 8, async (lid) => {
+        try { const r = await cexCall("Storeloads_get", { id: lid, store_load_id: lid, action_type: "values", active_struct_id: "eStructListForm_1", force_data_request: true, rows: 5000, params: { id: lid, store_load_id: lid, bid: CEX_BID, force_data_request: true } }, user, pass); return { lid, rows: findRows2(r.data) }; } catch (e) { return { lid, rows: [] }; }
+      });
+      const headById = {}; for (const h of heads) headById[String(h.store_load_id || h.id)] = h;
+      for (const d of details) for (const r of d.rows) { if (Number(r.article_id) === id) { const amt = Number(r.amount) || 0; total += amt; docs++; const h = headById[String(d.lid)] || {}; hits.push({ load: d.lid, date: (h.doc_date || h.create_date || h.date || "").slice(0, 10), amount: amt }); } }
+      hits.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+      res.status(200).json({ ok: true, id, name: (ARTS[String(id)] || {}).name, total_loaded: Math.round(total * 1000) / 1000, load_docs: docs, recent: hits.slice(0, 30) });
+      return;
+    }
     if (body.debug) { res.status(200).json({ ok: true, id, attempts, sample: rows.slice(0, 6) }); return; }
     // Обобщение вход/изход, ако разпознаем ключове amount + дата/тип.
     const summ = { in: 0, out: 0, count: rows.length, by_type: {} };
