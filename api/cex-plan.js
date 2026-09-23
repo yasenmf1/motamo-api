@@ -2215,6 +2215,33 @@ module.exports = async function handler(req, res) {
       res.status(200).json({ ok: true, id, name: (ARTS[String(id)] || {}).name, total_loaded: Math.round(total * 1000) / 1000, load_docs: docs, recent: hits.slice(0, 30) });
       return;
     }
+    // ── ПЪЛЕН РЕГИСТЪР на движенията за ЕДНА суровина (обхожда Reports_lot_list_details).
+    // Сървърът не филтрира по артикул → теглим всички страници и филтрираме тук.
+    if (body.ledger) {
+      const PER = 1000;
+      const getPage = async (pg) => {
+        for (let t = 0; t < 3; t++) {
+          try { const r = await cexCall("Reports_lot_list_details", { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, rows: PER, filters: {} }, user, pass); if (r && r.ok && r.data) return r.data; } catch (e) {}
+          await new Promise(res => setTimeout(res, 150 * (t + 1)));
+        }
+        return null;
+      };
+      const first = await getPage(1);
+      const records = first && Number(first.total_records || first.records) || 0;
+      const totalPages = first ? Math.max(1, Math.ceil((records || (first.total ? first.total * PER : 0)) / PER)) : 0;
+      const pagesToGet = Math.min(totalPages || 1, 120); // таван, за да не гръмне таймаутът
+      const pageNums = []; for (let p = 2; p <= pagesToGet; p++) pageNums.push(p);
+      const datas = await mapLimit(pageNums, 8, getPage);
+      const allData = [first, ...datas].filter(Boolean);
+      const mine = [];
+      for (const d of allData) { const rws = Array.isArray(d.rows) ? d.rows : []; for (const x of rws) if (Number(x.article_id) === id) mine.push(x); }
+      const byType = {}; let net = 0;
+      for (const x of mine) { const t = x.operation_ref_type || "?"; const a = Number(x.amount) || 0; byType[t] = (byType[t] || 0) + a; net += a; }
+      const ins = mine.filter(x => (Number(x.amount) || 0) > 0).map(x => ({ date: (x.operation_doc_date || x.create_date || "").slice(0, 10), type: x.operation_ref_type, amount: Number(x.amount) || 0, lot: x.lot_value, ref: x.ref_id })).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+      Object.keys(byType).forEach(k => byType[k] = Math.round(byType[k] * 1000) / 1000);
+      res.status(200).json({ ok: true, id, name: (ARTS[String(id)] || {}).name, records_total: records, pages_scanned: allData.length, pages_total: totalPages, my_rows: mine.length, by_type: byType, net_in_register: Math.round(net * 1000) / 1000, in_moves_count: ins.length, in_moves: ins.slice(0, 40) });
+      return;
+    }
     if (body.debug) { res.status(200).json({ ok: true, id, attempts, sample: rows.slice(0, 6) }); return; }
     // Обобщение вход/изход, ако разпознаем ключове amount + дата/тип.
     const summ = { in: 0, out: 0, count: rows.length, by_type: {} };
