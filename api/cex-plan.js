@@ -2170,13 +2170,17 @@ module.exports = async function handler(req, res) {
   if (body.action === "load_heads") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
-    let ids = Array.isArray(body.ids) ? body.ids.map(Number).filter(Boolean) : null;
-    let heads = [];
-    try { const hr = await cexCall("Storeloads_getlist", { length: 5000, limit: 5000, order_by: "store_load_id desc" }, user, pass); let L = hr.data || []; if (!Array.isArray(L)) L = Object.values(L); heads = L; } catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
-    let sel = ids ? heads.filter(h => ids.includes(Number(h.store_load_id || h.id))) : heads.slice(0, Number(body.recent) || 40);
-    const out = sel.map(h => ({ id: h.store_load_id || h.id, date: (h.doc_date || h.date || "").slice(0, 10), doc_num: h.doc_num || null, supplier: h.supplier_name || "", total_sum: Number(h.total_sum) || 0, total_real: Number(h.total_real) || 0, has_tax: h.has_tax }));
-    out.sort((a, b) => String(b.date).localeCompare(String(a.date)));
-    res.status(200).json({ ok: true, count: out.length, heads: out });
+    let ids = Array.isArray(body.ids) ? body.ids.map(Number).filter(Boolean) : [];
+    if (!ids.length) { // ако не са дадени — вземи последните N id-та от списъка
+      try { const hr = await cexCall("Storeloads_getlist", { length: 5000, limit: 5000, order_by: "store_load_id desc" }, user, pass); let L = hr.data || []; if (!Array.isArray(L)) L = Object.values(L); ids = L.map(h => Number(h.store_load_id || h.id)).filter(Boolean).slice(0, Number(body.recent) || 40); } catch (e) {}
+    }
+    // Пълните данни (сума/доставчик/дата) идват от ЕДИНИЧНОТО четене Storeloads_get.
+    const heads = await mapLimit(ids, 8, async (lid) => {
+      try { const r = await cexCall("Storeloads_get", { id: lid, store_load_id: lid }, user, pass); const h = r.data || {}; return { id: lid, date: (h.doc_date || h.date || "").slice(0, 10), doc_num: h.doc_num || null, supplier: h.supplier_name || "", total_sum: Number(h.total_sum) || 0, total_real: Number(h.total_real) || 0, has_tax: h.has_tax }; }
+      catch (e) { return { id: lid, error: true }; }
+    });
+    heads.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    res.status(200).json({ ok: true, count: heads.length, heads });
     return;
   }
   if (body.action === "stock") {
