@@ -2187,10 +2187,20 @@ module.exports = async function handler(req, res) {
       const findRows2 = (node) => { let best = null; (function w(x) { if (!x || typeof x !== "object") return; if (Array.isArray(x)) { if (x.length && x[0] && typeof x[0] === "object" && (x[0].article_id != null)) { if (!best || x.length > best.length) best = x; } return x.forEach(w); } for (const k in x) w(x[k]); })(node); return best || []; };
       const ids = heads.map(h => h.store_load_id || h.id).filter(Boolean);
       if (body.debug) {
-        // покажи структурата на ЕДИН документ, за да знам ключовете
+        // пробвай различни методи/грид-структури за РЕДОВЕТЕ на едно зареждане
         const one = ids[0];
-        let dr = null; try { const r = await cexCall("Storeloads_get", { id: one, store_load_id: one, action_type: "values", active_struct_id: "eStructListForm_1", force_data_request: true, rows: 5000, params: { id: one, store_load_id: one, bid: CEX_BID, force_data_request: true } }, user, pass); dr = r; } catch (e) {}
-        res.status(200).json({ ok: true, id, heads_count: ids.length, first_id: one, one_keys: dr && dr.data ? Object.keys(dr.data).slice(0, 30) : [], one_rows: findRows2(dr && dr.data).slice(0, 4), raw_sample: String(dr && dr.raw || "").slice(0, 600) });
+        const probes = [
+          { m: "Storeloads_movements", s: "eStructList_1" },
+          { m: "Storeloads_get", s: "eStructList_1" },
+          { m: "Storeloads_get", s: "eStructListGoods_1" },
+          { m: "Storeloads_getgoods", s: "eStructList_1" },
+          { m: "Storeloads_goods", s: "eStructList_1" }
+        ];
+        const out = [];
+        for (const p of probes) {
+          try { const r = await cexCall(p.m, { id: one, store_load_id: one, action_type: "values", active_struct_id: p.s, force_data_request: true, page_num: 1, rows: 5000, params: { id: one, store_load_id: one, bid: CEX_BID, force_data_request: true } }, user, pass); const rr = findRows2(r.data); out.push({ m: p.m, s: p.s, ok: r.ok, status: r.status, rows: rr.length, keys: rr[0] ? Object.keys(rr[0]).slice(0, 20) : [], raw: String(r.raw || "").slice(0, 200) }); } catch (e) { out.push({ m: p.m, error: String(e && e.message) }); }
+        }
+        res.status(200).json({ ok: true, id, heads_count: ids.length, first_id: one, probes: out });
         return;
       }
       let total = 0, docs = 0; const hits = [];
