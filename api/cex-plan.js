@@ -2264,7 +2264,27 @@ module.exports = async function handler(req, res) {
       for (const x of mine) { const t = x.operation_ref_type || "?"; const a = Number(x.amount) || 0; byType[t] = (byType[t] || 0) + a; net += a; }
       const ins = mine.filter(x => (Number(x.amount) || 0) > 0).map(x => ({ date: (x.operation_doc_date || x.create_date || "").slice(0, 10), type: x.operation_ref_type, amount: Number(x.amount) || 0, lot: x.lot_value, ref: x.ref_id })).sort((a, b) => String(b.date).localeCompare(String(a.date)));
       Object.keys(byType).forEach(k => byType[k] = Math.round(byType[k] * 1000) / 1000);
-      res.status(200).json({ ok: true, id, name: (ARTS[String(id)] || {}).name, records_total: records, pages_scanned: allData.length, pages_total: totalPages, my_rows: mine.length, by_type: byType, net_in_register: Math.round(net * 1000) / 1000, in_moves_count: ins.length, in_moves: ins.slice(0, 40) });
+      // ── Цена по ДОСТАВЧИК: LD движенията носят ref_id (=store_load_id) + amount_sum
+      // (стойност). Единична цена = amount_sum/amount; доставчикът е в заглавието на
+      // зареждането (Storeloads_getlist.supplier_name).
+      let by_supplier = null;
+      if (body.suppliers) {
+        let heads = [];
+        try { const hr = await cexCall("Storeloads_getlist", { length: 5000, limit: 5000, order_by: "store_load_id desc" }, user, pass); let L = hr.data || []; if (!Array.isArray(L)) L = Object.values(L); heads = L; } catch (e) {}
+        const supById = {}; for (const h of heads) supById[String(h.store_load_id || h.id)] = { sup: h.supplier_name || "?", date: (h.doc_date || h.date || "").slice(0, 10) };
+        const grp = {};
+        for (const x of mine) {
+          const t = x.operation_ref_type; if (t !== "LD") continue;
+          const amt = Number(x.amount) || 0; if (amt <= 0) continue;
+          const val = Number(x.amount_sum) || 0; const unit = val / amt;
+          const meta = supById[String(x.ref_id)] || { sup: "?", date: "" };
+          const g = grp[meta.sup] || (grp[meta.sup] = { supplier: meta.sup, qty: 0, value: 0, loads: 0, prices: [] });
+          g.qty += amt; g.value += val; g.loads++;
+          g.prices.push({ date: meta.date || (x.operation_doc_date || "").slice(0, 10), qty: amt, unit: Math.round(unit * 10000) / 10000, ref: x.ref_id });
+        }
+        by_supplier = Object.values(grp).map(g => ({ supplier: g.supplier, qty: Math.round(g.qty * 1000) / 1000, total_value: Math.round(g.value * 100) / 100, avg_unit: g.qty ? Math.round((g.value / g.qty) * 10000) / 10000 : null, loads: g.loads, recent: g.prices.sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 8) })).sort((a, b) => b.qty - a.qty);
+      }
+      res.status(200).json({ ok: true, id, name: (ARTS[String(id)] || {}).name, records_total: records, pages_scanned: allData.length, pages_total: totalPages, my_rows: mine.length, by_type: byType, net_in_register: Math.round(net * 1000) / 1000, in_moves_count: ins.length, in_moves: ins.slice(0, 40), by_supplier });
       return;
     }
     if (body.debug) { res.status(200).json({ ok: true, id, attempts, sample: rows.slice(0, 6) }); return; }
