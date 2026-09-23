@@ -2271,6 +2271,7 @@ module.exports = async function handler(req, res) {
       if (body.suppliers) {
         let heads = [];
         try { const hr = await cexCall("Storeloads_getlist", { length: 5000, limit: 5000, order_by: "store_load_id desc" }, user, pass); let L = hr.data || []; if (!Array.isArray(L)) L = Object.values(L); heads = L; } catch (e) {}
+        const headById2 = (ref, hs) => hs.find(h => String(h.store_load_id) === String(ref) || String(h.id) === String(ref) || String(h.barsy_id) === String(ref)) || null;
         const supById = {}; for (const h of heads) supById[String(h.store_load_id || h.id)] = { sup: h.supplier_name || "?", date: (h.doc_date || h.date || "").slice(0, 10) };
         const grp = {};
         for (const x of mine) {
@@ -2283,6 +2284,10 @@ module.exports = async function handler(req, res) {
           g.prices.push({ date: meta.date || (x.operation_doc_date || "").slice(0, 10), qty: amt, unit: Math.round(unit * 10000) / 10000, ref: x.ref_id });
         }
         by_supplier = Object.values(grp).map(g => ({ supplier: g.supplier, qty: Math.round(g.qty * 1000) / 1000, total_value: Math.round(g.value * 100) / 100, avg_unit: g.qty ? Math.round((g.value / g.qty) * 10000) / 10000 : null, loads: g.loads, recent: g.prices.sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 8) })).sort((a, b) => b.qty - a.qty);
+        // debug: свържи LD редовете със заглавията (доставчик + обща сума на документа)
+        const ld = mine.filter(x => x.operation_ref_type === "LD" && (Number(x.amount) || 0) > 0);
+        by_supplier.push({ _debug: true, ld_count: ld.length, header_count: heads.length,
+          sample_ld: ld.slice(0, 12).map(x => { const h = headById2(x.ref_id, heads); return { ref: x.ref_id, amount: Number(x.amount) || 0, amount_sum: Number(x.amount_sum) || 0, date: (x.operation_doc_date || "").slice(0, 10), sup: h ? (h.supplier_name || "") : "НЯМА ЗАГЛАВИЕ", total_sum: h ? h.total_sum : null } }) });
       }
       res.status(200).json({ ok: true, id, name: (ARTS[String(id)] || {}).name, records_total: records, pages_scanned: allData.length, pages_total: totalPages, my_rows: mine.length, by_type: byType, net_in_register: Math.round(net * 1000) / 1000, in_moves_count: ins.length, in_moves: ins.slice(0, 40), by_supplier });
       return;
