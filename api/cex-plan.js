@@ -2190,15 +2190,15 @@ module.exports = async function handler(req, res) {
         // пробвай различни методи/грид-структури за РЕДОВЕТЕ на едно зареждане
         const one = ids[0];
         const probes = [
-          { m: "Storeloads_movements", s: "eStructList_1" },
-          { m: "Storeloads_get", s: "eStructList_1" },
-          { m: "Storeloads_get", s: "eStructListGoods_1" },
-          { m: "Storeloads_getgoods", s: "eStructList_1" },
-          { m: "Storeloads_goods", s: "eStructList_1" }
+          { m: "Storemoves_getlist", p: {} },
+          { m: "Storemoves_getlist", p: { filters: { store_load_id: one } } },
+          { m: "Storemoves_getlist", p: { filters: { document_id: one } } },
+          { m: "Storeloads_get", p: { id: one, store_load_id: one } },
+          { m: "Storeloads_get", p: { id: one, store_load_id: one, action_type: "values", active_struct_id: "eStructListForm_1", force_data_request: true, page_num: 1, rows: 5000, params: { id: one, store_load_id: one, bid: CEX_BID, force_data_request: true, load_rows: true } } }
         ];
         const out = [];
-        for (const p of probes) {
-          try { const r = await cexCall(p.m, { id: one, store_load_id: one, action_type: "values", active_struct_id: p.s, force_data_request: true, page_num: 1, rows: 5000, params: { id: one, store_load_id: one, bid: CEX_BID, force_data_request: true } }, user, pass); const rr = findRows2(r.data); out.push({ m: p.m, s: p.s, ok: r.ok, status: r.status, rows: rr.length, keys: rr[0] ? Object.keys(rr[0]).slice(0, 20) : [], raw: String(r.raw || "").slice(0, 200) }); } catch (e) { out.push({ m: p.m, error: String(e && e.message) }); }
+        for (const pr of probes) {
+          try { const r = await cexCall(pr.m, pr.p, user, pass); const rr = findRows2(r.data); out.push({ m: pr.m, p: JSON.stringify(pr.p).slice(0, 80), ok: r.ok, status: r.status, rows: rr.length, keys: rr[0] ? Object.keys(rr[0]).slice(0, 22) : [], raw: String(r.raw || "").slice(0, 220) }); } catch (e) { out.push({ m: pr.m, error: String(e && e.message) }); }
         }
         res.status(200).json({ ok: true, id, heads_count: ids.length, first_id: one, probes: out });
         return;
