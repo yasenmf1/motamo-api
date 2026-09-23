@@ -2154,6 +2154,43 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // ── ДИАГНОСТИК (само четене): ВСИЧКИ складови движения на ЕДНА суровина/артикул ──
+  // За да хванем защо наличността е надута — разделя входа (зареждания/ревизии/производство)
+  // от изхода (изписване по производство/продажба). Barsy: Storemoves_getlist по article_id.
+  if (body.action === "raw_moves") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const id = Number(body.id); if (!id) { res.status(400).json({ ok: false, error: "no_id" }); return; }
+    const findRows = (node) => { let best = null; (function w(x) { if (!x || typeof x !== "object") return; if (Array.isArray(x)) { if (x.length && x[0] && typeof x[0] === "object") { if (!best || x.length > best.length) best = x; } return x.forEach(w); } for (const k in x) w(x[k]); })(node); return best || []; };
+    const attempts = [];
+    let rows = [];
+    // Няколко варианта на параметрите — Barsy е капризен кой ключ приема.
+    const variants = [
+      { method: "Storemoves_getlist", params: { filters: { article_id: id }, length: 5000, limit: 5000, order_by: "id desc" } },
+      { method: "Storemoves_getlist", params: { article_id: id, length: 5000, limit: 5000 } },
+      { method: "Storeloads_getlist", params: { filters: { article_id: id }, length: 5000, limit: 5000 } }
+    ];
+    for (const v of variants) {
+      try {
+        const r = await cexCall(v.method, v.params, user, pass);
+        const found = findRows(r.data);
+        attempts.push({ method: v.method, ok: r.ok, status: r.status, count: found.length, keys: found[0] ? Object.keys(found[0]).slice(0, 25) : [], raw_sample: String(r.raw || "").slice(0, 300) });
+        if (found.length && (rows.length === 0)) rows = found;
+      } catch (e) { attempts.push({ method: v.method, error: String(e && e.message) }); }
+    }
+    if (body.debug) { res.status(200).json({ ok: true, id, attempts, sample: rows.slice(0, 6) }); return; }
+    // Обобщение вход/изход, ако разпознаем ключове amount + дата/тип.
+    const summ = { in: 0, out: 0, count: rows.length, by_type: {} };
+    for (const x of rows) {
+      const amt = Number(x.amount != null ? x.amount : (x.amount_sum != null ? x.amount_sum : 0)) || 0;
+      const t = x.operation_ref_type || x.operation_type || x.doc_type || x.type || "?";
+      summ.by_type[t] = (summ.by_type[t] || 0) + amt;
+      if (amt >= 0) summ.in += amt; else summ.out += amt;
+    }
+    res.status(200).json({ ok: true, id, attempts, summary: summ, sample: rows.slice(0, 10) });
+    return;
+  }
+
   // ── НЕДОСТИГ ЗА ДЕНЯ: сравнява днешната нужда (разнос → fullBOM консумация) срещу
   // наличността и връща суровините/заготовките, които ЩЕ СВЪРШАТ днес (deficit > 0),
   // най-лошото първо. Read-only (view токен). Това хваща напр. скаридите Маки Еби,
