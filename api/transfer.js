@@ -599,6 +599,16 @@ module.exports = async function handler(req, res) {
         }
         const cost = num(a.avg_delivery_price);
         void it.shop_id; // мапингът е водещ: MAP[cex_id], не запазеното в заявката
+        // ★ Партидите в точката НЕ могат да се включат като истинско следене:
+        // всичките 186 артикула там са „Без партида", а включи ли се, Barsy ще
+        // иска избор на партида при ВСЯКА продажба и касата засяда. Затова
+        // партидите от цеха се записват в „Бележки" на реда — БАБХ ги вижда в
+        // документа, а истинското следене си остава в цеха (прехвърлянето носи
+        // партида на всеки ред).
+        const lotNote = alloc.rows
+          .filter(r => r.lot_value)
+          .map(r => r.lot_value + " (" + r.amount + " " + (it.unit || "") + ")" + (r.lot_exp ? ", годно до " + String(r.lot_exp).slice(0, 10) : ""))
+          .join(" · ");
         loadRows.push({
           store_load_row_id: "", article_id: String(MAP[it.cex_id]),
           original_article_name: it.name, amount: String(qty),
@@ -606,7 +616,7 @@ module.exports = async function handler(req, res) {
           delivery_total: String(Math.round(cost * qty * 100) / 100),
           delivery_tax_id: "100", actual_tax_id: "100", tax: "0", tax_sum: "0",
           discount: "0", lot_value: "", lot_exp_date: null, lot_detail_id: "",
-          notes: "", amount_unit: "1", is_group_art: 0
+          notes: lotNote ? "Партида: " + lotNote : "", amount_unit: "1", is_group_art: 0
         });
       }
 
@@ -676,6 +686,10 @@ module.exports = async function handler(req, res) {
           await sbPatch(id, { status: "failed", error: "цех прехвърляне падна: " + String(mv.raw || "").slice(0, 300) });
           res.status(200).json({ ok: false, step: "cex", error: String(mv.raw || "").slice(0, 400) }); return;
         }
+        // Връзката между двата документа — БАБХ тръгва оттук към прехвърлянето,
+        // където всеки ред носи партидата си.
+        if (mvId) loadPayload.Storeloads_save.values.description =
+          "Прехвърляне от цеха · цех прехвърляне №" + mvId + " (заявка " + id.slice(0, 8) + ")";
         // ── 2) ТОЧКА: зареждане от „Мотамо - цех" ──
         // Цех документът вече е издаден; при провал тук заявката остава „partial"
         // и НЕ се трие автоматично — за БАБХ следата е по-важна от чистотата.
