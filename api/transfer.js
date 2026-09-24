@@ -744,14 +744,28 @@ mark();load();setInterval(poll,20000);
 
 // ── ХЪБ: един вход към трите екрана ──────────────────────────────────────────
 // Ключът пътува в линковете, за да се сложи ЕДНА икона на началния екран.
+// Два ключа, два изгледа. `TRANSFER_TOKEN` е у момичетата в точката — той отваря
+// САМО заявката. `OWNER_TOKEN` е на собственика: освен трите екрана, показва и
+// цех инструмента (производство, сметки, стокови), чийто ключ се вмъква от
+// сървъра — така по-силният ключ никога не стига до телефона в точката.
+const isOwner = (k) => !!(process.env.OWNER_TOKEN && k === process.env.OWNER_TOKEN)
+  || [process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET, process.env.CEX_VIEW_TOKEN]
+    .some(t => t && k === t);
+const cexToolKey = () => process.env.CEX_VIEW_TOKEN || process.env.RECONCILE_TOKEN || process.env.PREVIEW_TOKEN || "";
+
 const NAV = [
-  { v: "shop", t: "Заявка към цеха", s: "точката поръчва" },
-  { v: "cex", t: "Заявки от точката", s: "цехът изпълнява" },
-  { v: "stock", t: "Складът на цеха", s: "какво свършва" }
+  { v: "shop", t: "Заявка към цеха", own: false },
+  { v: "cex", t: "Заявки от точката", own: true },
+  { v: "stock", t: "Складът на цеха", own: true }
 ];
-const navBar = (k, cur) => `<nav class="nav">` + NAV.map(x =>
-  x.v === cur ? `<span class="on">${x.t}</span>`
-    : `<a href="?view=${x.v}&k=${encodeURIComponent(k)}">${x.t}</a>`).join("") + `</nav>`;
+function navBar(k, cur) {
+  const own = isOwner(k);
+  const items = NAV.filter(x => own || !x.own).map(x =>
+    x.v === cur ? `<span class="on">${x.t}</span>`
+      : `<a href="?view=${x.v}&k=${encodeURIComponent(k)}">${x.t}</a>`);
+  if (own && cexToolKey()) items.push(`<a href="/api/cex-plan?view=tool&k=${encodeURIComponent(cexToolKey())}">Производство</a>`);
+  return items.length > 1 ? `<nav class="nav">${items.join("")}</nav>` : "";
+}
 
 const HUB_CSS = `
 .hub{display:grid;gap:14px;margin-top:18px}
@@ -777,15 +791,20 @@ ${FONTS}<style>${CSS}${HUB_CSS}</style></head><body>
 <div class="wrap">
   <div class="hub">
     <a href="?view=shop&k=${encodeURIComponent(k)}"><span><b>Заявка към цеха</b><span>точката поръчва какво да донесат</span></span><span class="go">→</span></a>
+    ${isOwner(k) ? `
     <a href="?view=cex&k=${encodeURIComponent(k)}"><span><b>Заявки от точката</b><span>цехът изпълнява и издава документите</span></span><span id="pend" class="go">→</span></a>
     <a href="?view=stock&k=${encodeURIComponent(k)}"><span><b>Складът на цеха</b><span>какво няма да стигне до доставката</span></span><span id="short" class="go">→</span></a>
+    ${cexToolKey() ? `<a href="/api/cex-plan?view=tool&k=${encodeURIComponent(cexToolKey())}"><span><b>Производство и стокови</b><span>заготовки, артикули, сметки, стокови разписки</span></span><span class="go">→</span></a>
+    <a href="/api/cex-plan?view=reports&k=${encodeURIComponent(cexToolKey())}"><span><b>Отчети</b><span>оборот и себестойност — цех и точка</span></span><span class="go">→</span></a>` : ``}
+    ` : ``}
   </div>
-  <div id="msg" class="msg info" style="margin-top:16px">Проверявам…</div>
+  <div id="msg" class="msg info" style="margin-top:16px">${isOwner(k) ? "Проверявам…" : "Натисни, за да поръчаш от цеха."}</div>
 </div>
 <script>
-var K=${JSON.stringify(k)};
+var K=${JSON.stringify(k)},OWN=${isOwner(k) ? "true" : "false"};
 function $(i){return document.getElementById(i)}
 function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
+if(OWN){
 Promise.all([api({action:'list_requests',days:14}),api({action:'stock_report'})]).then(function(r){
 var q=r[0],s=r[1],bits=[];
 if(q.ok){var p=(q.requests||[]).filter(function(x){return x.status==='pending'}).length;
@@ -795,6 +814,7 @@ if(s.ok){var raw=s.raw||[],n=raw.filter(function(x){return x.c!==null&&(x.c-x.le
 var m=$('msg');m.className='msg '+(bits.length?'err':'ok');
 m.textContent=bits.length?bits.join(' · '):'Няма чакащи заявки, всички суровини стигат до доставката.';
 }).catch(function(){$('msg').className='msg err';$('msg').textContent='Мрежова грешка'});
+}
 </script></body></html>`;
 }
 
@@ -920,7 +940,7 @@ module.exports = async function handler(req, res) {
   const q = (req.query && typeof req.query === "object") ? req.query : {};
   // `TRANSFER_TOKEN` е собственият ключ на този инструмент (точката го ползва от
   // телефона си); старите ключове също се приемат, за да работи един и същ линк.
-  const viewTokens = [process.env.TRANSFER_TOKEN, process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].filter(Boolean);
+  const viewTokens = [process.env.OWNER_TOKEN, process.env.TRANSFER_TOKEN, process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].filter(Boolean);
 
   const VIEWS = ["shop", "cex", "stock", "hub"];
   if (req.method === "GET" && (VIEWS.includes(q.view) || (!q.view && q.k))) {
@@ -928,6 +948,14 @@ module.exports = async function handler(req, res) {
     const okTok = viewTokens.some(t => q.k === t) || (q.view === "stock" && process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN);
     if (!okTok) {
       res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп — липсва или грешен ключ (?k=).</body>");
+      return;
+    }
+    // Цех екраните искат ключа на собственика. С ключа от телефона в точката се
+    // отваря само заявката — там не бива да се пуска производство или да се
+    // гледа себестойност.
+    if ((q.view === "cex" || q.view === "stock") && !isOwner(q.k)
+      && !(q.view === "stock" && process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN)) {
+      res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Този екран е само за цеха.</body>");
       return;
     }
     const view = q.view || "hub";
