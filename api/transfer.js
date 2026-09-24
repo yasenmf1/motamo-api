@@ -529,11 +529,12 @@ button:disabled{opacity:.45;cursor:default}
 function shopPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Заявка към цеха</title>
-${FONTS}<style>${CSS}</style></head><body>
+${FONTS}<style>${CSS}${HUB_CSS}</style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Заявка към цеха<small>точка Каравелов · какво да донесат</small></h1>
 <span class="tabs"><button id="t1" class="on" onclick="tab(1)">Нова заявка</button><button id="t2" onclick="tab(2)">История</button></span></header>
 <div class="wrap">
+  ${navBar(k, "shop")}
   <div id="msg" class="msg info">Зареждам наличностите…</div>
   <div id="p1"><table id="tbl"></table></div>
   <div id="p2" style="display:none"><div id="days" class="days"></div><div id="hist"></div></div>
@@ -620,12 +621,12 @@ reload();
 function cexPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Заявки от точката</title>
-${FONTS}<style>${CSS}</style></head><body>
+${FONTS}<style>${CSS}${HUB_CSS}</style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Заявки от точката<small>цех · прехвърляне към Каравелов</small></h1>
 <button class="ghost" id="bell" onclick="bell()">🔔<span class="hidesm"> Известия</span></button>
 <button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
-<div class="wrap"><div id="days" class="days"></div><div id="msg" class="msg info">Зареждам…</div><div id="list"></div></div>
+<div class="wrap">${navBar(k, "cex")}<div id="days" class="days"></div><div id="msg" class="msg info">Зареждам…</div><div id="list"></div></div>
 <div id="busy"><div class="sp"></div><div class="tx">Обработва се…</div><div class="sub" id="busysub">Не натискай пак — Barsy записва документите.</div></div>
 <script>
 var K=${JSON.stringify(k)};
@@ -741,6 +742,62 @@ mark();load();setInterval(poll,20000);
 </script></body></html>`;
 }
 
+// ── ХЪБ: един вход към трите екрана ──────────────────────────────────────────
+// Ключът пътува в линковете, за да се сложи ЕДНА икона на началния екран.
+const NAV = [
+  { v: "shop", t: "Заявка към цеха", s: "точката поръчва" },
+  { v: "cex", t: "Заявки от точката", s: "цехът изпълнява" },
+  { v: "stock", t: "Складът на цеха", s: "какво свършва" }
+];
+const navBar = (k, cur) => `<nav class="nav">` + NAV.map(x =>
+  x.v === cur ? `<span class="on">${x.t}</span>`
+    : `<a href="?view=${x.v}&k=${encodeURIComponent(k)}">${x.t}</a>`).join("") + `</nav>`;
+
+const HUB_CSS = `
+.hub{display:grid;gap:14px;margin-top:18px}
+.hub a{display:flex;align-items:center;justify-content:space-between;gap:14px;text-decoration:none;
+  background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;color:var(--fg)}
+.hub a:active{border-color:var(--sun)}
+.hub b{font-family:var(--font-d);font-size:19px;display:block}
+.hub span{font-size:13.5px;color:var(--dim)}
+.hub .go{font-size:26px;color:var(--sun);font-weight:800;line-height:1}
+.hub .badge{background:var(--sun);color:#fff;border-radius:999px;padding:2px 10px;font-size:13px;font-weight:800}
+.nav{display:flex;gap:6px;overflow-x:auto;padding:8px 0 0;-webkit-overflow-scrolling:touch}
+.nav a,.nav span{flex:0 0 auto;font-size:13px;font-weight:700;padding:7px 13px;border-radius:999px;text-decoration:none}
+.nav a{background:var(--chip);color:var(--dim)}
+.nav span.on{background:var(--sun);color:#fff}
+`;
+
+function hubPage(k) {
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>MOTAMO цех</title>
+${FONTS}<style>${CSS}${HUB_CSS}</style></head><body>
+<header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
+<h1>Цех и точка<small>всичко на едно място</small></h1></header>
+<div class="wrap">
+  <div class="hub">
+    <a href="?view=shop&k=${encodeURIComponent(k)}"><span><b>Заявка към цеха</b><span>точката поръчва какво да донесат</span></span><span class="go">→</span></a>
+    <a href="?view=cex&k=${encodeURIComponent(k)}"><span><b>Заявки от точката</b><span>цехът изпълнява и издава документите</span></span><span id="pend" class="go">→</span></a>
+    <a href="?view=stock&k=${encodeURIComponent(k)}"><span><b>Складът на цеха</b><span>какво няма да стигне до доставката</span></span><span id="short" class="go">→</span></a>
+  </div>
+  <div id="msg" class="msg info" style="margin-top:16px">Проверявам…</div>
+</div>
+<script>
+var K=${JSON.stringify(k)};
+function $(i){return document.getElementById(i)}
+function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
+Promise.all([api({action:'list_requests',days:14}),api({action:'stock_report'})]).then(function(r){
+var q=r[0],s=r[1],bits=[];
+if(q.ok){var p=(q.requests||[]).filter(function(x){return x.status==='pending'}).length;
+ if(p){$('pend').className='badge';$('pend').textContent=p;bits.push(p+' чакащи заявки')}}
+if(s.ok){var raw=s.raw||[],n=raw.filter(function(x){return x.c!==null&&(x.c-x.lead)<0}).length;
+ if(n){$('short').className='badge';$('short').textContent=n;bits.push(n+' суровини няма да стигнат')}}
+var m=$('msg');m.className='msg '+(bits.length?'err':'ok');
+m.textContent=bits.length?bits.join(' · '):'Няма чакащи заявки, всички суровини стигат до доставката.';
+}).catch(function(){$('msg').className='msg err';$('msg').textContent='Мрежова грешка'});
+</script></body></html>`;
+}
+
 // ── СКЛАДОВОТО ТАБЛО (жив екран) ─────────────────────────────────────────────
 // Същият разрез като еднократния отчет, но данните се четат от Barsy при всяко
 // отваряне: наличности, себестойности и производствата за последните 28 дни.
@@ -786,11 +843,12 @@ ul.lst li em{font-style:normal;color:var(--dim);font-size:12.5px;display:block}
 function stockPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Складът на цеха</title>
-${FONTS}<style>${CSS}${STOCK_CSS}</style></head><body>
+${FONTS}<style>${CSS}${HUB_CSS}${STOCK_CSS}</style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Складът на цеха<small>какво няма да стигне до следващата доставка</small></h1>
 <button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
 <div class="wrap">
+  ${navBar(k, "stock")}
   <div id="msg" class="msg info">Чета от Barsy…</div>
   <div class="sum">
     <div class="r"><b id="sNow">–</b><span>няма да стигнат</span></div>
@@ -864,14 +922,20 @@ module.exports = async function handler(req, res) {
   // телефона си); старите ключове също се приемат, за да работи един и същ линк.
   const viewTokens = [process.env.TRANSFER_TOKEN, process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].filter(Boolean);
 
-  if (req.method === "GET" && (q.view === "shop" || q.view === "cex" || q.view === "stock")) {
+  const VIEWS = ["shop", "cex", "stock", "hub"];
+  if (req.method === "GET" && (VIEWS.includes(q.view) || (!q.view && q.k))) {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     const okTok = viewTokens.some(t => q.k === t) || (q.view === "stock" && process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN);
     if (!okTok) {
       res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп — липсва или грешен ключ (?k=).</body>");
       return;
     }
-    res.status(200).send(q.view === "shop" ? shopPage(q.k) : q.view === "stock" ? stockPage(q.k) : cexPage(q.k));
+    const view = q.view || "hub";
+    res.status(200).send(
+      view === "shop" ? shopPage(q.k)
+      : view === "stock" ? stockPage(q.k)
+      : view === "cex" ? cexPage(q.k)
+      : hubPage(q.k));
     return;
   }
 
