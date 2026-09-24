@@ -494,8 +494,8 @@ module.exports = async function handler(req, res) {
           current_price: String(cost), delivery_price: String(cost),
           delivery_total: String(Math.round(cost * qty * 100) / 100),
           delivery_tax_id: "100", actual_tax_id: "100", tax: "0", tax_sum: "0",
-          discount: "0", lot_value: null, lot_exp_date: null, lot_type_id: "1",
-          notes: null, amount_unit: "1", is_group_art: 0
+          discount: "0", lot_value: "", lot_exp_date: null, lot_detail_id: "",
+          notes: "", amount_unit: "1", is_group_art: 0
         });
       }
 
@@ -527,7 +527,7 @@ module.exports = async function handler(req, res) {
       const loadPayload = { Storeloads_save: {
         id: null, action_type: "save_and_close",
         values: {
-          store_load_id: null, depot_id: String(SHOP_DEPOT), doc_type_id: "1",
+          store_load_id: null, operation_type: "1", depot_id: String(SHOP_DEPOT), doc_type_id: "1",
           doc_date: today + " 00:00:00", doc_num: null,
           supplier_id: String(SHOP_SUPPLIER_ID), has_tax: 0, price_mode: 0, fill_delivery_price: 0,
           currency_id: "1", currency_rate: "1", store_load_cat_id: "1", discount: "0",
