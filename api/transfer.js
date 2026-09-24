@@ -480,11 +480,11 @@ module.exports = async function handler(req, res) {
         const alloc = allocate(qty, lots[it.cex_id]);
         if (alloc.short > 0) short.push(`${it.name}: ${alloc.short} ${it.unit || ""} без партида в склада`);
         for (const r of alloc.rows) {
+          // Редът е точно какъвто го праща самият Barsy UI (снето от Network):
+          // article_id е ЧИСЛО, без current_price/ref_num/lot_type_id.
           moveRows.push({
-            row_id: "", article_id: String(it.cex_id), ref_num: null,
-            article_name: it.name, current_price: null,
-            amount: String(r.amount), notes: "",
-            lot_value: r.lot_value, lot_type_id: r.lot_value ? "4" : "1"
+            row_id: "", article_id: it.cex_id, article_name: it.name,
+            amount: String(r.amount), notes: "", lot_value: r.lot_value
           });
         }
         const cost = num(a.avg_delivery_price);
@@ -505,16 +505,18 @@ module.exports = async function handler(req, res) {
       }
 
       const today = sofiaToday();
+      // Точният формат, снет от Network на самия Barsy UI (24.09): складовете са
+      // `depot_id_left` / `depot_id_right` (НЕ from_/to_depot_id — с тях Barsy
+      // отговаря „Не е подаден склад от който да се тегли"), а `doc_date` е null
+      // (Barsy слага текущия момент). „Запиши и премести" = `confirm_save`;
+      // `confirm_move` е „Запиши и изпрати" — то е за ДРУГА фирма, не за нас.
       const movePayload = { Storemoves_save: {
-        id: null, action_type: "confirm_move",
+        id: null, action_type: "confirm_save",
         values: {
-          store_move_id: null, doc_date: today + " 00:00:00",
+          user_name: null, doc_date: null,
           description: "Прехвърляне към точка Каравелов (заявка " + id.slice(0, 8) + ")",
-          from_depot_id: String(CEX_DEPOT_FROM), to_depot_id: String(CEX_DEPOT_TO),
-          from_barsy_id: String(BID), to_barsy_id: String(BID),
-          depot_left: { barsy_id: BID, depot_id: CEX_DEPOT_FROM },
-          depot_right: { barsy_id: BID, depot_id: CEX_DEPOT_TO },
-          deal_id: null, deal_title: "", status: 0
+          deal_id: null, deal_title: "",
+          depot_id_left: String(CEX_DEPOT_FROM), depot_id_right: String(CEX_DEPOT_TO)
         }, rows: moveRows } };
       const loadPayload = { Storeloads_save: {
         id: null, action_type: "confirm_storeload_close",
