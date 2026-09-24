@@ -252,63 +252,117 @@ function fmtQty(n) {
 }
 
 // ── СТРАНИЦИ ─────────────────────────────────────────────────────────────────
+// Фирменият вид на MOTAMO: червеното слънце (#FF0000 / #CC0000), мастилено
+// #111, мача зелено за „готово", дърво за акценти; шрифтове Unbounded (заглавия)
+// и Manrope (текст) — същите като на motamo.bg. Светла и тъмна тема според
+// настройката на телефона (решение на собственика).
+const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&family=Unbounded:wght@600;700&display=swap" rel="stylesheet">`;
+
 const CSS = `
-:root{--bg:#0f1115;--card:#171a21;--line:#262b36;--fg:#e8eaf0;--dim:#9aa3b2;--warn:#d97706;--acc:#2563eb}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-header{position:sticky;top:0;z-index:5;background:#12151b;border-bottom:1px solid var(--line);padding:10px 14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-h1{font-size:18px;margin:0}h1 small{display:block;font-size:12px;color:var(--dim);font-weight:400}
+:root{
+  --sun:#FF0000;--sun-deep:#CC0000;--wood:#C8A46A;--matcha:#2E7D53;
+  --bg:#FAF8F5;--card:#FFFFFF;--line:#E6E1DA;--fg:#111111;--dim:#6B6B6B;
+  --field:#FFFFFF;--zebra:#FBF9F6;--bar:#FFFFFF;--chip:#F1EDE7;
+  --okbg:#E9F7EE;--okfg:#0E5A28;--errbg:#FDECEC;--errfg:#B3160E;
+  --infbg:#FFF6E5;--inffg:#7A4E00;--veil:rgba(250,248,245,.92);
+  --font-d:"Unbounded",system-ui,sans-serif;--font-b:"Manrope",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0E0F12;--card:#16181D;--line:#272A31;--fg:#F2F2F3;--dim:#9A9DA5;
+  --field:#0A0B0E;--zebra:#131519;--bar:#16181D;--chip:#232730;
+  --okbg:#0F2E1E;--okfg:#7EE2A8;--errbg:#33100F;--errfg:#FF8A80;
+  --infbg:#2A2010;--inffg:#F0C889;--veil:rgba(10,11,14,.92);
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 var(--font-b)}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);
+  padding:10px 14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;
+  box-shadow:0 1px 0 rgba(0,0,0,.04)}
+header .logo{width:30px;height:30px;border-radius:7px;flex:0 0 auto}
+h1{font-family:var(--font-d);font-size:17px;margin:0;letter-spacing:-.01em;flex:1 1 auto}
+h1 small{display:block;font-family:var(--font-b);font-size:12px;color:var(--dim);font-weight:400;letter-spacing:0;margin-top:2px}
 .wrap{padding:12px 14px 96px;max-width:900px;margin:0 auto}
 table{width:100%;border-collapse:collapse}
-th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
-th{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+th,td{padding:11px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+tbody tr:nth-child(even) td,table tr:nth-child(even) td{background:var(--zebra)}
+th{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;font-weight:800;background:transparent!important}
+td{font-size:16px}
 td.num,th.num{text-align:right;white-space:nowrap}
-input[type=number]{width:92px;padding:8px;font-size:17px;border-radius:8px;border:1px solid var(--line);background:#0c0e13;color:var(--fg);text-align:right}
-input[type=number]:focus{outline:2px solid var(--acc)}
-button{padding:10px 16px;border-radius:10px;border:0;font-size:15px;font-weight:600;cursor:pointer;background:var(--acc);color:#fff}
-button.ghost{background:#222835;color:var(--fg)}button:disabled{opacity:.5;cursor:default}
-.neg{color:#ff6b6b;font-weight:700}.zero{color:var(--dim)}
-.msg{padding:10px 12px;border-radius:10px;margin:10px 0;font-size:14px;display:none}
-.msg.ok{display:block;background:#0f2e1e;color:#7ee2a8}
-.msg.err{display:block;background:#2e1414;color:#ff9b9b}
-.msg.info{display:block;background:#15203a;color:#a8c4ff}
-.bar{position:fixed;left:0;right:0;bottom:0;background:#12151b;border-top:1px solid var(--line);padding:10px 14px;display:flex;gap:10px;align-items:center;justify-content:space-between}
-.grp{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding-top:14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0}
-.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700}
-.pill.pending{background:#3b2f0b;color:#f5c542}.pill.done{background:#0f2e1e;color:#7ee2a8}
-.pill.partial{background:#3a2410;color:#ffb066}.pill.failed{background:#2e1414;color:#ff9b9b}
-.pill.processing{background:#15203a;color:#a8c4ff}.pill.cancelled{background:#242833;color:var(--dim)}
+input[type=number]{width:96px;padding:10px;font-size:17px;font-family:var(--font-b);font-weight:600;
+  border-radius:10px;border:1.5px solid var(--line);background:var(--field);color:var(--fg);text-align:right}
+input[type=number]:focus{outline:none;border-color:var(--sun);box-shadow:0 0 0 3px rgba(255,0,0,.16)}
+button{padding:11px 18px;border-radius:12px;border:0;font-family:var(--font-b);font-size:15px;font-weight:800;
+  cursor:pointer;background:var(--sun);color:#fff;letter-spacing:.01em}
+button:active{background:var(--sun-deep)}
+button.ghost{background:var(--chip);color:var(--fg)}
+button:disabled{opacity:.45;cursor:default}
+.neg{color:var(--sun);font-weight:800}.zero{color:var(--dim)}
+.msg{padding:11px 13px;border-radius:12px;margin:10px 0;font-size:14px;display:none;font-weight:600}
+.msg.ok{display:block;background:var(--okbg);color:var(--okfg)}
+.msg.err{display:block;background:var(--errbg);color:var(--errfg)}
+.msg.info{display:block;background:var(--infbg);color:var(--inffg)}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--bar);border-top:1px solid var(--line);
+  padding:10px 14px;display:flex;gap:10px;align-items:center;justify-content:space-between;
+  box-shadow:0 -2px 12px rgba(0,0,0,.06)}
+/* Заглавие на група — с червена чертичка, за да личи (беше почти невидимо). */
+.grp{font-family:var(--font-d);font-size:12px;color:var(--fg);text-transform:uppercase;letter-spacing:.1em;
+  padding:22px 0 6px!important;background:transparent!important;border-bottom:0!important}
+.grp span{border-left:3px solid var(--sun);padding-left:9px;display:inline-block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin:12px 0}
+.pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:800}
+.pill.pending{background:var(--infbg);color:var(--inffg)}
+.pill.done{background:var(--okbg);color:var(--okfg)}
+.pill.partial{background:var(--infbg);color:var(--inffg)}
+.pill.failed{background:var(--errbg);color:var(--errfg)}
+.pill.processing{background:var(--chip);color:var(--dim)}
+.pill.cancelled{background:var(--chip);color:var(--dim)}
 .days{display:flex;gap:8px;overflow-x:auto;padding:4px 0 10px;-webkit-overflow-scrolling:touch}
-.days button{flex:0 0 auto;background:#1b2029;color:var(--dim);font-weight:600;padding:8px 14px;border-radius:999px;font-size:14px}
-.days button.on{background:var(--acc);color:#fff}
-.days button .b{display:inline-block;margin-left:6px;background:#f5c542;color:#1a1a1a;border-radius:999px;padding:0 6px;font-size:11px}
+.days button{flex:0 0 auto;background:var(--chip);color:var(--dim);font-weight:700;padding:9px 16px;border-radius:999px;font-size:14px}
+.days button.on{background:var(--sun);color:#fff}
+.days button .b{display:inline-block;margin-left:6px;background:#fff;color:var(--sun);border-radius:999px;padding:0 7px;font-size:11px;font-weight:800}
+.days button:not(.on) .b{background:var(--sun);color:#fff}
 .head{display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;flex-wrap:wrap}
-.head .t{font-weight:700}.head .s{color:var(--dim);font-size:13px;font-weight:400}
+.head .t{font-family:var(--font-d);font-size:16px}
+.head .s{color:var(--dim);font-size:13px;font-weight:600}
 .body{display:none;margin-top:10px}.open .body{display:block}
 .head .caret{color:var(--dim);font-size:13px}
-.docs{margin-top:8px;color:var(--dim);font-size:13px}
-.sent{color:#7ee2a8;font-weight:700}.cut{color:#ffb066;font-weight:700}
-.tabs{display:flex;gap:6px}.tabs button{background:#1b2029;color:var(--dim);padding:8px 14px;font-size:14px}
-.tabs button.on{background:var(--acc);color:#fff}
+.docs{margin-top:10px;color:var(--dim);font-size:13px;border-top:1px dashed var(--line);padding-top:8px}
+.sent{color:var(--matcha);font-weight:800}.cut{color:var(--sun);font-weight:800}
+.tabs{display:flex;gap:6px}
+.tabs button{background:var(--chip);color:var(--dim);padding:9px 15px;font-size:14px;font-weight:700}
+.tabs button.on{background:var(--sun);color:#fff}
 /* Докато Barsy работи (няколко секунди при много редове) целият екран се
    заключва — иначе се натиска пак и пак. */
-#busy{position:fixed;inset:0;z-index:99;background:rgba(10,12,16,.88);display:none;
+#busy{position:fixed;inset:0;z-index:99;background:var(--veil);display:none;
   align-items:center;justify-content:center;flex-direction:column;gap:18px;padding:24px;text-align:center}
 #busy.on{display:flex}
-#busy .sp{width:54px;height:54px;border:5px solid #2b3240;border-top-color:var(--acc);border-radius:50%;animation:spin 1s linear infinite}
+#busy .sp{width:56px;height:56px;border:5px solid var(--line);border-top-color:var(--sun);border-radius:50%;animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-#busy .tx{font-size:19px;font-weight:700}
-#busy .sub{font-size:14px;color:var(--dim);max-width:320px}
-.pk{display:inline-block;background:#232a36;color:#a8c4ff;border-radius:6px;padding:1px 6px;font-size:12px;margin-left:6px;white-space:nowrap}
-.conv{font-size:12px;color:var(--dim);margin-top:3px;height:15px}
-.sub2{display:block;font-size:12px;color:var(--dim);font-weight:400}
+#busy .tx{font-family:var(--font-d);font-size:19px}
+#busy .sub{font-size:14px;color:var(--dim);max-width:320px;font-weight:600}
+.pk{display:inline-block;background:var(--chip);color:var(--dim);border-radius:7px;padding:2px 7px;font-size:12px;margin-left:6px;white-space:nowrap;font-weight:700}
+.conv{font-size:12px;color:var(--matcha);margin-top:4px;height:15px;font-weight:700}
+.sub2{display:block;font-size:12px;color:var(--dim);font-weight:600;margin-top:2px}
+/* Телефон: лентата долу трябва да остане НА ЕДИН ред — иначе изяжда екрана. */
+@media (max-width:430px){
+  .bar{padding:8px 10px;gap:8px}
+  .bar button{padding:12px 14px;font-size:14px}
+  .bar #cnt{font-size:12px;line-height:1.25}
+  .hidesm{display:none}
+  h1{font-size:15px}
+  td{font-size:15px}
+  th,td{padding:10px 6px}
+  input[type=number]{width:84px;padding:9px}
+}
 `;
 
 function shopPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Заявка към цеха</title>
-<style>${CSS}</style></head><body>
-<header><h1>Заявка към цеха<small>точка Каравелов · какво да донесат</small></h1>
+${FONTS}<style>${CSS}</style></head><body>
+<header><img class="logo" src="https://motamo.bg/icons/icon-192.png" alt="" onerror="this.style.display='none'">
+<h1>Заявка към цеха<small>точка Каравелов · какво да донесат</small></h1>
 <span class="tabs"><button id="t1" class="on" onclick="tab(1)">Нова заявка</button><button id="t2" onclick="tab(2)">История</button></span></header>
 <div class="wrap">
   <div id="msg" class="msg info">Зареждам наличностите…</div>
@@ -317,8 +371,8 @@ function shopPage(k) {
 </div>
 <div class="bar" id="bar">
   <span id="cnt" style="color:var(--dim);font-size:14px">—</span>
-  <span><button class="ghost" onclick="reload()">↻ Наличности</button>
-  <button id="send" onclick="send()" disabled>Изпрати заявката</button></span>
+  <span style="display:flex;gap:8px;align-items:center"><button class="ghost" onclick="reload()">↻<span class="hidesm"> Наличности</span></button>
+  <button id="send" onclick="send()" disabled>Изпрати</button></span>
 </div>
 <div id="busy"><div class="sp"></div><div class="tx">Изпраща се…</div><div class="sub" id="busysub">Не натискай пак.</div></div>
 <script>
@@ -331,7 +385,7 @@ function draft(){try{return JSON.parse(localStorage.getItem(DRAFT)||'{}')}catch(
 function saveDraft(){var d={};document.querySelectorAll('input.q').forEach(function(i){if(i.value)d[i.dataset.id]=i.value});try{localStorage.setItem(DRAFT,JSON.stringify(d))}catch(e){}conv();count()}
 function count(){var n=0;document.querySelectorAll('input.q').forEach(function(i){if(Number(i.value)>0)n++});$('cnt').textContent=n?(n+' продукта в заявката'):'нищо не е въведено';$('send').disabled=!n}
 function render(){var d=draft(),h='<tr><th>Продукт</th><th class="num">Имам</th><th class="num">Искам</th></tr>',lastZ=null;
-items.forEach(function(it){var z=it.zag?'Заготовки':'Суровини и други';if(z!==lastZ){lastZ=z;h+='<tr><td colspan="3" class="grp">'+z+'</td></tr>'}
+items.forEach(function(it){var z=it.zag?'Заготовки':'Суровини и други';if(z!==lastZ){lastZ=z;h+='<tr><td colspan="3" class="grp"><span>'+z+'</span></td></tr>'}
 var st=it.shop_stock,cls=st<0?'neg':(st===0?'zero':''),p=it.pack;
 var have=p?(Math.round(st/p.size*10)/10+' '+p.plural):(Math.round(st*1000)/1000+' '+esc(it.unit));
 h+='<tr><td>'+esc(it.name)+(p?' <span class="pk">по '+esc(p.name)+' '+(p.size*1000)+' г</span>':'')+(it.missing?' <span style="color:var(--warn)">\\u26a0 липсва в '+esc(it.missing)+'</span>':'')+'</td>'+
@@ -397,8 +451,9 @@ reload();
 function cexPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Заявки от точката</title>
-<style>${CSS}</style></head><body>
-<header><h1>Заявки от точката<small>цех · прехвърляне към Каравелов</small></h1>
+${FONTS}<style>${CSS}</style></head><body>
+<header><img class="logo" src="https://motamo.bg/icons/icon-192.png" alt="" onerror="this.style.display='none'">
+<h1>Заявки от точката<small>цех · прехвърляне към Каравелов</small></h1>
 <button class="ghost" onclick="load()">↻ Опресни</button></header>
 <div class="wrap"><div id="days" class="days"></div><div id="msg" class="msg info">Зареждам…</div><div id="list"></div></div>
 <div id="busy"><div class="sp"></div><div class="tx">Обработва се…</div><div class="sub" id="busysub">Не натискай пак — Barsy записва документите.</div></div>
