@@ -256,18 +256,32 @@ button.ghost{background:#222835;color:var(--fg)}button:disabled{opacity:.5;curso
 .pill.pending{background:#3b2f0b;color:#f5c542}.pill.done{background:#0f2e1e;color:#7ee2a8}
 .pill.partial{background:#3a2410;color:#ffb066}.pill.failed{background:#2e1414;color:#ff9b9b}
 .pill.processing{background:#15203a;color:#a8c4ff}.pill.cancelled{background:#242833;color:var(--dim)}
+.days{display:flex;gap:8px;overflow-x:auto;padding:4px 0 10px;-webkit-overflow-scrolling:touch}
+.days button{flex:0 0 auto;background:#1b2029;color:var(--dim);font-weight:600;padding:8px 14px;border-radius:999px;font-size:14px}
+.days button.on{background:var(--acc);color:#fff}
+.days button .b{display:inline-block;margin-left:6px;background:#f5c542;color:#1a1a1a;border-radius:999px;padding:0 6px;font-size:11px}
+.head{display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;flex-wrap:wrap}
+.head .t{font-weight:700}.head .s{color:var(--dim);font-size:13px;font-weight:400}
+.body{display:none;margin-top:10px}.open .body{display:block}
+.head .caret{color:var(--dim);font-size:13px}
+.docs{margin-top:8px;color:var(--dim);font-size:13px}
+.sent{color:#7ee2a8;font-weight:700}.cut{color:#ffb066;font-weight:700}
+.tabs{display:flex;gap:6px}.tabs button{background:#1b2029;color:var(--dim);padding:8px 14px;font-size:14px}
+.tabs button.on{background:var(--acc);color:#fff}
 `;
 
 function shopPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Заявка към цеха</title>
 <style>${CSS}</style></head><body>
-<header><h1>Заявка към цеха<small>точка Каравелов · какво да донесат</small></h1></header>
+<header><h1>Заявка към цеха<small>точка Каравелов · какво да донесат</small></h1>
+<span class="tabs"><button id="t1" class="on" onclick="tab(1)">Нова заявка</button><button id="t2" onclick="tab(2)">История</button></span></header>
 <div class="wrap">
   <div id="msg" class="msg info">Зареждам наличностите…</div>
-  <table id="tbl"></table>
+  <div id="p1"><table id="tbl"></table></div>
+  <div id="p2" style="display:none"><div id="days" class="days"></div><div id="hist"></div></div>
 </div>
-<div class="bar">
+<div class="bar" id="bar">
   <span id="cnt" style="color:var(--dim);font-size:14px">—</span>
   <span><button class="ghost" onclick="reload()">↻ Наличности</button>
   <button id="send" onclick="send()" disabled>Изпрати заявката</button></span>
@@ -297,6 +311,39 @@ api({action:'create_request',items:rows,note:null}).then(function(j){if(!j.ok){m
 try{localStorage.removeItem(DRAFT)}catch(e){}
 document.querySelectorAll('input.q').forEach(function(i){i.value=''});count();
 msg('\\u2713 Заявката е изпратена ('+(j.items_count||rows.length)+' продукта). Цехът я вижда.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err');$('send').disabled=false})}
+
+/* ── История: същата лента с дати като в цеха, но тук се чете „поиска / дойде" ── */
+var ALL=[],DATES=[],SEL=null,OPEN={},TODAY='';
+var LBL={pending:'чака цеха',processing:'в процес',done:'донесена',partial:'частична',failed:'пропадна',cancelled:'отказана'};
+function n3(v){return Math.round(Number(v)*1000)/1000}
+function hhmm(s){var d=new Date(s);return isNaN(d)?'':('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
+function dlabel(d){if(d===TODAY)return 'Днес';var y=new Date(Date.parse(TODAY)-864e5).toISOString().slice(0,10);if(d===y)return 'Вчера';var p=d.split('-');return p[2]+'.'+p[1]}
+function tab(n){$('t1').className=n===1?'on':'';$('t2').className=n===2?'on':'';
+$('p1').style.display=n===1?'':'none';$('p2').style.display=n===2?'':'none';$('bar').style.display=n===1?'':'none';
+if(n===2)hist()}
+function pick(d){SEL=d;drawDays();drawHist()}
+function drawDays(){var h='';DATES.forEach(function(x){h+='<button class="'+(x.date===SEL?'on':'')+'" onclick="pick(&quot;'+x.date+'&quot;)">'+dlabel(x.date)+'</button>'});$('days').innerHTML=h}
+function drawHist(){var rs=ALL.filter(function(r){return r.for_date===SEL});
+if(!rs.length){$('hist').innerHTML='<div class="card" style="color:var(--dim)">Няма заявки за този ден.</div>';return}
+var h='';rs.forEach(function(r){var it=r.items||[],op=OPEN[r.id];
+h+='<div class="card'+(op?' open':'')+'"><div class="head" onclick="tg(&quot;'+esc(r.id)+'&quot;)">'+
+'<span><span class="t">'+hhmm(r.created_at)+'</span> <span class="s">'+it.length+' продукта'+(r.parent_id?' · остатък':'')+'</span></span>'+
+'<span><span class="pill '+esc(r.status)+'">'+esc(LBL[r.status]||r.status)+'</span> <span class="caret">'+(op?'▲':'▼')+'</span></span></div>'+
+'<div class="body"><table><tr><th>Продукт</th><th class="num">Поиска</th><th class="num">Дойде</th></tr>';
+it.forEach(function(x){var s=x.sent;
+h+='<tr><td>'+esc(x.name)+'</td><td class="num">'+n3(x.qty)+' '+esc(x.unit||'')+'</td>'+
+'<td class="num '+(s==null?'':(Number(s)<Number(x.qty)?'cut':'sent'))+'">'+(s==null?'—':n3(s))+'</td></tr>'});
+h+='</table>';
+if(r.status==='done')h+='<div class="docs">зареждане №'+esc(r.shop_doc_id||'?')+'</div>';
+if(r.error)h+='<div class="msg err" style="display:block">'+esc(r.error)+'</div>';
+h+='</div></div>'});
+$('hist').innerHTML=h}
+function tg(id){OPEN[id]=!OPEN[id];drawHist()}
+function hist(){msg('Зареждам историята…','info');api({action:'list_requests',days:14}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}
+ALL=j.requests||[];DATES=j.dates||[];TODAY=j.today;
+if(!DATES.length){$('days').innerHTML='';$('hist').innerHTML='';msg('Няма заявки в последните 14 дни.','info');return}
+if(!SEL||!DATES.some(function(x){return x.date===SEL}))SEL=DATES[0].date;
+drawDays();drawHist();msg('Последните 14 дни. Клик на заявка я отваря.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 reload();
 </script></body></html>`;
 }
@@ -307,33 +354,62 @@ function cexPage(k) {
 <style>${CSS}</style></head><body>
 <header><h1>Заявки от точката<small>цех · прехвърляне към Каравелов</small></h1>
 <button class="ghost" onclick="load()">↻ Опресни</button></header>
-<div class="wrap"><div id="msg" class="msg info">Зареждам…</div><div id="list"></div></div>
+<div class="wrap"><div id="days" class="days"></div><div id="msg" class="msg info">Зареждам…</div><div id="list"></div></div>
 <script>
 var K=${JSON.stringify(k)};
 function $(i){return document.getElementById(i)}
 function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
-function load(){msg('Зареждам…','info');api({action:'list_requests'}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}
-var rs=j.requests||[];if(!rs.length){$('list').innerHTML='';msg('Няма заявки.','info');return}
-var h='';rs.forEach(function(r){var it=r.items||[];
-h+='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'+
-'<b>'+esc(r.for_date)+' \\u00b7 '+it.length+' продукта</b><span class="pill '+esc(r.status)+'">'+esc(r.status)+'</span></div>'+
-'<table style="margin-top:8px"><tr><th>Продукт</th><th class="num">Искат</th><th class="num">В цеха</th></tr>';
-it.forEach(function(x){var short=(x.cex_stock!=null&&x.cex_stock<x.qty);
-h+='<tr><td>'+esc(x.name)+'</td><td class="num">'+x.qty+' '+esc(x.unit||'')+'</td><td class="num'+(short?' neg':'')+'">'+(x.cex_stock==null?'\\u2014':Math.round(x.cex_stock*1000)/1000)+'</td></tr>'});
+var ALL=[],DATES=[],SEL=null,OPEN={};
+var LBL={pending:'чака',processing:'в процес',done:'изпълнена',partial:'частична',failed:'пропадна',cancelled:'отказана'};
+function n3(v){return Math.round(Number(v)*1000)/1000}
+function hhmm(s){var d=new Date(s);return isNaN(d)?'':('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
+function dlabel(d,today){if(d===today)return 'Днес';var y=new Date(Date.parse(today)-864e5).toISOString().slice(0,10);if(d===y)return 'Вчера';var p=d.split('-');return p[2]+'.'+p[1]}
+function renderDays(today){var h='';DATES.forEach(function(x){h+='<button class="'+(x.date===SEL?'on':'')+'" onclick="pick(&quot;'+x.date+'&quot;)">'+dlabel(x.date,today)+(x.pending?'<span class="b">'+x.pending+'</span>':'')+'</button>'});$('days').innerHTML=h}
+function pick(d){SEL=d;renderDays(TODAY);renderList()}
+function renderList(){
+var rs=ALL.filter(function(r){return r.for_date===SEL});
+if(!rs.length){$('list').innerHTML='<div class="card" style="color:var(--dim)">Няма заявки за този ден.</div>';return}
+var h='';rs.forEach(function(r){var it=r.items||[],op=OPEN[r.id];
+var sum=0;it.forEach(function(x){sum+=Number(x.sent!=null?x.sent:x.qty)});
+h+='<div class="card'+(op?' open':'')+'"><div class="head" onclick="tog(&quot;'+esc(r.id)+'&quot;)">'+
+'<span><span class="t">'+hhmm(r.created_at)+'</span> <span class="s">'+it.length+' продукта'+(r.parent_id?' · остатък':'')+'</span></span>'+
+'<span><span class="pill '+esc(r.status)+'">'+esc(LBL[r.status]||r.status)+'</span> <span class="caret">'+(op?'▲':'▼')+'</span></span></div>'+
+'<div class="body">';
+var edit=(r.status==='pending');
+h+='<table><tr><th>Продукт</th><th class="num">Искат</th><th class="num">'+(edit?'Изпращам':'Тръгна')+'</th><th class="num">В цеха</th></tr>';
+it.forEach(function(x){
+var stock=x.cex_stock,low=(stock!=null&&stock<x.qty);
+h+='<tr><td>'+esc(x.name)+'</td><td class="num">'+n3(x.qty)+' '+esc(x.unit||'')+'</td>';
+if(edit){h+='<td class="num"><input class="q" type="number" min="0" step="any" inputmode="decimal" data-r="'+esc(r.id)+'" data-id="'+x.cex_id+'" data-max="'+(stock==null?'':stock)+'" value="'+n3(Math.min(x.qty,stock==null?x.qty:Math.max(0,stock)))+'" oninput="chk(this)"></td>'}
+else{var s=x.sent;h+='<td class="num '+(s==null?'':(Number(s)<Number(x.qty)?'cut':'sent'))+'">'+(s==null?'—':n3(s))+'</td>'}
+h+='<td class="num'+(low?' neg':'')+'">'+(stock==null?'—':n3(stock))+'</td></tr>'});
 h+='</table>';
 if(r.error)h+='<div class="msg err" style="display:block">'+esc(r.error)+'</div>';
-if(r.status==='pending')h+='<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="ghost" onclick="run(&quot;'+esc(r.id)+'&quot;,false)">Преглед</button><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Издай документите</button><button class="ghost" onclick="cancelReq(&quot;'+esc(r.id)+'&quot;)">Откажи</button></div>';
-if(r.status==='done')h+='<div style="margin-top:8px;color:var(--dim);font-size:13px">цех прехвърляне №'+esc(r.cex_doc_id||'?')+' \\u00b7 точка зареждане №'+esc(r.shop_doc_id||'?')+'</div>';
-if(r.status==='partial')h+='<div style="margin-top:8px;display:flex;gap:8px"><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Опитай пак точката</button></div>';
-h+='</div>'});
-$('list').innerHTML=h;msg(rs.length+' заявки.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+if(r.status==='done')h+='<div class="docs">цех прехвърляне №'+esc(r.cex_doc_id||'?')+' · точка зареждане №'+esc(r.shop_doc_id||'?')+'</div>';
+if(edit)h+='<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Издай документите</button><button class="ghost" onclick="run(&quot;'+esc(r.id)+'&quot;,false)">Преглед</button><button class="ghost" onclick="cancelReq(&quot;'+esc(r.id)+'&quot;)">Откажи</button></div>';
+if(r.status==='partial')h+='<div style="margin-top:12px"><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Опитай пак точката</button></div>';
+h+='</div></div>'});
+$('list').innerHTML=h}
+function tog(id){OPEN[id]=!OPEN[id];renderList()}
+function chk(i){var mx=i.dataset.max;if(mx!==''&&Number(i.value)>Number(mx)){i.value=n3(mx);i.style.borderColor='#d97706'}else{i.style.borderColor=''}}
+function sendMap(id){var m={};document.querySelectorAll('input.q[data-r="'+id+'"]').forEach(function(i){m[i.dataset.id]=Number(i.value)||0});return m}
+var TODAY='';
+function load(){msg('Зареждам…','info');api({action:'list_requests',days:14}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}
+ALL=j.requests||[];DATES=j.dates||[];TODAY=j.today;
+if(!DATES.length){$('days').innerHTML='';$('list').innerHTML='';msg('Няма заявки в последните 14 дни.','info');return}
+if(!SEL||!DATES.some(function(x){return x.date===SEL}))SEL=DATES[0].date;
+renderDays(TODAY);renderList();
+var p=ALL.filter(function(r){return r.status==='pending'}).length;
+msg(p?(p+' чакащи заявки.'):'Няма чакащи заявки.',p?'ok':'info')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function run(id,write){
-if(write){if(!confirm('ИЗДАВАМ двата документа:\\n1) цех прехвърляне Основен → Точка\\n2) зареждане в точката\\n\\nПродължавам?'))return}
+var send=sendMap(id),n=0;for(var k in send)if(send[k]>0)n++;
+if(write){if(!n){msg('Всички количества са 0 — няма какво да се изпрати.','err');return}
+if(!confirm('ИЗДАВАМ двата документа за '+n+' продукта:\\n1) цех прехвърляне Основен → Точка\\n2) зареждане в точката\\n\\nПродължавам?'))return}
 document.querySelectorAll('button').forEach(function(b){b.disabled=true});
 msg(write?'Издавам документите…':'Сглобявам (преглед)…','info');
-api({action:'process_request',id:id,dry:write?false:true}).then(function(j){
+api({action:'process_request',id:id,dry:write?false:true,send:send}).then(function(j){
 if(!j.ok){msg('Грешка: '+(j.error||''),'err');load();return}
 msg(j.message||'Готово.',j.dry?'info':'ok');load()}).catch(function(e){msg('Мрежова грешка: '+e,'err');load()})}
 function cancelReq(id){if(!confirm('Отказвам тази заявка?'))return;api({action:'cancel_request',id:id}).then(function(){load()})}
@@ -428,11 +504,19 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    // ── цехът вижда заявките ──
+    // ── историята: последните N дни, групирана по дата (за двата екрана) ──
     if (body.action === "list_requests") {
-      const lim = Math.min(Number(body.limit) || 20, 100);
-      const rows = await sbSelect(`order=created_at.desc&limit=${lim}`);
-      res.status(200).json({ ok: true, requests: rows });
+      const days = Math.min(Math.max(Number(body.days) || 14, 1), 90);
+      const from = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
+      const rows = await sbSelect(`for_date=gte.${from}&order=created_at.desc&limit=500`);
+      // по дата, най-новата отгоре — лентата с дати се строи от това
+      const byDate = {};
+      for (const r of rows) (byDate[r.for_date] = byDate[r.for_date] || []).push(r);
+      const dates = Object.keys(byDate).sort().reverse().map(d => ({
+        date: d, count: byDate[d].length,
+        pending: byDate[d].filter(x => x.status === "pending").length
+      }));
+      res.status(200).json({ ok: true, today: sofiaToday(), days, dates, requests: rows });
       return;
     }
 
@@ -469,13 +553,24 @@ module.exports = async function handler(req, res) {
       const cexA = {}; for (const a of artList(cr)) cexA[Number(a.article_id)] = a;
       const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 
+      // Цехът може да КОРИГИРА количествата преди да издаде документите
+      // (`send` = {cex_id: количество}). Липсващ ключ = изпраща се исканото;
+      // 0 = редът се пропуска. Никога повече от наличното в цеха.
+      const override = (body.send && typeof body.send === "object") ? body.send : null;
+
       // редовете на двата документа
-      const moveRows = [], loadRows = [], short = [];
+      const moveRows = [], loadRows = [], short = [], sentBy = {};
       for (const it of items) {
         const a = cexA[it.cex_id] || {};
         const have = num(a.store_amount);
-        const qty = round3(Math.min(Number(it.qty), Math.max(0, have))); // не даваме повече, отколкото има
-        if (qty < Number(it.qty)) short.push(`${it.name}: искат ${it.qty}, в цеха ${round3(have)}`);
+        let want = Number(it.qty);
+        if (override && Object.prototype.hasOwnProperty.call(override, String(it.cex_id))) {
+          const v = Number(override[String(it.cex_id)]);
+          if (Number.isFinite(v) && v >= 0) want = v;
+        }
+        const qty = round3(Math.min(want, Math.max(0, have))); // не даваме повече, отколкото има
+        sentBy[it.cex_id] = qty;
+        if (qty < Number(it.qty)) short.push(`${it.name}: искат ${it.qty}, тръгват ${qty}`);
         if (qty <= 0) continue;
         const alloc = allocate(qty, lots[it.cex_id]);
         if (alloc.short > 0) short.push(`${it.name}: ${alloc.short} ${it.unit || ""} без партида в склада`);
@@ -488,6 +583,7 @@ module.exports = async function handler(req, res) {
           });
         }
         const cost = num(a.avg_delivery_price);
+        void it.shop_id; // мапингът е водещ: MAP[cex_id], не запазеното в заявката
         loadRows.push({
           store_load_row_id: "", article_id: String(MAP[it.cex_id]),
           original_article_name: it.name, amount: String(qty),
@@ -587,11 +683,25 @@ module.exports = async function handler(req, res) {
           await sbPatch(id, { status: "partial", cex_doc_id: mvId ? String(mvId) : "?", processed_at: new Date().toISOString(), error: "цехът е изписан, точката НЕ е заредена: " + String(ld.raw || "").slice(0, 300) });
           res.status(200).json({ ok: false, step: "shop", cex_doc_id: mvId, error: "Цехът е изписан (прехвърляне " + (mvId || "?") + "), но зареждането в точката падна: " + String(ld.raw || "").slice(0, 300) }); return;
         }
-        await sbPatch(id, { status: "done", cex_doc_id: mvId ? String(mvId) : null, shop_doc_id: ldId ? String(ldId) : null, processed_at: new Date().toISOString(), error: null });
+        // Записваме КОЛКО реално е тръгнало на всеки ред (точката вижда
+        // „поиска 10, дойде 6") и отваряме НОВА заявка с остатъка, за да не се
+        // забрави — решение на собственика.
+        const itemsSent = items.map(it => ({ ...it, sent: sentBy[it.cex_id] != null ? sentBy[it.cex_id] : 0 }));
+        const rest = itemsSent
+          .map(it => ({ ...it, qty: round3(Number(it.qty) - Number(it.sent)) }))
+          .filter(it => it.qty > 0.0005)
+          .map(it => { const o = { ...it }; delete o.sent; return o; });
+        let restId = null;
+        if (rest.length) {
+          const ins = await sbInsert({ for_date: today, status: "pending", items: rest, parent_id: id, note: "остатък от предишна заявка" });
+          restId = ins.row && ins.row.id;
+        }
+        await sbPatch(id, { status: "done", items: itemsSent, cex_doc_id: mvId ? String(mvId) : null, shop_doc_id: ldId ? String(ldId) : null, processed_at: new Date().toISOString(), error: null });
         res.status(200).json({
-          ok: true, dry: false, id, cex_doc_id: mvId, shop_doc_id: ldId, short,
+          ok: true, dry: false, id, cex_doc_id: mvId, shop_doc_id: ldId, short, rest_id: restId, rest_count: rest.length,
           message: "✓ Готово: цех прехвърляне " + (mvId || "") + " (" + moveRows.length + " реда) → точка зареждане " + (ldId || "") + " (" + loadRows.length + " реда)."
             + (short.length ? " ⚠ " + short.join(" · ") : "")
+            + (rest.length ? " Остатъкът (" + rest.length + " продукта) е в нова заявка." : "")
         });
         return;
       }
