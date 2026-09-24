@@ -8,7 +8,7 @@
 // доставка, за разлика от цеха) → точен маржин по поддържаната таблица разходи.
 // Само ЧЕТЕ. Гейт: CEX_VIEW_TOKEN (или силните токени).
 
-const COSTSMOD = require("./costs.js");
+const COSTSMOD = require("../lib/costs.js");
 const COSTS = COSTSMOD.COSTS || {};
 const PACKAGING = COSTSMOD.PACKAGING || {};
 const FALLBACK_FOOD_COST = COSTSMOD.FALLBACK_FOOD_COST || {};

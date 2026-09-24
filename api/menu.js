@@ -26,9 +26,9 @@ const IMAGE_BASE = {
 // ПРОМОЦИИ there would make the gift unorderable, which is the opposite of the point.
 const HIDDEN_CATEGORY = /алкохол|промоции/i;
 
-const { sortByProfit } = require("./costs");
-const { allergensFor } = require("./allergens");
-const { parseDescription } = require("./describe");
+const { sortByProfit } = require("../lib/costs");
+const { allergensFor } = require("../lib/allergens");
+const { parseDescription } = require("../lib/describe");
 
 // Подредбата по печалба важи само за точката. Магазинният каталог е друг —
 // други article_id, друг ценоразпис, себестойности за него няма — така че там

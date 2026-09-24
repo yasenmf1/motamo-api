@@ -11,7 +11,7 @@
 // RECONCILE_TOKEN / PAY_HMAC_SECRET / PREVIEW_TOKEN. За view=today и CEX_VIEW_TOKEN.
 
 const crypto = require("crypto");
-const DATA = require("./_cexdata.js");
+const DATA = require("../lib/_cexdata.js");
 const ARTS = DATA.articles, NAME2ID = DATA.name2id;
 const MENU = Object.values(ARTS).filter(a => a.is_menu)
   .sort((a, b) => (a.is_set - b.is_set) || (a.id - b.id))
