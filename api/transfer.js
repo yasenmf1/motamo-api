@@ -11,10 +11,13 @@
 //   2. Цехът отваря `?view=cex&k=<token>` → вижда чакащите заявки, преглежда,
 //      натиска „Изпълни" → 2 документа (цех goods-out + шоп goods-in).
 //
-// ⚠ Стъпка 2 (същинското издаване на документите) е ЗАСЕГА САМО DRY —
-// сглобява и показва какво ще се запише, но НЕ пише в Barsy, докато не се
-// избере документният модел (продажба на вътрешен клиент vs вътрешен трансфер;
-// виж `process_request` по-долу). Заявката и екраните работят напълно.
+// Двата документа (цехът и точката са ЕДНА фирма, затова това НЕ е продажба —
+// продажбен документ би надул оборота и ДДС):
+//   1) ЦЕХ  — прехвърляне Основен(1) → Точка(2), `Storemoves_save`. Документът
+//      за БАБХ. Редът иска партида във формат „партида(количество)" (FIFO).
+//   2) ТОЧКА — зареждане в `motamoshop` от доставчик „Мотамо - цех",
+//      `Storeloads_save`, по мапнатите id-та и по себестойност от цеха.
+// „Преглед" сглобява без да пише; „Издай документите" записва (`dry:false`).
 
 const CEX_API = "https://motamo.barsy.online";
 const SHOP_API = "https://motamoshop.barsy.online";
@@ -173,6 +176,56 @@ async function sbPatch(id, patch) {
   });
 }
 
+// ── ПАРТИДИ ──────────────────────────────────────────────────────────────────
+// Прехвърлянето в цеха иска партида на реда, във формата „партида(количество)"
+// (виж ръчното прехвърляне №2). Партидите с наличност се четат от
+// `Lots_GetListAvailability` — същия източник, който UI-ят ползва за полето.
+// Артикулите БЕЗ следене на партида (заготовките) просто не връщат редове →
+// редът минава с празно `lot_value`.
+const CEX_DEPOT_FROM = 1;   // Основен
+const CEX_DEPOT_TO = 2;     // Точка
+const SHOP_DEPOT = 1;       // Основен (точката има само един)
+const SHOP_SUPPLIER_ID = 4; // „Мотамо - цех" (вече заведен от собственика)
+
+async function lotsByArticle(ids) {
+  const out = {};
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 8) chunks.push(ids.slice(i, i + 8));
+  for (const ch of chunks) {
+    const rs = await Promise.all(ch.map(id =>
+      cexRoot({ Lots_GetListAvailability: { filters: { has_amount_real_or_reserved: 1, article_id: id }, params: { bid: BID, article_id: id } } })
+        .then(r => ({ id, rows: (r.data && r.data.Lots_GetListAvailability) || [] }))
+        .catch(() => ({ id, rows: [] }))
+    ));
+    for (const r of rs) {
+      // само партидите в склада, от който даваме, и само с реална наличност
+      out[r.id] = (Array.isArray(r.rows) ? r.rows : [])
+        .filter(x => Number(x.depot_id) === CEX_DEPOT_FROM && Number(x.amount_real) > 0)
+        // FIFO: първо изтичащите, после по номер на партида
+        .sort((a, b) => String(a.lot_exp_date || "9999").localeCompare(String(b.lot_exp_date || "9999"))
+          || String(a.lot_value).localeCompare(String(b.lot_value)));
+    }
+  }
+  return out;
+}
+
+// Разпределя исканото количество по партиди (FIFO) → по ЕДИН ред на партида,
+// както прави и ръчното прехвърляне. Без партиди → един ред с празно lot_value.
+function allocate(qty, lots) {
+  if (!lots || !lots.length) return { rows: [{ lot_value: "", amount: qty }], short: 0 };
+  const rows = []; let left = qty;
+  for (const l of lots) {
+    if (left <= 0) break;
+    const take = Math.min(left, Number(l.amount_real));
+    if (take <= 0) continue;
+    // Barsy иска „партида(количество)" в полето
+    rows.push({ lot_value: `${l.lot_value}(${round3(take)})`, amount: round3(take), lot_exp: l.lot_exp_date || null });
+    left -= take;
+  }
+  return { rows, short: round3(Math.max(0, left)) };
+}
+const round3 = (n) => Math.round(Number(n) * 1000) / 1000;
+
 // ── СТРАНИЦИ ─────────────────────────────────────────────────────────────────
 const CSS = `
 :root{--bg:#0f1115;--card:#171a21;--line:#262b36;--fg:#e8eaf0;--dim:#9aa3b2;--warn:#d97706;--acc:#2563eb}
@@ -268,13 +321,18 @@ it.forEach(function(x){var short=(x.cex_stock!=null&&x.cex_stock<x.qty);
 h+='<tr><td>'+esc(x.name)+'</td><td class="num">'+x.qty+' '+esc(x.unit||'')+'</td><td class="num'+(short?' neg':'')+'">'+(x.cex_stock==null?'\\u2014':Math.round(x.cex_stock*1000)/1000)+'</td></tr>'});
 h+='</table>';
 if(r.error)h+='<div class="msg err" style="display:block">'+esc(r.error)+'</div>';
-if(r.status==='pending')h+='<div style="margin-top:10px;display:flex;gap:8px"><button onclick="run(&quot;'+esc(r.id)+'&quot;)">Изпълни (преглед)</button><button class="ghost" onclick="cancelReq(&quot;'+esc(r.id)+'&quot;)">Откажи</button></div>';
+if(r.status==='pending')h+='<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="ghost" onclick="run(&quot;'+esc(r.id)+'&quot;,false)">Преглед</button><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Издай документите</button><button class="ghost" onclick="cancelReq(&quot;'+esc(r.id)+'&quot;)">Откажи</button></div>';
+if(r.status==='done')h+='<div style="margin-top:8px;color:var(--dim);font-size:13px">цех прехвърляне №'+esc(r.cex_doc_id||'?')+' \\u00b7 точка зареждане №'+esc(r.shop_doc_id||'?')+'</div>';
+if(r.status==='partial')h+='<div style="margin-top:8px;display:flex;gap:8px"><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Опитай пак точката</button></div>';
 h+='</div>'});
 $('list').innerHTML=h;msg(rs.length+' заявки.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
-function run(id){if(!confirm('Изпълнявам заявката (засега само ПРЕГЛЕД — нищо не се записва в Barsy).'))return;
-msg('Сглобявам документите…','info');api({action:'process_request',id:id}).then(function(j){
+function run(id,write){
+if(write){if(!confirm('ИЗДАВАМ двата документа:\\n1) цех прехвърляне Основен → Точка\\n2) зареждане в точката\\n\\nПродължавам?'))return}
+document.querySelectorAll('button').forEach(function(b){b.disabled=true});
+msg(write?'Издавам документите…':'Сглобявам (преглед)…','info');
+api({action:'process_request',id:id,dry:write?false:true}).then(function(j){
 if(!j.ok){msg('Грешка: '+(j.error||''),'err');load();return}
-msg(j.message||'Готово.',j.dry?'info':'ok');load()}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+msg(j.message||'Готово.',j.dry?'info':'ok');load()}).catch(function(e){msg('Мрежова грешка: '+e,'err');load()})}
 function cancelReq(id){if(!confirm('Отказвам тази заявка?'))return;api({action:'cancel_request',id:id}).then(function(){load()})}
 load();
 </script></body></html>`;
@@ -390,26 +448,115 @@ module.exports = async function handler(req, res) {
     // (вътрешен трансфер vs продажба на вътрешен клиент).
     if (body.action === "process_request") {
       const id = String(body.id || ""); if (!id) { res.status(400).json({ ok: false, error: "no_id" }); return; }
-      const claim = await sbClaim(id, "pending", { status: "processing" });
+      const write = body.dry === false;
+      const claim = await sbClaim(id, "pending", { status: write ? "processing" : "pending" });
       if (!claim.ok) { res.status(200).json({ ok: false, error: "заявката вече се изпълнява или е изпълнена (двойно натискане)" }); return; }
       const reqRow = claim.row || {};
-      const items = Array.isArray(reqRow.items) ? reqRow.items : [];
-      // пресни наличности в цеха — има ли изобщо какво да даде
-      const list = await buildList();
-      const byId = {}; for (const x of list) byId[x.cex_id] = x;
-      const short = items.filter(it => (byId[it.cex_id] || {}).cex_stock < it.qty)
-        .map(it => `${it.name}: искат ${it.qty}, в цеха ${(byId[it.cex_id] || {}).cex_stock}`);
-      const plan = {
-        cex_out: items.map(it => ({ article_id: it.cex_id, name: it.name, amount: it.qty })),
-        shop_in: items.map(it => ({ article_id: it.shop_id, name: it.name, amount: it.qty }))
-      };
-      await sbPatch(id, { status: "pending" }); // DRY → връщаме я чакаща
+      const items = (Array.isArray(reqRow.items) ? reqRow.items : []).filter(it => MAP[it.cex_id] && Number(it.qty) > 0);
+      if (!items.length) {
+        await sbPatch(id, { status: "failed", error: "празна заявка" });
+        res.status(200).json({ ok: false, error: "празна заявка" }); return;
+      }
+
+      // пресни данни: наличност + себестойност (цех) и партидите по артикул
+      const [cr, lots] = await Promise.all([
+        cexCall("Articles_getlistobject", { extra_properties: ["store_amount", "avg_delivery_price"] }),
+        lotsByArticle(items.map(it => it.cex_id))
+      ]);
+      const cexA = {}; for (const a of artList(cr)) cexA[Number(a.article_id)] = a;
+      const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+
+      // редовете на двата документа
+      const moveRows = [], loadRows = [], short = [];
+      for (const it of items) {
+        const a = cexA[it.cex_id] || {};
+        const have = num(a.store_amount);
+        const qty = round3(Math.min(Number(it.qty), Math.max(0, have))); // не даваме повече, отколкото има
+        if (qty < Number(it.qty)) short.push(`${it.name}: искат ${it.qty}, в цеха ${round3(have)}`);
+        if (qty <= 0) continue;
+        const alloc = allocate(qty, lots[it.cex_id]);
+        if (alloc.short > 0) short.push(`${it.name}: ${alloc.short} ${it.unit || ""} без партида в склада`);
+        for (const r of alloc.rows) {
+          moveRows.push({
+            row_id: "", article_id: String(it.cex_id), ref_num: null,
+            article_name: it.name, current_price: null,
+            amount: String(r.amount), notes: "",
+            lot_value: r.lot_value, lot_type_id: r.lot_value ? "4" : "1"
+          });
+        }
+        const cost = num(a.avg_delivery_price);
+        loadRows.push({
+          store_load_row_id: "", article_id: String(MAP[it.cex_id]),
+          original_article_name: it.name, amount: String(qty),
+          current_price: String(cost), delivery_price: String(cost),
+          delivery_total: String(Math.round(cost * qty * 100) / 100),
+          delivery_tax_id: "100", actual_tax_id: "100", tax: "0", tax_sum: "0",
+          discount: "0", lot_value: null, lot_exp_date: null, lot_type_id: "1",
+          notes: null, amount_unit: "1", is_group_art: 0
+        });
+      }
+
+      if (!moveRows.length) {
+        await sbPatch(id, { status: "pending", error: "няма нито един ред с наличност в цеха" });
+        res.status(200).json({ ok: false, error: "няма нито един ред с наличност в цеха: " + short.join(" · ") }); return;
+      }
+
+      const today = sofiaToday();
+      const movePayload = { Storemoves_save: {
+        id: null, action_type: "confirm_move",
+        values: {
+          store_move_id: null, doc_date: today + " 00:00:00",
+          description: "Прехвърляне към точка Каравелов (заявка " + id.slice(0, 8) + ")",
+          from_depot_id: String(CEX_DEPOT_FROM), to_depot_id: String(CEX_DEPOT_TO),
+          from_barsy_id: String(BID), to_barsy_id: String(BID),
+          depot_left: { barsy_id: BID, depot_id: CEX_DEPOT_FROM },
+          depot_right: { barsy_id: BID, depot_id: CEX_DEPOT_TO },
+          deal_id: null, deal_title: "", status: 0
+        }, rows: moveRows } };
+      const loadPayload = { Storeloads_save: {
+        id: null, action_type: "confirm_storeload_close",
+        values: {
+          store_load_id: null, depot_id: String(SHOP_DEPOT), doc_type_id: "1",
+          doc_date: today + " 00:00:00", doc_num: null,
+          supplier_id: String(SHOP_SUPPLIER_ID), has_tax: 0, price_mode: 0, fill_delivery_price: 0,
+          currency_id: "1", currency_rate: "1", store_load_cat_id: "1", discount: "0",
+          total_costs: 0, description: "Прехвърляне от цеха (заявка " + id.slice(0, 8) + ")"
+        }, rows: loadRows } };
+
+      if (write) {
+        // ── 1) ЦЕХ: прехвърляне Основен → Точка (документът за БАБХ) ──
+        const mv = await cexRoot(movePayload);
+        const mvSave = mv.data && mv.data.Storemoves_save;
+        const mvId = (mvSave && (mvSave.id || mvSave.store_move_id)) || null;
+        if (!mv.ok || (mv.data && mv.data.error)) {
+          await sbPatch(id, { status: "failed", error: "цех прехвърляне падна: " + String(mv.raw || "").slice(0, 300) });
+          res.status(200).json({ ok: false, step: "cex", error: String(mv.raw || "").slice(0, 400) }); return;
+        }
+        // ── 2) ТОЧКА: зареждане от „Мотамо - цех" ──
+        // Цех документът вече е издаден; при провал тук заявката остава „partial"
+        // и НЕ се трие автоматично — за БАБХ следата е по-важна от чистотата.
+        const ld = await shopRoot(loadPayload);
+        const ldSave = ld.data && ld.data.Storeloads_save;
+        const ldId = (ldSave && (ldSave.id || ldSave.store_load_id)) || null;
+        if (!ld.ok || (ld.data && ld.data.error)) {
+          await sbPatch(id, { status: "partial", cex_doc_id: mvId ? String(mvId) : "?", processed_at: new Date().toISOString(), error: "цехът е изписан, точката НЕ е заредена: " + String(ld.raw || "").slice(0, 300) });
+          res.status(200).json({ ok: false, step: "shop", cex_doc_id: mvId, error: "Цехът е изписан (прехвърляне " + (mvId || "?") + "), но зареждането в точката падна: " + String(ld.raw || "").slice(0, 300) }); return;
+        }
+        await sbPatch(id, { status: "done", cex_doc_id: mvId ? String(mvId) : null, shop_doc_id: ldId ? String(ldId) : null, processed_at: new Date().toISOString(), error: null });
+        res.status(200).json({
+          ok: true, dry: false, id, cex_doc_id: mvId, shop_doc_id: ldId, short,
+          message: "✓ Готово: цех прехвърляне " + (mvId || "") + " (" + moveRows.length + " реда) → точка зареждане " + (ldId || "") + " (" + loadRows.length + " реда)."
+            + (short.length ? " ⚠ " + short.join(" · ") : "")
+        });
+        return;
+      }
+
       res.status(200).json({
-        ok: true, dry: true, id, items_count: items.length, short,
-        message: "ПРЕГЛЕД: " + items.length + " реда готови за двата документа."
+        ok: true, dry: true, id, move_rows: moveRows.length, load_rows: loadRows.length, short,
+        message: "ПРЕГЛЕД: цех прехвърляне " + moveRows.length + " реда, точка зареждане " + loadRows.length + " реда."
           + (short.length ? " \u26a0 НЕДОСТИГ в цеха: " + short.join(" · ") : "")
-          + " Документите още НЕ се издават — чака се решение за документния модел.",
-        plan
+          + " Натисни пак с Издай документите, за да се запише.",
+        payloads: { move: movePayload, load: loadPayload }
       });
       return;
     }
