@@ -280,6 +280,15 @@ button.ghost{background:#222835;color:var(--fg)}button:disabled{opacity:.5;curso
 .sent{color:#7ee2a8;font-weight:700}.cut{color:#ffb066;font-weight:700}
 .tabs{display:flex;gap:6px}.tabs button{background:#1b2029;color:var(--dim);padding:8px 14px;font-size:14px}
 .tabs button.on{background:var(--acc);color:#fff}
+/* Докато Barsy работи (няколко секунди при много редове) целият екран се
+   заключва — иначе се натиска пак и пак. */
+#busy{position:fixed;inset:0;z-index:99;background:rgba(10,12,16,.88);display:none;
+  align-items:center;justify-content:center;flex-direction:column;gap:18px;padding:24px;text-align:center}
+#busy.on{display:flex}
+#busy .sp{width:54px;height:54px;border:5px solid #2b3240;border-top-color:var(--acc);border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#busy .tx{font-size:19px;font-weight:700}
+#busy .sub{font-size:14px;color:var(--dim);max-width:320px}
 `;
 
 function shopPage(k) {
@@ -298,6 +307,7 @@ function shopPage(k) {
   <span><button class="ghost" onclick="reload()">↻ Наличности</button>
   <button id="send" onclick="send()" disabled>Изпрати заявката</button></span>
 </div>
+<div id="busy"><div class="sp"></div><div class="tx">Изпраща се…</div><div class="sub" id="busysub">Не натискай пак.</div></div>
 <script>
 var K=${JSON.stringify(k)},items=[],DRAFT='motamo-transfer-draft';
 function $(i){return document.getElementById(i)}
@@ -318,11 +328,14 @@ function reload(){msg('Зареждам наличностите…','info');api
 function send(){var rows=[];document.querySelectorAll('input.q').forEach(function(i){var v=Number(i.value);if(v>0)rows.push({cex_id:Number(i.dataset.id),qty:v})});
 if(!rows.length){msg('Нищо не е въведено.','err');return}
 if(!confirm('Изпращам заявка с '+rows.length+' продукта към цеха. Продължавам?'))return;
-$('send').disabled=true;msg('Изпращам…','info');
-api({action:'create_request',items:rows,note:null}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');$('send').disabled=false;return}
+busy('Изпраща се…','Заявката тръгва към цеха. Не натискай пак.');
+api({action:'create_request',items:rows,note:null}).then(function(j){free();if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}
 try{localStorage.removeItem(DRAFT)}catch(e){}
 document.querySelectorAll('input.q').forEach(function(i){i.value=''});count();
-msg('\\u2713 Заявката е изпратена ('+(j.items_count||rows.length)+' продукта). Цехът я вижда.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err');$('send').disabled=false})}
+msg('\\u2713 Заявката е изпратена ('+(j.items_count||rows.length)+' продукта). Цехът я вижда.','ok')}).catch(function(e){free();msg('Мрежова грешка: '+e,'err')})}
+function busy(t,s){var b=$('busy');b.querySelector('.tx').textContent=t;$('busysub').textContent=s||'';b.className='on';
+document.querySelectorAll('button').forEach(function(x){x.disabled=true})}
+function free(){$('busy').className='';document.querySelectorAll('button').forEach(function(x){x.disabled=false});count()}
 
 /* ── История: същата лента с дати като в цеха, но тук се чете „поиска / дойде" ── */
 var ALL=[],DATES=[],SEL=null,OPEN={},TODAY='';
@@ -367,6 +380,7 @@ function cexPage(k) {
 <header><h1>Заявки от точката<small>цех · прехвърляне към Каравелов</small></h1>
 <button class="ghost" onclick="load()">↻ Опресни</button></header>
 <div class="wrap"><div id="days" class="days"></div><div id="msg" class="msg info">Зареждам…</div><div id="list"></div></div>
+<div id="busy"><div class="sp"></div><div class="tx">Обработва се…</div><div class="sub" id="busysub">Не натискай пак — Barsy записва документите.</div></div>
 <script>
 var K=${JSON.stringify(k)};
 function $(i){return document.getElementById(i)}
@@ -422,11 +436,13 @@ function run(id,write){
 var send=sendMap(id),n=0;for(var k in send)if(send[k]>0)n++;
 if(!n){msg('Всички количества са 0 — няма какво да се изпрати.','err',1);return}
 if(!confirm('ИЗДАВАМ двата документа за '+n+' продукта:\\n1) цех прехвърляне Основен → Точка\\n2) зареждане в точката\\n\\nПродължавам?'))return;
-document.querySelectorAll('button').forEach(function(b){b.disabled=true});
-msg('Издавам документите…','info',1);
+busy('Издавам документите…','Правя цех прехвърлянето и зареждането в точката. Не натискай пак.');
 api({action:'process_request',id:id,dry:false,send:send}).then(function(j){
-if(!j.ok){msg('Грешка: '+(j.error||''),'err',1);load();return}
-msg(j.message||'Готово.','ok',1);load()}).catch(function(e){msg('Мрежова грешка: '+e,'err',1);load()})}
+free();if(!j.ok){msg('Грешка: '+(j.error||''),'err',1);load();return}
+msg(j.message||'Готово.','ok',1);load()}).catch(function(e){free();msg('Мрежова грешка: '+e,'err',1);load()})}
+function busy(t,s){var b=$('busy');b.querySelector('.tx').textContent=t;$('busysub').textContent=s||'';b.className='on';
+document.querySelectorAll('button').forEach(function(x){x.disabled=true})}
+function free(){$('busy').className='';document.querySelectorAll('button').forEach(function(x){x.disabled=false})}
 function cancelReq(id){if(!confirm('Отказвам тази заявка?'))return;api({action:'cancel_request',id:id}).then(function(){load()})}
 load();
 </script></body></html>`;
