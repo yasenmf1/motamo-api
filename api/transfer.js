@@ -1028,6 +1028,47 @@ module.exports = async function handler(req, res) {
   if (!process.env.BARSY_CEX_USER || !process.env.BARSY_USER) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
 
   try {
+    // ── СКРИЙ/ПОКАЖИ АРТИКУЛ В ОНЛАЙН МЕНЮТО ────────────────────────────────
+    // Сайтът чете менюто направо от публичния Barsy, затова `is_public: 0` го
+    // маха от motamo.bg, а на касата си остава. Артикулът се ЧЕТЕ цял (54 полета)
+    // и се връща непокътнат с едно сменено поле — `Articles_save` иска пълния
+    // запис и частичен би изтрил цена, снимка или описание.
+    // DRY по подразбиране: пише само при `dry:false`.
+    if (body.action === "set_public") {
+      const ids = (Array.isArray(body.ids) ? body.ids : []).map(Number).filter(Boolean);
+      if (!ids.length) { res.status(400).json({ ok: false, error: "no_ids" }); return; }
+      const want = body.visible === true ? 1 : 0;
+      const field = body.field === "is_for_sale" ? "is_for_sale" : "is_public";
+      const write = body.dry === false;
+      const readOne = async (id) => {
+        const r = await shopRoot({ articles_edit: { id, action_type: "values", active_struct_id: "eStructForm_1", params: { bid: BID, id } } });
+        return (r.data && r.data.articles_edit) || null;
+      };
+      const out = [];
+      for (const id of ids) {
+        const a = await readOne(id);
+        if (!a || a.article_id == null) { out.push({ id, ok: false, error: "не се прочете" }); continue; }
+        const was = Number(a[field]);
+        if (was === want) { out.push({ id, name: a.article_name, ok: true, skipped: "вече е такъв" }); continue; }
+        if (!write) { out.push({ id, name: a.article_name, ok: true, dry: true, from: was, to: want }); continue; }
+        // Себестойността се смята от рецептата — върнеш ли я, Barsy отказва целия
+        // запис с „Не може да се редактира ръчно себестойност, когато артикула има
+        // рецепта". Махаме я и оставяме Barsy да си я изчисли.
+        const values = { ...a, [field]: want };
+        delete values.avg_delivery_price;
+        delete values.delivery_price;
+        const sv = await shopRoot({ Articles_save: { id, action_type: "save", values } });
+        const after = await readOne(id);
+        const now = after ? Number(after[field]) : null;
+        out.push({
+          id, name: a.article_name, ok: now === want, from: was, to: now,
+          error: now === want ? undefined : String(sv.raw || "").slice(0, 200)
+        });
+      }
+      res.status(200).json({ ok: out.every(x => x.ok), dry: !write, field, want, items: out });
+      return;
+    }
+
     // ── складовото табло (чете живо от Barsy при всяко отваряне) ──
     if (body.action === "stock_report") {
       const rep = await stockReport();
