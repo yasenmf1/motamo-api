@@ -664,7 +664,11 @@ module.exports = async function handler(req, res) {
       const loadPayload = { Storeloads_save: {
         id: null, action_type: "save_and_close",
         values: {
-          store_load_id: null, operation_type: "1", depot_id: String(SHOP_DEPOT), doc_type_id: "1",
+          // Типът е „Друго" (3), не „Фактура" (1): прехвърлянето е ВЪТРЕШНО, в
+          // една фирма, и фактура би твърдяла продажба. В списъка на Barsy няма
+          // „Приемно-предавателен протокол", затова типът е „Друго", а името на
+          // документа се носи от `doc_num` и от бележките.
+          store_load_id: null, operation_type: "1", depot_id: String(SHOP_DEPOT), doc_type_id: "3",
           doc_date: today + " 00:00:00", doc_num: null,
           supplier_id: String(SHOP_SUPPLIER_ID), has_tax: 0, price_mode: 0, fill_delivery_price: 0,
           currency_id: "1", currency_rate: "1", store_load_cat_id: "1", discount: "0",
@@ -704,8 +708,13 @@ module.exports = async function handler(req, res) {
         }
         // Връзката между двата документа — БАБХ тръгва оттук към прехвърлянето,
         // където всеки ред носи партидата си.
-        if (mvId) loadPayload.Storeloads_save.values.description =
-          "Прехвърляне от цеха · цех прехвърляне №" + mvId + " (заявка " + id.slice(0, 8) + ")";
+        if (mvId) {
+          loadPayload.Storeloads_save.values.doc_num = "ППП-" + mvId;
+          loadPayload.Storeloads_save.values.description =
+            "Приемно-предавателен протокол №ППП-" + mvId
+            + " · вътрешно прехвърляне цех → точка Каравелов (една фирма, не е продажба)"
+            + " · цех прехвърляне №" + mvId + " · заявка " + id.slice(0, 8);
+        }
         // ── 2) ТОЧКА: зареждане от „Мотамо - цех" ──
         // Цех документът вече е издаден; при провал тук заявката остава „partial"
         // и НЕ се трие автоматично — за БАБХ следата е по-важна от чистотата.
