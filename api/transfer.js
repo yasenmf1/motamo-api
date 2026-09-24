@@ -502,7 +502,8 @@ function cexPage(k) {
 ${FONTS}<style>${CSS}</style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Заявки от точката<small>цех · прехвърляне към Каравелов</small></h1>
-<button class="ghost" onclick="load()">↻ Опресни</button></header>
+<button class="ghost" id="bell" onclick="bell()">🔔<span class="hidesm"> Известия</span></button>
+<button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
 <div class="wrap"><div id="days" class="days"></div><div id="msg" class="msg info">Зареждам…</div><div id="list"></div></div>
 <div id="busy"><div class="sp"></div><div class="tx">Обработва се…</div><div class="sub" id="busysub">Не натискай пак — Barsy записва документите.</div></div>
 <script>
@@ -551,6 +552,7 @@ function sendMap(id){var m={};document.querySelectorAll('input.q[data-r="'+id+'"
 var TODAY='';
 function load(){msg('Зареждам…','info');api({action:'list_requests',days:14}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}
 ALL=j.requests||[];DATES=j.dates||[];TODAY=j.today;
+SEEN=ALL.filter(function(r){return r.status==='pending'}).map(function(r){return r.id});
 if(!DATES.length){$('days').innerHTML='';$('list').innerHTML='';msg('Няма заявки в последните 14 дни.','info');return}
 if(!SEL||!DATES.some(function(x){return x.date===SEL}))SEL=DATES[0].date;
 renderDays(TODAY);renderList();
@@ -568,7 +570,53 @@ function busy(t,s){var b=$('busy');b.querySelector('.tx').textContent=t;$('busys
 document.querySelectorAll('button').forEach(function(x){x.disabled=true})}
 function free(){$('busy').className='';document.querySelectorAll('button').forEach(function(x){x.disabled=false})}
 function cancelReq(id){if(!confirm('Отказвам тази заявка?'))return;api({action:'cancel_request',id:id}).then(function(){load()})}
-load();
+
+/* ── ИЗВЕСТИЯ ────────────────────────────────────────────────────────────────
+   Цех екранът стои отворен на таблета: сам се опреснява и щом от точката дойде
+   НОВА заявка — звъни, показва известие и мига в заглавието. Нула разходи,
+   вместо платен Viber Business (там месечният минимум е в пъти над нуждата). */
+var SEEN=null,ARMED=false,AC=null,TITLE=document.title,BLINK=null;
+function bell(){
+  // Едно натискане прави две неща: иска разрешение за известия И отключва звука
+  // (браузърът пуска аудио само след докосване от потребителя).
+  try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();AC.resume()}catch(e){}
+  if(window.Notification&&Notification.permission==='default'){Notification.requestPermission().then(mark)}else{mark()}
+  ARMED=true;try{localStorage.setItem('motamo-transfer-bell','1')}catch(e){}
+  ding();msg('Известията са включени. Екранът се опреснява сам на 20 секунди.','ok');
+}
+function mark(){var b=$('bell');if(!b)return;
+var okN=(window.Notification&&Notification.permission==='granted');
+b.innerHTML=(ARMED?'🔔':'🔕')+'<span class="hidesm"> '+(ARMED?(okN?'Включено':'Само звук'):'Известия')+'</span>'}
+function ding(){try{if(!AC)return;var t=AC.currentTime;[880,1174,1568].forEach(function(f,i){
+var o=AC.createOscillator(),g=AC.createGain();o.type='sine';o.frequency.value=f;
+g.gain.setValueAtTime(0,t+i*0.16);g.gain.linearRampToValueAtTime(0.32,t+i*0.16+0.02);
+g.gain.exponentialRampToValueAtTime(0.001,t+i*0.16+0.38);
+o.connect(g);g.connect(AC.destination);o.start(t+i*0.16);o.stop(t+i*0.16+0.4)})}catch(e){}}
+function blink(n){clearInterval(BLINK);var on=false,c=0;
+BLINK=setInterval(function(){on=!on;document.title=on?('\\u25cf '+n+' нова заявка'):TITLE;
+if(++c>40){clearInterval(BLINK);document.title=TITLE}},900);
+window.addEventListener('focus',function(){clearInterval(BLINK);document.title=TITLE},{once:true})}
+function alarm(fresh){
+  ding();blink(fresh.length);
+  var names=fresh.map(function(r){return (r.items||[]).length+' продукта'}).join(', ');
+  try{if(window.Notification&&Notification.permission==='granted')
+    new Notification('Нова заявка от точката',{body:names+' · отвори цех екрана',tag:'motamo-transfer',renotify:true})}catch(e){}
+  msg('\\u25cf Нова заявка от точката ('+names+')','ok',1);
+}
+/* Проверява тихо; при промяна пререндира и алармира само за НОВИТЕ чакащи. */
+function poll(){api({action:'list_requests',days:14}).then(function(j){if(!j.ok)return;
+var rs=j.requests||[],pend=rs.filter(function(r){return r.status==='pending'});
+var ids=pend.map(function(r){return r.id});
+if(SEEN===null){SEEN=ids;return}
+var fresh=pend.filter(function(r){return SEEN.indexOf(r.id)<0});
+var changed=(ids.join()!==SEEN.join())||rs.length!==ALL.length;
+SEEN=ids;
+if(changed){ALL=rs;DATES=j.dates||[];TODAY=j.today;
+  if(!SEL||!DATES.some(function(x){return x.date===SEL}))SEL=(DATES[0]||{}).date;
+  renderDays(TODAY);renderList()}
+if(fresh.length&&ARMED)alarm(fresh)}).catch(function(){})}
+try{if(localStorage.getItem('motamo-transfer-bell')==='1')ARMED=true}catch(e){}
+mark();load();setInterval(poll,20000);
 </script></body></html>`;
 }
 
