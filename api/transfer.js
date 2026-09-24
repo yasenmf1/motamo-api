@@ -229,6 +229,127 @@ async function sbPatch(id, patch) {
   });
 }
 
+
+// ── СКЛАДОВО ТАБЛО ───────────────────────────────────────────────────────────
+// Кой доставчик носи коя суровина — изведено от редовете на 103 фактури (юни–
+// септември 2026); взет е този, който я е носил най-често.
+const SUPPLIER = {
+  26:"FOODEX", 27:"БРАДЪРС", 28:"БРАДЪРС", 29:"БРАДЪРС", 30:"FOODEX", 31:"ФИШ",
+  36:"БРАДЪРС", 37:"БРАДЪРС", 39:"FOODEX", 40:"МЕТРО", 42:"МЕТРО", 44:"АЛЕКС",
+  49:"АЛЕКС", 50:"ФИШ", 51:"ФИШ", 52:"АЙСБОКС", 53:"ФИШ", 54:"ФИШ",
+  56:"Анонимен", 58:"АЛЕКС", 60:"ФИШ", 61:"ФИШ", 64:"ФИШ", 84:"FOODEX",
+  85:"FOODEX", 86:"ФИШ", 87:"ФИШ", 88:"FOODEX", 89:"FOODEX", 90:"FOODEX",
+  91:"FOODEX", 92:"FOODEX", 93:"FOODEX", 97:"ФИШ", 98:"ФИШ", 103:"FOODEX",
+  110:"FOODEX", 120:"МЕТРО", 121:"МЕТРО", 123:"АЙСБОКС", 125:"Анонимен", 127:"БРАДЪРС",
+  144:"АЙСБОКС", 145:"FOODEX", 146:"Анонимен", 148:"ФИШ", 149:"FOODEX", 150:"FOODEX",
+  151:"FOODEX", 152:"FOODEX", 153:"FOODEX", 154:"FOODEX", 155:"FOODEX", 156:"FOODEX",
+  157:"FOODEX", 158:"FOODEX", 159:"FOODEX", 160:"FOODEX", 161:"FOODEX", 162:"FOODEX",
+  163:"FOODEX", 164:"FOODEX", 165:"ФИШ", 166:"АЛЕКС", 167:"АЛЕКС"
+};
+
+// Графикът, по който идват.  са дните от седмицата (1=пон … 6=съб);
+// доставчик без график се чака  дни (Foodex е внос).
+const DELIVERY = {
+  "БРАДЪРС":  { n: "Брадърс",        d: [1,2,3,4,5,6] },
+  "ФИШ":      { n: "Фиш Експрес",    d: [2,5] },
+  "АЛЕКС":    { n: "Алекс Фиш",      d: [1,4] },
+  "АЙСБОКС":  { n: "Айсбокс",        d: [3] },
+  "МЕТРО":    { n: "Метро",          d: [1,2,3,4,5,6] },
+  "FOODEX":   { n: "Foodex (внос)",  d: null, lead: 21 },
+  "СИБИЕС":   { n: "Сибиес",         d: [1,2,3,4,5,6] },
+  "КЕРАНОВ":  { n: "Керанов",        d: [1,2,3,4,5,6] },
+  "ЕМИ":      { n: "Еми Фрут",       d: [1,2,3,4,5,6] },
+  "Тони":     { n: "Тони 93",        d: null, lead: 7 },
+  "Анонимен": { n: "на място",       d: [1,2,3,4,5,6] }
+};
+const CEXDATA = require("../lib/_cexdata.js");
+
+// Дни до следващата доставка от този доставчик (0 не се връща — днешният ден е
+// изпуснат). Доставчик без седмичен график чака фиксиран срок.
+function daysToDelivery(key, from) {
+  const s = DELIVERY[key];
+  if (!s) return 3;
+  if (!s.d) return s.lead || 14;
+  const dow = from.getDay();
+  for (let i = 1; i <= 7; i++) if (s.d.includes((dow + i) % 7)) return i;
+  return 7;
+}
+
+// Разходът се смята от РЕАЛНИТЕ производства, разгънати по рецепта — същият
+// метод, който одитът на 22.09 свери срещу реално изписаното. Анулираните
+// производства не влизат. Две скорости: 7 дни (какво става сега) и 28 дни
+// (стабилната база); покритието е по по-бързата, защото е по-скъпо да закъснееш.
+async function stockReport() {
+  const [ar, pr] = await Promise.all([
+    cexCall("Articles_getlistobject", { extra_properties: ["store_amount", "avg_delivery_price"] }),
+    cexCall("Storeproductions_getlist", { filters: {}, extra_properties: ["all", "details"], length: 5000, limit: 5000 })
+  ]);
+  const A = {}; for (const a of artList(ar)) A[Number(a.article_id)] = a;
+  let P = (pr && pr.data) || [];
+  if (!Array.isArray(P)) P = P && typeof P === "object" ? Object.values(P) : [];
+
+  const now = new Date();
+  const d7 = new Date(now - 7 * 864e5), d28 = new Date(now - 28 * 864e5);
+  const u7 = {}, u28 = {}; let prods = 0, annulled = 0; const days = new Set();
+  for (const p of P) {
+    if (Number(p.anulate_flag)) { annulled++; continue; }
+    const raw = String(p.doc_date || p.date || "").replace(" ", "T");
+    const dt = new Date(raw);
+    if (isNaN(dt) || dt < d28) continue;
+    prods++; days.add(raw.slice(0, 10));
+    for (const it of (p.details || [])) {
+      const rec = CEXDATA.articles[String(it.article_id)];
+      if (!rec || !rec.components) continue;
+      for (const c of rec.components) {
+        const q = Number(c.qty) * Number(it.amount);
+        if (!(q > 0)) continue;
+        u28[c.id] = (u28[c.id] || 0) + q;
+        if (dt >= d7) u7[c.id] = (u7[c.id] || 0) + q;
+      }
+    }
+  }
+
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const r3 = (n) => Math.round(n * 1000) / 1000;
+  const raw = [], made = [];
+  for (const key of Object.keys(u28)) {
+    const id = Number(key), a = A[id] || {}, rec = CEXDATA.articles[key] || {};
+    const cat = rec.cat || "";
+    const v28 = u28[id] / 28, v7 = (u7[id] || 0) / 7, v = Math.max(v28, v7);
+    const stock = num(a.store_amount), cost = num(a.avg_delivery_price);
+    const base = {
+      id, n: rec.name || a.article_name || ("#" + id), u: a.amount_type_name_short || "",
+      s: r3(stock), v7: r3(v7), v28: r3(v28), c: v > 0 ? Math.round(stock / v * 10) / 10 : null,
+      val: Math.round(stock * cost)
+    };
+    if (cat === "Суровини" || cat === "Консумативи") {
+      const k = SUPPLIER[id] || null;
+      raw.push({ ...base, sup: k ? (DELIVERY[k] || {}).n || k : "—", lead: k ? daysToDelivery(k, now) : 3 });
+    } else if (cat === "Заготовки" || cat === "МЕНЮ") {
+      made.push({ n: base.n, u: base.u, s: base.s, v: Math.round(v * 100) / 100, c: base.c });
+    }
+  }
+
+  // Наличност без НИТО грам разход за 28 дни: или наистина стои, или се движи
+  // извън рецептите. Тези, които се прехвърлят в точката, се отделят — там
+  // разходът им е реален, просто не минава през цехово производство.
+  const moving = new Set(Object.keys(u28).map(Number));
+  const toPoint = [], rest = [];
+  for (const a of artList(ar)) {
+    const id = Number(a.article_id), rec = CEXDATA.articles[String(id)] || {};
+    if (rec.cat !== "Суровини" && rec.cat !== "Консумативи") continue;
+    if (moving.has(id)) continue;
+    const stock = num(a.store_amount);
+    if (stock <= 0) continue;
+    const row = { n: rec.name || a.article_name, s: r3(stock), u: a.amount_type_name_short || "", val: Math.round(stock * num(a.avg_delivery_price)) };
+    (MAP[id] ? toPoint : rest).push(row);
+  }
+  const byVal = (x, y) => y.val - x.val;
+  toPoint.sort(byVal); rest.sort(byVal);
+
+  return { for_date: sofiaToday(), prods, annulled, work_days: days.size, raw, made, toPoint, rest };
+}
+
 // ── ПАРТИДИ ──────────────────────────────────────────────────────────────────
 // Прехвърлянето в цеха иска партида на реда, във формата „партида(количество)"
 // (виж ръчното прехвърляне №2). Партидите с наличност се четат от
@@ -620,6 +741,121 @@ mark();load();setInterval(poll,20000);
 </script></body></html>`;
 }
 
+// ── СКЛАДОВОТО ТАБЛО (жив екран) ─────────────────────────────────────────────
+// Същият разрез като еднократния отчет, но данните се четат от Barsy при всяко
+// отваряне: наличности, себестойности и производствата за последните 28 дни.
+const STOCK_CSS = `
+.sum{display:flex;flex-wrap:wrap;border-top:2px solid var(--fg);border-bottom:1px solid var(--line);margin:4px 0 8px}
+.sum div{flex:1 1 150px;padding:14px 16px 13px;border-right:1px solid var(--line)}
+.sum div:last-child{border-right:0}
+.sum b{display:block;font-family:var(--font-d);font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+.sum span{display:block;font-size:12px;color:var(--dim);margin-top:4px}
+.sum .r b{color:var(--sun)} .sum .a b{color:#C08A2E}
+.tw{overflow-x:auto;margin-top:10px}
+.tw table{min-width:700px}
+.tw td{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.tw td:first-child,.tw td.l{text-align:left}
+.tw td:first-child{white-space:normal;border-left:3px solid transparent;padding-left:11px}
+.tw th{text-align:right}.tw th:first-child,.tw th.l{text-align:left}
+tr.now td:first-child{border-left-color:var(--sun)}
+tr.soon td:first-child{border-left-color:#C08A2E}
+tr.over td:first-child{border-left-color:#7C8B99}
+.cov{font-family:var(--font-d);font-size:15px}
+tr.now .cov{color:var(--sun)} tr.soon .cov{color:#C08A2E} tr.over .cov{color:#7C8B99}
+.pl{display:inline-block;font-size:11px;font-weight:800;padding:2px 8px;border-radius:3px;white-space:nowrap}
+.pl.now{background:var(--sun);color:#fff}
+.pl.soon{color:#C08A2E;border:1px solid currentColor}
+.pl.ok{color:var(--dim)}
+.pl.over{color:#7C8B99;border:1px solid currentColor}
+.tw i{font-style:normal;color:var(--dim);font-size:12.5px}
+.sup{font-size:13px;color:var(--dim)}
+.sup em{font-style:normal;color:var(--dim);opacity:.75;font-size:12px;display:block}
+h2{font-family:var(--font-d);font-size:16px;margin:34px 0 4px}
+.nt{color:var(--dim);font-size:13.5px;margin:0 0 10px;max-width:70ch}
+.sched{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));border-top:1px solid var(--line);margin-top:8px}
+.sched div{padding:11px 14px;border-bottom:1px solid var(--line);border-right:1px solid var(--line)}
+.sched b{display:block;font-size:14px}.sched span{font-size:12.5px;color:var(--dim)}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:24px}
+ul.lst{list-style:none;margin:6px 0 0;padding:0}
+ul.lst li{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+ul.lst li b{font-variant-numeric:tabular-nums;white-space:nowrap}
+ul.lst li em{font-style:normal;color:var(--dim);font-size:12.5px;display:block}
+.meta{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);color:var(--dim);font-size:12.5px}
+`;
+
+function stockPage(k) {
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Складът на цеха</title>
+${FONTS}<style>${CSS}${STOCK_CSS}</style></head><body>
+<header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
+<h1>Складът на цеха<small>какво няма да стигне до следващата доставка</small></h1>
+<button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
+<div class="wrap">
+  <div id="msg" class="msg info">Чета от Barsy…</div>
+  <div class="sum">
+    <div class="r"><b id="sNow">–</b><span>няма да стигнат</span></div>
+    <div class="a"><b id="sSoon">–</b><span>на ръба</span></div>
+    <div><b id="sVal">–</b><span>€ в суровини</span></div>
+    <div><b id="sDead">–</b><span>€ без движение</span></div>
+  </div>
+  <h2>Суровини</h2>
+  <p class="nt">Подредени по <b>запас</b> — дните покритие минус дните до следващата доставка от този доставчик. Отрицателно значи, че ще свърши преди камионът да дойде.</p>
+  <div class="tw"><table id="tRaw"><thead><tr><th>Суровина</th><th>Стига за</th><th class="l">Доставчик</th><th class="l">Състояние</th><th>Налично</th><th>Разход / ден</th><th>Стойност</th></tr></thead><tbody></tbody></table></div>
+  <h2>Графикът на доставчиците</h2>
+  <div class="sched">
+    <div><b>Брадърс Комерс</b><span>всеки ден · крема сирене, майонеза, пиле, олио, захар, сол</span></div>
+    <div><b>Фиш Експрес</b><span>вторник и петък · риба, скариди, сурими, нори, унаги, сусам</span></div>
+    <div><b>Алекс Фиш</b><span>понеделник и четвъртък · пушена сьомга, чили сос, сусамо олио</span></div>
+    <div><b>Айсбокс</b><span>веднъж седмично · авокадо, царевица, манго</span></div>
+    <div><b>Метро</b><span>на място · зеле, чесън, уни сос</span></div>
+    <div><b>Foodex</b><span>внос, рядко · ориз, оцет, кутии, соев сос, гьози</span></div>
+  </div>
+  <h2>Заготовки и ролки</h2>
+  <p class="nt">Тези не се купуват — правят се всяка сутрин. Ниското покритие тук е нормално; показани са заради дневния разход.</p>
+  <div class="tw"><table id="tMade"><thead><tr><th>Артикул</th><th>Дни</th><th>Налично</th><th>Разход / ден</th></tr></thead><tbody></tbody></table></div>
+  <div class="cols">
+    <section><h2>Отиват в точката</h2><p class="nt">Нула разход в цеха, защото се прехвърлят на Каравелов.</p><ul class="lst" id="lPoint"></ul></section>
+    <section><h2>Без движение 28 дни</h2><p class="nt">По пари. Част са оборудване, част за преглед.</p><ul class="lst" id="lRest"></ul></section>
+  </div>
+  <p class="meta" id="meta"></p>
+</div>
+<script>
+var K=${JSON.stringify(k)};
+function $(i){return document.getElementById(i)}
+function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function fmt(n){return Number(n).toLocaleString('bg-BG')}
+function slack(r){return r.c===null?999:(r.c-r.lead)}
+function st(r){return slack(r)<0?'now':slack(r)<4?'soon':(r.c!==null&&r.c>120)?'over':'ok'}
+var LBL={now:'няма да стигне',soon:'на ръба',ok:'добре',over:'презапас'};
+function load(){msg('Чета от Barsy…','info');
+fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:K,action:'stock_report'})})
+.then(function(r){return r.json()}).then(function(d){
+if(!d.ok){msg('Грешка: '+(d.error||''),'err');return}
+var raw=(d.raw||[]).slice().sort(function(a,b){return slack(a)-slack(b)});
+$('tRaw').tBodies[0].innerHTML=raw.map(function(r){var s=st(r);
+return '<tr class="'+s+'"><td>'+esc(r.n)+'</td>'+
+'<td class="cov">'+(r.c===null?'—':r.c)+' <i>дни</i></td>'+
+'<td class="l"><span class="sup">'+esc(r.sup)+'<em>идва след '+r.lead+' дни</em></span></td>'+
+'<td class="l"><span class="pl '+s+'">'+LBL[s]+'</span></td>'+
+'<td>'+fmt(r.s)+' <i>'+esc(r.u)+'</i></td>'+
+'<td>'+fmt(r.v28)+' <i>7дн '+fmt(r.v7)+'</i></td>'+
+'<td><i>'+fmt(r.val)+' €</i></td></tr>'}).join('');
+$('tMade').tBodies[0].innerHTML=(d.made||[]).slice().sort(function(a,b){return (a.c===null?1e9:a.c)-(b.c===null?1e9:b.c)})
+.map(function(r){return '<tr><td>'+esc(r.n)+'</td><td class="cov">'+(r.c===null?'—':r.c)+'</td><td>'+fmt(r.s)+' <i>'+esc(r.u)+'</i></td><td><i>'+fmt(r.v)+'</i></td></tr>'}).join('');
+function li(a){return a.map(function(x){return '<li><span>'+esc(x.n)+'<em>'+fmt(x.s)+' '+esc(x.u)+'</em></span><b>'+fmt(x.val)+' €</b></li>'}).join('')}
+$('lPoint').innerHTML=li(d.toPoint||[]);$('lRest').innerHTML=li((d.rest||[]).slice(0,14));
+function sum(a){return a.reduce(function(s,x){return s+x.val},0)}
+$('sNow').textContent=raw.filter(function(r){return st(r)==='now'}).length;
+$('sSoon').textContent=raw.filter(function(r){return st(r)==='soon'}).length;
+$('sVal').textContent=fmt(sum(d.raw||[]));
+$('sDead').textContent=fmt(sum(d.rest||[]));
+$('meta').textContent='Живо от Barsy · '+d.for_date+' · разходът е от '+d.prods+' производства за 28 дни ('+d.work_days+' работни дни), разгънати по рецепта; '+d.annulled+' анулирани не влизат. Всички суми са в евро.';
+msg('Готово · '+raw.length+' суровини','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+load();
+</script></body></html>`;
+}
+
 // ── HANDLER ──────────────────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -628,13 +864,14 @@ module.exports = async function handler(req, res) {
   // телефона си); старите ключове също се приемат, за да работи един и същ линк.
   const viewTokens = [process.env.TRANSFER_TOKEN, process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].filter(Boolean);
 
-  if (req.method === "GET" && (q.view === "shop" || q.view === "cex")) {
+  if (req.method === "GET" && (q.view === "shop" || q.view === "cex" || q.view === "stock")) {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    if (!viewTokens.some(t => q.k === t)) {
+    const okTok = viewTokens.some(t => q.k === t) || (q.view === "stock" && process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN);
+    if (!okTok) {
       res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп — липсва или грешен ключ (?k=).</body>");
       return;
     }
-    res.status(200).send(q.view === "shop" ? shopPage(q.k) : cexPage(q.k));
+    res.status(200).send(q.view === "shop" ? shopPage(q.k) : q.view === "stock" ? stockPage(q.k) : cexPage(q.k));
     return;
   }
 
@@ -644,12 +881,19 @@ module.exports = async function handler(req, res) {
   const token = body.token != null ? body.token : q.token;
   // Четящите/диагностичните действия приемат и PEEK_TOKEN (read-only прозорецът за
   // разработка); всичко, което пише, иска пълния токен.
-  const readOnly = ["list", "list_requests", "inspect"].includes(body.action);
+  const readOnly = ["list", "list_requests", "inspect", "stock_report"].includes(body.action);
   const allowed = readOnly ? viewTokens.concat([process.env.PEEK_TOKEN].filter(Boolean)) : viewTokens;
   if (!allowed.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
   if (!process.env.BARSY_CEX_USER || !process.env.BARSY_USER) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
 
   try {
+    // ── складовото табло (чете живо от Barsy при всяко отваряне) ──
+    if (body.action === "stock_report") {
+      const rep = await stockReport();
+      res.status(200).json({ ok: true, ...rep });
+      return;
+    }
+
     // ── списъкът с 35-те продукта + наличности (за формата на точката) ──
     if (body.action === "list") {
       const items = await buildList();
