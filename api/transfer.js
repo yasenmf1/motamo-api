@@ -425,6 +425,41 @@ const LOGO = `<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg"
 const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&family=Unbounded:wght@600;700&display=swap" rel="stylesheet">`;
 
+// Слагане на началния екран: с манифеста иконата се отваря като приложение — без
+// адресна лента и без ключа пред очите. Ключът пътува в `start_url`, затова
+// манифестът се генерира за всеки ключ поотделно.
+const PWA = (k) => `<link rel="manifest" href="?view=manifest&k=${encodeURIComponent(k)}">
+<link rel="apple-touch-icon" href="https://motamo.bg/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MOTAMO Цех">
+<meta name="theme-color" content="#FF0000">`;
+
+function manifest(k, owner) {
+  return {
+    name: owner ? "MOTAMO Цех" : "Заявка към цеха",
+    short_name: owner ? "Цех" : "Заявка",
+    description: owner
+      ? "Заявки от точката, складът на цеха, производство и стокови."
+      : "Заявка към цеха — какво да донесат в точката.",
+    start_url: "/api/transfer?k=" + encodeURIComponent(k) + (owner ? "" : "&view=shop"),
+    scope: "/api/",
+    display: "standalone",
+    orientation: "portrait",
+    background_color: "#FBF8F3",
+    theme_color: "#FF0000",
+    lang: "bg",
+    icons: [
+      { src: "https://motamo.bg/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "https://motamo.bg/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" }
+    ],
+    shortcuts: owner ? [
+      { name: "Складът на цеха", url: "/api/transfer?view=stock&k=" + encodeURIComponent(k) },
+      { name: "Заявки от точката", url: "/api/transfer?view=cex&k=" + encodeURIComponent(k) }
+    ] : []
+  };
+}
+
 const CSS = `
 :root{
   --sun:#FF0000;--sun-deep:#CC0000;--wood:#C8A46A;--matcha:#2E7D53;
@@ -529,7 +564,7 @@ button:disabled{opacity:.45;cursor:default}
 function shopPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Заявка към цеха</title>
-${FONTS}<style>${CSS}${HUB_CSS}</style></head><body>
+${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Заявка към цеха<small>точка Каравелов · какво да донесат</small></h1>
 <span class="tabs"><button id="t1" class="on" onclick="tab(1)">Нова заявка</button><button id="t2" onclick="tab(2)">История</button></span></header>
@@ -621,7 +656,7 @@ reload();
 function cexPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Заявки от точката</title>
-${FONTS}<style>${CSS}${HUB_CSS}</style></head><body>
+${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Заявки от точката<small>цех · прехвърляне към Каравелов</small></h1>
 <button class="ghost" id="bell" onclick="bell()">🔔<span class="hidesm"> Известия</span></button>
@@ -785,7 +820,7 @@ const HUB_CSS = `
 function hubPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>MOTAMO цех</title>
-${FONTS}<style>${CSS}${HUB_CSS}</style></head><body>
+${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Цех и точка<small>всичко на едно място</small></h1></header>
 <div class="wrap">
@@ -863,7 +898,7 @@ ul.lst li em{font-style:normal;color:var(--dim);font-size:12.5px;display:block}
 function stockPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Складът на цеха</title>
-${FONTS}<style>${CSS}${HUB_CSS}${STOCK_CSS}</style></head><body>
+${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}${STOCK_CSS}</style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Складът на цеха<small>какво няма да стигне до следващата доставка</small></h1>
 <button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
@@ -941,6 +976,14 @@ module.exports = async function handler(req, res) {
   // `TRANSFER_TOKEN` е собственият ключ на този инструмент (точката го ползва от
   // телефона си); старите ключове също се приемат, за да работи един и същ линк.
   const viewTokens = [process.env.OWNER_TOKEN, process.env.TRANSFER_TOKEN, process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].filter(Boolean);
+
+  // Манифестът се сервира от същия адрес, за да е в обхвата на страницата.
+  if (req.method === "GET" && q.view === "manifest") {
+    if (!viewTokens.some(t => q.k === t)) { res.status(403).json({ error: "forbidden" }); return; }
+    res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
+    res.status(200).json(manifest(q.k, isOwner(q.k)));
+    return;
+  }
 
   const VIEWS = ["shop", "cex", "stock", "hub"];
   if (req.method === "GET" && (VIEWS.includes(q.view) || (!q.view && q.k))) {
