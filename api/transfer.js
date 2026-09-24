@@ -508,18 +508,24 @@ module.exports = async function handler(req, res) {
       // Точният формат, снет от Network на самия Barsy UI (24.09): складовете са
       // `depot_id_left` / `depot_id_right` (НЕ from_/to_depot_id — с тях Barsy
       // отговаря „Не е подаден склад от който да се тегли"), а `doc_date` е null
-      // (Barsy слага текущия момент). „Запиши и премести" = `confirm_save`;
-      // `confirm_move` е „Запиши и изпрати" — то е за ДРУГА фирма, не за нас.
+      // (Barsy слага текущия момент).
+      // ★ `action_type` = КЛЮЧЪТ на бутона в `global_actions`, не суфиксът след
+      // „@". Проверено на живо: „Запиши" → `save` оставя ЧЕРНОВА (наличността не
+      // мърда), „Запиши и изпрати" → `save_and_send` праща документа към другия
+      // склад, но той чака ПРИЕМАНЕ (статус 2, стоката още не е там).
+      // За нас е „Запиши и премести" = `save_and_close` — директното местене
+      // (складът позволява: `allow_direct_move:1`).
       const movePayload = { Storemoves_save: {
-        id: null, action_type: "confirm_save",
+        id: null, action_type: "save_and_close",
         values: {
           user_name: null, doc_date: null,
           description: "Прехвърляне към точка Каравелов (заявка " + id.slice(0, 8) + ")",
           deal_id: null, deal_title: "",
           depot_id_left: String(CEX_DEPOT_FROM), depot_id_right: String(CEX_DEPOT_TO)
         }, rows: moveRows } };
+      // Същата логика в точката: „Запиши и вкарай в склада" = `save_and_close`.
       const loadPayload = { Storeloads_save: {
-        id: null, action_type: "confirm_storeload_close",
+        id: null, action_type: "save_and_close",
         values: {
           store_load_id: null, depot_id: String(SHOP_DEPOT), doc_type_id: "1",
           doc_date: today + " 00:00:00", doc_num: null,
@@ -532,7 +538,29 @@ module.exports = async function handler(req, res) {
         // ── 1) ЦЕХ: прехвърляне Основен → Точка (документът за БАБХ) ──
         const mv = await cexRoot(movePayload);
         const mvSave = mv.data && mv.data.Storemoves_save;
-        const mvId = (mvSave && (mvSave.id || mvSave.store_move_id)) || null;
+        let mvId = (mvSave && (mvSave.id || mvSave.store_move_id)) || null;
+        // Отговорът на Barsy не винаги носи id → вземаме най-новия документ.
+        // Четем и СТАТУСА: 0 = чернова, 2 = изпратено (чака приемане, стоката
+        // още не е преместена), 1 = приключено. Само 1 е истински успех — иначе
+        // инструментът щеше да рапортува „готово" на документ, който нищо не е
+        // преместил (точно това се случи на първия опит).
+        let mvStatus = null;
+        try {
+          const lst = await cexCall("Storemoves_getlist", { filters: {} });
+          const rows = Array.isArray(lst.data) ? lst.data : [];
+          const last = rows.map(x => Number(x.store_move_id)).filter(Boolean).sort((a, b) => b - a)[0];
+          if (last && !mvId) mvId = last;
+          if (mvId) {
+            const g = await cexCall("Storemoves_get", { id: mvId, store_move_id: mvId });
+            mvStatus = g.data && g.data.status;
+          }
+        } catch (e) {}
+        if (mv.ok && Number(mvStatus) !== 1) {
+          const what = Number(mvStatus) === 2 ? "остана ИЗПРАТЕНО (чака приемане в склад Точка)" : "остана ЧЕРНОВА";
+          await sbPatch(id, { status: "failed", cex_doc_id: mvId ? String(mvId) : null, error: "цех прехвърляне №" + mvId + " " + what + " — стоката НЕ е преместена" });
+          res.status(200).json({ ok: false, step: "cex", cex_doc_id: mvId, error: "Цех прехвърляне №" + mvId + " " + what + ". Стоката НЕ е преместена и точката НЕ е заредена." });
+          return;
+        }
         if (!mv.ok || (mv.data && mv.data.error)) {
           await sbPatch(id, { status: "failed", error: "цех прехвърляне падна: " + String(mv.raw || "").slice(0, 300) });
           res.status(200).json({ ok: false, step: "cex", error: String(mv.raw || "").slice(0, 400) }); return;
@@ -542,7 +570,19 @@ module.exports = async function handler(req, res) {
         // и НЕ се трие автоматично — за БАБХ следата е по-важна от чистотата.
         const ld = await shopRoot(loadPayload);
         const ldSave = ld.data && ld.data.Storeloads_save;
-        const ldId = (ldSave && (ldSave.id || ldSave.store_load_id)) || null;
+        let ldId = (ldSave && (ldSave.id || ldSave.store_load_id)) || null;
+        let ldStatus = null;
+        try {
+          const lst = await shopCall("Storeloads_getlist", { length: 5, order_by: "store_load_id desc", extra_properties: ["all"] });
+          const rows = Array.isArray(lst.data) ? lst.data : [];
+          const last = rows.sort((a, b) => Number(b.store_load_id) - Number(a.store_load_id))[0];
+          if (last) { if (!ldId) ldId = last.store_load_id; if (Number(last.store_load_id) === Number(ldId)) ldStatus = last.status; }
+        } catch (e) {}
+        if (ld.ok && Number(ldStatus) !== 1) {
+          await sbPatch(id, { status: "partial", cex_doc_id: mvId ? String(mvId) : null, shop_doc_id: ldId ? String(ldId) : null, processed_at: new Date().toISOString(), error: "точка зареждане №" + ldId + " остана ЧЕРНОВА — наличността в точката НЕ е вдигната" });
+          res.status(200).json({ ok: false, step: "shop", cex_doc_id: mvId, shop_doc_id: ldId, error: "Цехът е преместен (№" + mvId + "), но зареждане №" + ldId + " в точката остана ЧЕРНОВА — наличността там НЕ е вдигната." });
+          return;
+        }
         if (!ld.ok || (ld.data && ld.data.error)) {
           await sbPatch(id, { status: "partial", cex_doc_id: mvId ? String(mvId) : "?", processed_at: new Date().toISOString(), error: "цехът е изписан, точката НЕ е заредена: " + String(ld.raw || "").slice(0, 300) });
           res.status(200).json({ ok: false, step: "shop", cex_doc_id: mvId, error: "Цехът е изписан (прехвърляне " + (mvId || "?") + "), но зареждането в точката падна: " + String(ld.raw || "").slice(0, 300) }); return;
