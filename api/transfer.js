@@ -63,6 +63,40 @@ function barsyCall(base, action, params, user, pass) {
 const cexCall = (a, p) => barsyCall(CEX_API, a, p, process.env.BARSY_CEX_USER, process.env.BARSY_CEX_PASS);
 const shopCall = (a, p) => barsyCall(SHOP_API, a, p, process.env.BARSY_USER, process.env.BARSY_PASS);
 
+// Недокументираните записващи методи на Barsy се пращат на /endpoints/json (БЕЗ
+// действие в пътя), с тяло обвито под ключа на метода — както Storeproductions_save
+// и Invoices_create в `cex-plan.js`. Същият канал зарежда и ФОРМИТЕ (…_edit), от
+// които се четат очакваните полета.
+function callRoot(base, bodyObj, user, pass) {
+  const auth = Buffer.from(`${user}:${pass}`).toString("base64");
+  return withTimeout(async (signal) => {
+    const r = await fetch(`${base}/endpoints/json?bid=${BID}`, {
+      method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify(bodyObj || {}), signal
+    });
+    const text = await r.text(); let d = null; try { d = JSON.parse(text); } catch (e) {}
+    return { ok: r.ok, status: r.status, data: d, raw: text };
+  });
+}
+const cexRoot = (b) => callRoot(CEX_API, b, process.env.BARSY_CEX_USER, process.env.BARSY_CEX_PASS);
+const shopRoot = (b) => callRoot(SHOP_API, b, process.env.BARSY_USER, process.env.BARSY_PASS);
+
+// Обхожда формата и събира полетата (name→value); обект-стойност се разгъва.
+function formValues(node) {
+  const values = {};
+  (function walk(n) {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (typeof n.name === "string" && Object.prototype.hasOwnProperty.call(n, "value")) {
+      const v = n.value;
+      if (v && typeof v === "object" && !Array.isArray(v)) Object.assign(values, v);
+      else if (!(n.name in values) || values[n.name] == null) values[n.name] = v;
+    }
+    for (const k in n) if (k !== "data_source" && k !== "elements") walk(n[k]);
+  })(node);
+  return values;
+}
+
 function sofiaToday() {
   const f = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Sofia", year: "numeric", month: "2-digit", day: "2-digit" });
   return f.format(new Date());
@@ -250,7 +284,9 @@ load();
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   const q = (req.query && typeof req.query === "object") ? req.query : {};
-  const viewTokens = [process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].filter(Boolean);
+  // `TRANSFER_TOKEN` е собственият ключ на този инструмент (точката го ползва от
+  // телефона си); старите ключове също се приемат, за да работи един и същ линк.
+  const viewTokens = [process.env.TRANSFER_TOKEN, process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].filter(Boolean);
 
   if (req.method === "GET" && (q.view === "shop" || q.view === "cex")) {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -266,7 +302,11 @@ module.exports = async function handler(req, res) {
   if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = null; } }
   if (!body || typeof body !== "object") body = {};
   const token = body.token != null ? body.token : q.token;
-  if (!viewTokens.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+  // Четящите/диагностичните действия приемат и PEEK_TOKEN (read-only прозорецът за
+  // разработка); всичко, което пише, иска пълния токен.
+  const readOnly = ["list", "list_requests", "inspect"].includes(body.action);
+  const allowed = readOnly ? viewTokens.concat([process.env.PEEK_TOKEN].filter(Boolean)) : viewTokens;
+  if (!allowed.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
   if (!process.env.BARSY_CEX_USER || !process.env.BARSY_USER) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
 
   try {
@@ -274,6 +314,33 @@ module.exports = async function handler(req, res) {
     if (body.action === "list") {
       const items = await buildList();
       res.status(200).json({ ok: true, for_date: sofiaToday(), items: items.map(x => ({ ...x, zag: ZAG.includes(x.cex_id) })) });
+      return;
+    }
+
+    // ── ДИАГНОСТИКА (само четене): зарежда формата на записващ метод, за да се
+    // видят полетата, които Barsy очаква. `what`: "move" = прехвърляне в цеха
+    // (Основен→Точка), "load" = зареждане в точката. Нищо не се записва.
+    if (body.action === "inspect") {
+      const what = body.what || "move";
+      const call = what === "load" ? shopRoot : cexRoot;
+      const payload = body.payload || (what === "load"
+        ? { Storeloads_edit: { params: { bid: BID } } }
+        : { Storemoves_edit: { params: { bid: BID } } });
+      const r = await call(payload);
+      const inner = r.data && (r.data.Storemoves_edit || r.data.Storeloads_edit || r.data);
+      const actions = [];
+      (function w(n) {
+        if (!n || typeof n !== "object") return;
+        if (Array.isArray(n)) return n.forEach(w);
+        if (n.type === "action" && n.target) actions.push({ title: n.title || null, target: n.target });
+        for (const k in n) w(n[k]);
+      })(inner);
+      res.status(200).json({
+        ok: r.ok, what, status: r.status,
+        values: inner ? formValues(inner) : null,
+        actions: actions.slice(0, 20),
+        raw: String(r.raw || "").slice(0, Number(body.raw_chars) || 1500)
+      });
       return;
     }
 
