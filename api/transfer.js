@@ -786,7 +786,13 @@ mark();load();setInterval(poll,20000);
 const isOwner = (k) => !!(process.env.OWNER_TOKEN && k === process.env.OWNER_TOKEN)
   || [process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET, process.env.CEX_VIEW_TOKEN]
     .some(t => t && k === t);
-const cexToolKey = () => process.env.CEX_VIEW_TOKEN || process.env.RECONCILE_TOKEN || process.env.PREVIEW_TOKEN || "";
+// ⚠ Редът тук има значение. Цех инструментът дели токените на ЧЕТЯЩИ и ПИШЕЩИ:
+// `CEX_VIEW_TOKEN` отваря страницата и смята, но „② Артикули" (`produce_plan`),
+// „③ Сметки" и „④ Стокова" ПИШАТ и искат силен ключ — с четящия връщат
+// „Грешка: forbidden". Затова плочката носи силния. Вижда я само собственикът
+// (`isOwner`), така че до телефона в точката не стига.
+const cexToolKey = () => process.env.RECONCILE_TOKEN || process.env.PAY_HMAC_SECRET
+  || process.env.PREVIEW_TOKEN || process.env.CEX_VIEW_TOKEN || "";
 
 const NAV = [
   { v: "shop", t: "Заявка към цеха", own: false },
