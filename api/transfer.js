@@ -47,6 +47,15 @@ const MAP = {
   // 10 мл (145 „Соев сос 10 мл" → 141 „Соев сос САШЕ", беше на −1162).
   145: 141
 };
+// ★ ОПАКОВКИ. Някои артикули се водят в кг/литри, но в точката се БРОЯТ на
+// опаковки (Маки Еби скаридите идват в тарелки по 180 г). Момичетата пишат
+// „2 тарелки", а не „0.36 кг" — полето е в опаковки, а в заявката и в
+// документите влиза винаги базовата единица, за да не се разминава със склада.
+// `size` = колко базови единици е ЕДНА опаковка.
+const PACK = {
+  51: { name: "тарелка", plural: "тарелки", size: 0.18 } // Бланширани скариди Маки Еби
+};
+
 // Ред на показване в листа — заготовките първо, както собственикът мисли за тях.
 const ZAG = [59, 67, 68, 65, 131];
 const ORDERED = ZAG.concat(Object.keys(MAP).map(Number).filter(id => !ZAG.includes(id)));
@@ -134,6 +143,7 @@ async function buildList() {
       unit: c.amount_type_name_short || s.amount_type_name_short || "бр",
       shop_stock: num(s.store_amount),
       cex_stock: num(c.store_amount),
+      pack: PACK[id] || null,
       missing: !cex[id] ? "цех" : (!shop[sid] ? "точка" : null)
     };
   });
@@ -289,6 +299,9 @@ button.ghost{background:#222835;color:var(--fg)}button:disabled{opacity:.5;curso
 @keyframes spin{to{transform:rotate(360deg)}}
 #busy .tx{font-size:19px;font-weight:700}
 #busy .sub{font-size:14px;color:var(--dim);max-width:320px}
+.pk{display:inline-block;background:#232a36;color:#a8c4ff;border-radius:6px;padding:1px 6px;font-size:12px;margin-left:6px;white-space:nowrap}
+.conv{font-size:12px;color:var(--dim);margin-top:3px;height:15px}
+.sub2{display:block;font-size:12px;color:var(--dim);font-weight:400}
 `;
 
 function shopPage(k) {
@@ -315,17 +328,25 @@ function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
 function draft(){try{return JSON.parse(localStorage.getItem(DRAFT)||'{}')}catch(e){return{}}}
-function saveDraft(){var d={};document.querySelectorAll('input.q').forEach(function(i){if(i.value)d[i.dataset.id]=i.value});try{localStorage.setItem(DRAFT,JSON.stringify(d))}catch(e){}count()}
+function saveDraft(){var d={};document.querySelectorAll('input.q').forEach(function(i){if(i.value)d[i.dataset.id]=i.value});try{localStorage.setItem(DRAFT,JSON.stringify(d))}catch(e){}conv();count()}
 function count(){var n=0;document.querySelectorAll('input.q').forEach(function(i){if(Number(i.value)>0)n++});$('cnt').textContent=n?(n+' продукта в заявката'):'нищо не е въведено';$('send').disabled=!n}
 function render(){var d=draft(),h='<tr><th>Продукт</th><th class="num">Имам</th><th class="num">Искам</th></tr>',lastZ=null;
 items.forEach(function(it){var z=it.zag?'Заготовки':'Суровини и други';if(z!==lastZ){lastZ=z;h+='<tr><td colspan="3" class="grp">'+z+'</td></tr>'}
-var st=it.shop_stock,cls=st<0?'neg':(st===0?'zero':'');
-h+='<tr><td>'+esc(it.name)+(it.missing?' <span style="color:var(--warn)">\\u26a0 липсва в '+esc(it.missing)+'</span>':'')+'</td>'+
-'<td class="num '+cls+'">'+(Math.round(st*1000)/1000)+' '+esc(it.unit)+'</td>'+
-'<td class="num"><input class="q" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" value="'+(d[it.cex_id]||'')+'" oninput="saveDraft()"></td></tr>'});
-$('tbl').innerHTML=h;count()}
+var st=it.shop_stock,cls=st<0?'neg':(st===0?'zero':''),p=it.pack;
+var have=p?(Math.round(st/p.size*10)/10+' '+p.plural):(Math.round(st*1000)/1000+' '+esc(it.unit));
+h+='<tr><td>'+esc(it.name)+(p?' <span class="pk">по '+esc(p.name)+' '+(p.size*1000)+' г</span>':'')+(it.missing?' <span style="color:var(--warn)">\\u26a0 липсва в '+esc(it.missing)+'</span>':'')+'</td>'+
+'<td class="num '+cls+'">'+have+'</td>'+
+'<td class="num"><input class="q" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-size="'+(p?p.size:'')+'" value="'+(d[it.cex_id]||'')+'" oninput="saveDraft()">'+
+(p?'<div class="conv" id="cv'+it.cex_id+'"></div>':'')+'</td></tr>'});
+$('tbl').innerHTML=h;conv();count()}
+/* Полето е в опаковки — под него се изписва колко прави в кг, за да няма съмнение. */
+function conv(){items.forEach(function(it){if(!it.pack)return;var i=document.querySelector('input.q[data-id="'+it.cex_id+'"]'),e=$('cv'+it.cex_id);if(!i||!e)return;
+var n=Number(i.value);e.textContent=n>0?('= '+(Math.round(n*it.pack.size*1000)/1000)+' '+it.unit):''})}
 function reload(){msg('Зареждам наличностите…','info');api({action:'list'}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}items=j.items||[];render();msg('Наличности от точката \\u00b7 '+j.for_date+'. Червено = на минус. Въведи колко искаш и натисни „Изпрати".','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
-function send(){var rows=[];document.querySelectorAll('input.q').forEach(function(i){var v=Number(i.value);if(v>0)rows.push({cex_id:Number(i.dataset.id),qty:v})});
+/* Полето може да е в опаковки — тук се превръща в базовата единица, защото
+   заявката и документите работят само с нея. */
+function send(){var rows=[];document.querySelectorAll('input.q').forEach(function(i){var v=Number(i.value);if(!(v>0))return;
+var sz=Number(i.dataset.size);rows.push({cex_id:Number(i.dataset.id),qty:sz>0?Math.round(v*sz*1000)/1000:v})});
 if(!rows.length){msg('Нищо не е въведено.','err');return}
 if(!confirm('Изпращам заявка с '+rows.length+' продукта към цеха. Продължавам?'))return;
 busy('Изпраща се…','Заявката тръгва към цеха. Не натискай пак.');
@@ -355,8 +376,8 @@ h+='<div class="card'+(op?' open':'')+'"><div class="head" onclick="tg(&quot;'+e
 '<span><span class="t">'+hhmm(r.created_at)+'</span> <span class="s">'+it.length+' продукта'+(r.parent_id?' · остатък':'')+'</span></span>'+
 '<span><span class="pill '+esc(r.status)+'">'+esc(LBL[r.status]||r.status)+'</span> <span class="caret">'+(op?'▲':'▼')+'</span></span></div>'+
 '<div class="body"><table><tr><th>Продукт</th><th class="num">Поиска</th><th class="num">Дойде</th></tr>';
-it.forEach(function(x){var s=x.sent;
-h+='<tr><td>'+esc(x.name)+'</td><td class="num">'+n3(x.qty)+' '+esc(x.unit||'')+'</td>'+
+it.forEach(function(x){var s=x.sent,p=x.pack;
+h+='<tr><td>'+esc(x.name)+(p?'<span class="sub2">'+n3(p.count)+' '+esc(p.plural)+'</span>':'')+'</td><td class="num">'+n3(x.qty)+' '+esc(x.unit||'')+'</td>'+
 '<td class="num '+(s==null?'':(Number(s)<Number(x.qty)?'cut':'sent'))+'">'+(s==null?'—':n3(s))+'</td></tr>'});
 h+='</table>';
 if(r.status==='done')h+='<div class="docs">зареждане №'+esc(r.shop_doc_id||'?')+'</div>';
@@ -409,8 +430,8 @@ h+='<div class="card'+(op?' open':'')+'"><div class="head" onclick="tog(&quot;'+
 var edit=(r.status==='pending');
 h+='<table><tr><th>Продукт</th><th class="num">Искат</th><th class="num">'+(edit?'Изпращам':'Тръгна')+'</th><th class="num">В цеха</th></tr>';
 it.forEach(function(x){
-var stock=x.cex_stock,low=(stock!=null&&stock<x.qty);
-h+='<tr><td>'+esc(x.name)+'</td><td class="num">'+n3(x.qty)+' '+esc(x.unit||'')+'</td>';
+var stock=x.cex_stock,low=(stock!=null&&stock<x.qty),p=x.pack;
+h+='<tr><td>'+esc(x.name)+(p?'<span class="sub2">'+n3(p.count)+' '+esc(p.plural)+' по '+(p.size*1000)+' г</span>':'')+'</td><td class="num">'+n3(x.qty)+' '+esc(x.unit||'')+'</td>';
 if(edit){h+='<td class="num"><input class="q" type="number" min="0" step="any" inputmode="decimal" data-r="'+esc(r.id)+'" data-id="'+x.cex_id+'" data-max="'+(stock==null?'':stock)+'" value="'+n3(Math.min(x.qty,stock==null?x.qty:Math.max(0,stock)))+'" oninput="chk(this)"></td>'}
 else{var s=x.sent;h+='<td class="num '+(s==null?'':(Number(s)<Number(x.qty)?'cut':'sent'))+'">'+(s==null?'—':n3(s))+'</td>'}
 h+='<td class="num'+(low?' neg':'')+'">'+(stock==null?'—':n3(stock))+'</td></tr>'});
@@ -524,11 +545,18 @@ module.exports = async function handler(req, res) {
       if (!want.size) { res.status(200).json({ ok: false, error: "празна заявка — няма нито едно количество > 0" }); return; }
       const list = await buildList();
       const byId = {}; for (const x of list) byId[x.cex_id] = x;
-      const items = [...want.entries()].map(([id, qty]) => ({
-        cex_id: id, shop_id: MAP[id], name: (byId[id] || {}).name || ("#" + id),
-        unit: (byId[id] || {}).unit || "бр", qty,
-        shop_stock: (byId[id] || {}).shop_stock, cex_stock: (byId[id] || {}).cex_stock
-      }));
+      // `qty` е ВИНАГИ в базовата единица (кг/л/бр) — така документите и складът
+      // не се разминават. При артикул с опаковка пазим и колко опаковки е поискала
+      // точката, за да се покаже пак като „2 тарелки".
+      const items = [...want.entries()].map(([id, qty]) => {
+        const p = PACK[id];
+        return {
+          cex_id: id, shop_id: MAP[id], name: (byId[id] || {}).name || ("#" + id),
+          unit: (byId[id] || {}).unit || "бр", qty,
+          pack: p ? { name: p.name, plural: p.plural, size: p.size, count: Math.round((qty / p.size) * 1000) / 1000 } : null,
+          shop_stock: (byId[id] || {}).shop_stock, cex_stock: (byId[id] || {}).cex_stock
+        };
+      });
       const ins = await sbInsert({ for_date: sofiaToday(), status: "pending", items, note: body.note || null });
       if (!ins.ok) { res.status(200).json({ ok: false, error: "не се записа: " + ins.raw }); return; }
       res.status(200).json({ ok: true, id: ins.row && ins.row.id, items_count: items.length });
