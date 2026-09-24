@@ -215,11 +215,12 @@ async function lotsByArticle(ids) {
 // Разпределя исканото количество по партиди (FIFO) → по ЕДИН ред на партида,
 // както прави и ръчното прехвърляне. Без партиди → един ред с празно lot_value.
 //
-// ⚠ Количеството в „партида(количество)" трябва да е ТОЧНО. Barsy сверява низа
-// срещу наличността на партидата: остатък 0.0095 закръглен на 0.01 дава
-// „За артикул „Олио" не съществува партида „04032026(0.01)"". Затова когато
-// изчерпваме партида, вземаме `amount_real` както го е дал Barsy, без да го
-// пипаме, и форматираме без закръгляне и без излишни нули.
+// ⚠ `lot_value` при ЗАПИС е САМО номерът на партидата („04032026"). Видът
+// „партида(количество)", с който Barsy ВРЪЩА реда при четене, е форматиране за
+// екрана — подаден обратно при запис дава „не съществува партида
+// „04032026(0.0095)"" (пада и с точната стойност, значи не е закръгляване).
+// Количеството си живее в `amount`. Полето е autocomplete към
+// `Lots_GetListAvailability` с field_key `lot_value` — пак самият номер.
 function allocate(qty, lots) {
   if (!lots || !lots.length) return { rows: [{ lot_value: "", amount: fmtQty(qty) }], short: 0 };
   const rows = []; let left = Number(qty);
@@ -228,7 +229,7 @@ function allocate(qty, lots) {
     const real = Number(l.amount_real);
     const take = left >= real ? real : left; // цялата партида → точната ѝ стойност
     if (take <= 1e-9) continue;
-    rows.push({ lot_value: `${l.lot_value}(${fmtQty(take)})`, amount: fmtQty(take), lot_exp: l.lot_exp_date || null });
+    rows.push({ lot_value: String(l.lot_value), amount: fmtQty(take), lot_exp: l.lot_exp_date || null });
     left = Number((left - take).toFixed(9));
   }
   return { rows, short: round3(Math.max(0, left)) };
