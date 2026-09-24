@@ -358,7 +358,10 @@ function cexPage(k) {
 <script>
 var K=${JSON.stringify(k)};
 function $(i){return document.getElementById(i)}
-function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
+/* Съобщението е най-горе, а бутоните са долу в разгънатата карта — без това
+   скролване изглежда, че натискаш и „нищо не става". */
+function msg(t,c,scroll){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t;
+if(scroll){try{m.scrollIntoView({behavior:'smooth',block:'center'})}catch(e){window.scrollTo(0,0)}}}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
 var ALL=[],DATES=[],SEL=null,OPEN={};
@@ -388,7 +391,7 @@ h+='<td class="num'+(low?' neg':'')+'">'+(stock==null?'—':n3(stock))+'</td></t
 h+='</table>';
 if(r.error)h+='<div class="msg err" style="display:block">'+esc(r.error)+'</div>';
 if(r.status==='done')h+='<div class="docs">цех прехвърляне №'+esc(r.cex_doc_id||'?')+' · точка зареждане №'+esc(r.shop_doc_id||'?')+'</div>';
-if(edit)h+='<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Издай документите</button><button class="ghost" onclick="run(&quot;'+esc(r.id)+'&quot;,false)">Преглед</button><button class="ghost" onclick="cancelReq(&quot;'+esc(r.id)+'&quot;)">Откажи</button></div>';
+if(edit)h+='<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Издай документите</button><button class="ghost" onclick="cancelReq(&quot;'+esc(r.id)+'&quot;)">Откажи</button></div>';
 if(r.status==='partial')h+='<div style="margin-top:12px"><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Опитай пак точката</button></div>';
 h+='</div></div>'});
 $('list').innerHTML=h}
@@ -405,13 +408,13 @@ var p=ALL.filter(function(r){return r.status==='pending'}).length;
 msg(p?(p+' чакащи заявки.'):'Няма чакащи заявки.',p?'ok':'info')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function run(id,write){
 var send=sendMap(id),n=0;for(var k in send)if(send[k]>0)n++;
-if(write){if(!n){msg('Всички количества са 0 — няма какво да се изпрати.','err');return}
-if(!confirm('ИЗДАВАМ двата документа за '+n+' продукта:\\n1) цех прехвърляне Основен → Точка\\n2) зареждане в точката\\n\\nПродължавам?'))return}
+if(!n){msg('Всички количества са 0 — няма какво да се изпрати.','err',1);return}
+if(!confirm('ИЗДАВАМ двата документа за '+n+' продукта:\\n1) цех прехвърляне Основен → Точка\\n2) зареждане в точката\\n\\nПродължавам?'))return;
 document.querySelectorAll('button').forEach(function(b){b.disabled=true});
-msg(write?'Издавам документите…':'Сглобявам (преглед)…','info');
-api({action:'process_request',id:id,dry:write?false:true,send:send}).then(function(j){
-if(!j.ok){msg('Грешка: '+(j.error||''),'err');load();return}
-msg(j.message||'Готово.',j.dry?'info':'ok');load()}).catch(function(e){msg('Мрежова грешка: '+e,'err');load()})}
+msg('Издавам документите…','info',1);
+api({action:'process_request',id:id,dry:false,send:send}).then(function(j){
+if(!j.ok){msg('Грешка: '+(j.error||''),'err',1);load();return}
+msg(j.message||'Готово.','ok',1);load()}).catch(function(e){msg('Мрежова грешка: '+e,'err',1);load()})}
 function cancelReq(id){if(!confirm('Отказвам тази заявка?'))return;api({action:'cancel_request',id:id}).then(function(){load()})}
 load();
 </script></body></html>`;
