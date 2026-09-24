@@ -214,20 +214,31 @@ async function lotsByArticle(ids) {
 
 // Разпределя исканото количество по партиди (FIFO) → по ЕДИН ред на партида,
 // както прави и ръчното прехвърляне. Без партиди → един ред с празно lot_value.
+//
+// ⚠ Количеството в „партида(количество)" трябва да е ТОЧНО. Barsy сверява низа
+// срещу наличността на партидата: остатък 0.0095 закръглен на 0.01 дава
+// „За артикул „Олио" не съществува партида „04032026(0.01)"". Затова когато
+// изчерпваме партида, вземаме `amount_real` както го е дал Barsy, без да го
+// пипаме, и форматираме без закръгляне и без излишни нули.
 function allocate(qty, lots) {
-  if (!lots || !lots.length) return { rows: [{ lot_value: "", amount: qty }], short: 0 };
-  const rows = []; let left = qty;
+  if (!lots || !lots.length) return { rows: [{ lot_value: "", amount: fmtQty(qty) }], short: 0 };
+  const rows = []; let left = Number(qty);
   for (const l of lots) {
-    if (left <= 0) break;
-    const take = Math.min(left, Number(l.amount_real));
-    if (take <= 0) continue;
-    // Barsy иска „партида(количество)" в полето
-    rows.push({ lot_value: `${l.lot_value}(${round3(take)})`, amount: round3(take), lot_exp: l.lot_exp_date || null });
-    left -= take;
+    if (left <= 1e-9) break;
+    const real = Number(l.amount_real);
+    const take = left >= real ? real : left; // цялата партида → точната ѝ стойност
+    if (take <= 1e-9) continue;
+    rows.push({ lot_value: `${l.lot_value}(${fmtQty(take)})`, amount: fmtQty(take), lot_exp: l.lot_exp_date || null });
+    left = Number((left - take).toFixed(9));
   }
   return { rows, short: round3(Math.max(0, left)) };
 }
 const round3 = (n) => Math.round(Number(n) * 1000) / 1000;
+// Число за Barsy: без научна нотация, без влачещи нули, без закръгляне нагоре.
+function fmtQty(n) {
+  const s = Number(n).toFixed(9);
+  return s.indexOf(".") < 0 ? s : s.replace(/0+$/, "").replace(/\.$/, "");
+}
 
 // ── СТРАНИЦИ ─────────────────────────────────────────────────────────────────
 const CSS = `
@@ -582,7 +593,7 @@ module.exports = async function handler(req, res) {
           // article_id е ЧИСЛО, без current_price/ref_num/lot_type_id.
           moveRows.push({
             row_id: "", article_id: it.cex_id, article_name: it.name,
-            amount: String(r.amount), notes: "", lot_value: r.lot_value
+            amount: r.amount, notes: "", lot_value: r.lot_value
           });
         }
         const cost = num(a.avg_delivery_price);
