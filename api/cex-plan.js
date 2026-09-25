@@ -138,9 +138,11 @@ async function createProduction(rows, opts, user, pass) {
 // НЕТО произведено под дадена партида, {article_id: кол} — по всички производства
 // (анулиращите документи са с минус и гасят оригинала). Пази ① от повторно производство
 // на вече произведеното за деня (натиснато два пъти = двойни количества, 10.09).
+function markRel(o, ok) { Object.defineProperty(o, "_ok", { value: !!ok, enumerable: false }); return o; }
 async function producedUnderLot(lot, user, pass) {
   const out = {};
-  if (!lot) return out;
+  if (!lot) return markRel(out, false);
+  let rel = true;
   // Storeproductions_getlist НЕ връща партидата по ред → четем справката за партиди:
   // редовете тип „AP" (производство, ref_id = № на производството) носят article_id + amount
   // (анулиращият документ е с минус). Страници по 50.
@@ -153,12 +155,12 @@ async function producedUnderLot(lot, user, pass) {
       } catch (e) {}
       if (d === null) await new Promise(res => setTimeout(res, 200 * (t + 1)));
     }
-    if (!d) break;
+    if (!d) { rel = false; break; }   // ★ S23: неуспяла страница = справката НЕ е надеждна
     const rows = Array.isArray(d.rows) ? d.rows : [];
     for (const x of rows) { if (x.operation_ref_type === "AP" && x.article_id != null) out[String(x.article_id)] = (out[String(x.article_id)] || 0) + (Number(x.amount) || 0); }
     if (rows.length < 50) break;
   }
-  return out;
+  return markRel(out, rel);
 }
 // Паралелно с ограничение (за да не надхвърлим лимита при много заявки).
 async function mapLimit(items, limit, fn) {
@@ -2001,14 +2003,11 @@ module.exports = async function handler(req, res) {
     try { sm = await stockMap(user, pass); } catch (e) { sm = {}; }
     const rawStock = id => { const q = sm[String(id)]; return (q == null || isNaN(q)) ? 0 : q; };
     const shortfall = (need, id) => Math.max(0, Number(need) - rawStock(id));
-    // ★ S20 ден3 (GPT-потвърдено) — ЧИСТА ПАРТИДА НА ДЕН. Свободното под партида НЕ се чете
-    // (справката дава само производство; резервациите от отворени сметки са скрити; грешката
-    // дава БРУТНОТО, не свободното). Затова НЕ вадим idempotency: ① прави ПЪЛНАТА поръчка под
-    // партидата (dayPlan с underL={} → продаваните пълно; заготовки/компоненти нетно спрямо
-    // общото). Така при ЧИСТА партида: производство = точно дневната нужда → сметките теглят
-    // точно → нула излишък, нула провал. Пазим от ДВОЙНО производство с „мръсна партида" гард.
-    let underLot = {};
-    if (lot) { try { underLot = await producedUnderLot(lot, user, pass); } catch (e) { underLot = {}; } }
+    // ★ S23 — ЧЕТЕМ произведеното под партида L (БРУТНО, от справката за партиди). То е
+    // основата на идемпотентността на ② (виж soldBase по-долу). Преди беше игнорирано (underL={}),
+    // затова всяко повторно ② преправяше ЦЯЛАТА поръчка → свръхпроизводство (S21, 24.09).
+    let underLot = {}, underRel = false;
+    if (lot) { try { underLot = await producedUnderLot(lot, user, pass); underRel = underLot._ok !== false; } catch (e) { underLot = {}; underRel = false; } }
     // ★ РЕАЛНО СВОБОДНО = склад − запазено от отворените сметки (Barsy не приспада при отворена
     // сметка). Иначе компонентите (НАЧИ за сетовете) се подценяваха → последните сметки падаха.
     let reserved = {};
@@ -2016,7 +2015,15 @@ module.exports = async function handler(req, res) {
     const freeStock = {};
     for (const k in sm) freeStock[k] = (Number(sm[k]) || 0) - (Number(reserved[k]) || 0);
     for (const k in reserved) if (!(k in freeStock)) freeStock[k] = -(Number(reserved[k]) || 0);
-    const plan = dayPlan(agg, freeStock, {}); // продаваните ПЪЛНО под L; компонентите нетно спрямо СВОБОДНОТО
+    // ★ S23 — СТРОГА ИДЕМПОТЕНТНОСТ на ②. Трети аргумент = вече произведеното под партида L
+    // (БРУТНО от справката): продаваме max(0, поръчка − вече произведено). Повторно ② → нищо;
+    // добавен магазин → само разликата; грешка 200-вместо-20 → второто ② не дублира.
+    // Не вадим „запазеното от отворени сметки" тук — справката брои ПРОИЗВОДСТВОТО, а нуждата
+    // е цялата поръчка на тикнатите; иначе след ③ същите магазини биха се произвели пак.
+    // Ако справката за партиди НЕ е надеждна (паднала заявка) → падаме на СВОБОДНОТО: по-малко
+    // производство (③ допроизвежда точно колкото липсва), но НИКОГА двойно.
+    const soldBase = underRel ? underLot : freeStock;
+    const plan = dayPlan(agg, freeStock, soldBase); // продаваните нетно спрямо L; компонентите спрямо СВОБОДНОТО
     const zagProduce = {}, rollProduce = {}, setProduce = {}, loadRawNamed = {};
     for (const [id, q] of Object.entries(plan.produce)) { const a = byId(id); if (!a || !(q > 0)) continue; if (a.is_set) setProduce[a.name] = round(q); else if (a.cat === "Заготовки") zagProduce[a.name] = round(q); else if (a.is_menu) rollProduce[a.name] = round(q); }
     for (const [id, q] of Object.entries(plan.loadRaw)) { const a = byId(id); if (a && q > 0 && a.name !== "Опаковка" && a.name !== "Етикет Опаковка") loadRawNamed[a.name] = round(q); }
