@@ -1329,7 +1329,7 @@ function preBox(pf){if(!pf)return '';if(pf.error)return '<div class="prewarn" st
 function renderPlan(j){$('planbox').innerHTML=preBox(j.preflight)+'<h2>За производство</h2><div class="plan">'+tbl('Сетове',j.produce_sets)+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
 function doZagotovki(){if(!shops.length){msg('Първо натисни „Зареди".','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин.','err');return}var pd=$('pdate').value;if(!confirm('① Ще произведа ЗАГОТОВКИТЕ (майонези, сосове, ориз…) за '+sel.length+' магазина, дата '+pd+'.\\nПродължавам?'))return;msg('Правя заготовките…');api({action:'produce_plan',only:'zag',shops:sel,prod_date:pd}).then(function(j){if(j.error&&!j.zagotovki){msg('Грешка: '+(j.error||j.message||''),'err');return}var z=j.zagotovki||{};var zp=(z.produced||[]).length,zs=(z.skipped||[]).length,zf=z.failed||[];var lr=j.load_raw||{},lrk=Object.keys(lr);var lrTxt=lrk.length?(' · ⚠️ ЗАРЕДИ суровини: '+lrk.map(function(k){return k+' '+lr[k]}).join(', ')):'';var zfTxt=zf.length?(' · ⚠️ НЕ излязоха: '+zf.map(function(f){return f.name+(f.reason?(' — '+f.reason):'')}).join(' | ')):'';var bad=zf.length||lrk.length;msg((bad?'⚠️ ':'✓ ')+'Заготовки: '+zp+' произв.'+(zs?(' ('+zs+' ръчни, без рецепта)'):'')+zfTxt+lrTxt+(bad?'':'. Сега натисни „② Артикули".'),bad?'err':'ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function detail(t){var d=document.getElementById('detailline');if(!d){d=document.createElement('div');d.id='detailline';d.style.cssText='margin:6px 0 0;font-size:13px;color:#9aa3b2;line-height:1.4';var m=document.getElementById('msg');if(m&&m.parentNode)m.parentNode.insertBefore(d,m.nextSibling)}d.textContent=t}
-function doArticles(){if(!shops.length){msg('Първо натисни „Зареди".','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин.','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('② Ще произведа РОЛКИ/ПОКЕ и СЕТОВЕ под партида '+lot+' за '+sel.length+' магазина.\\n(Първо трябва да си направил „① Заготовки".)\\nПродължавам?'))return;msg('Правя артикулите (ролки/поке → сетове)…');api({action:'produce_plan',only:'articles',shops:sel,prod_date:pd}).then(function(j){if(!j.ok){if(j.error==='lot_dirty'){msg('⚠️ '+j.message,'err');return}msg('Грешка при производство: '+((j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||j.message||j.error||''),'err');return}var ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;var pr=j.produced_rolls||{},ps=j.produced_sets||{};
+function doArticles(){if(!shops.length){msg('Първо натисни „Зареди".','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин.','err');return}var pd=$('pdate').value;var lot='L.'+pd.split('-').reverse().join('.');if(!confirm('② Ще произведа РОЛКИ/ПОКЕ и СЕТОВЕ под партида '+lot+' за '+sel.length+' магазина.\\n(Първо трябва да си направил „① Заготовки".)\\nПродължавам?'))return;msg('Правя артикулите (ролки/поке → сетове)…');api({action:'produce_plan',only:'articles',shops:sel,prod_date:pd,razos_date:$('date').value}).then(function(j){if(!j.ok){if(j.error==='lot_dirty'){msg('⚠️ '+j.message,'err');return}msg('Грешка при производство: '+((j.rolls&&j.rolls.error)||(j.sets&&j.sets.error)||j.message||j.error||''),'err');return}var ri=j.rolls&&j.rolls.store_production_id,si=j.sets&&j.sets.store_production_id;var pr=j.produced_rolls||{},ps=j.produced_sets||{};
 var mk=function(o){return Object.keys(o).map(function(k){return k+' '+o[k]}).join(', ')};
 var madeTxt=[Object.keys(pr).length?('ролки/поке: '+mk(pr)):'',Object.keys(ps).length?('сетове: '+mk(ps)):''].filter(Boolean).join(' · ');var al=j.already_under_lot||{},alk=Object.keys(al);var lr=j.load_raw||{},lrk=Object.keys(lr);var lrTxt=lrk.length?(' · ⚠️ ЗАРЕДИ суровини/заготовки ПРЕДИ: '+mk(lr)):'';if(!ri&&!si){msg('Нищо ново не е произведено — поръчаното вече е налично под партида '+j.lot+'.'+lrTxt,'ok');if(alk.length)detail('Под партидата от по-рано днес (НЕ е произведено сега): '+mk(al));return}msg((lrk.length?'⚠️ ':'✓ ')+'ПРОИЗВЕДЕНО СЕГА · '+madeTxt+' · док. ролки №'+(ri||'—')+', сетове №'+(si||'—')+lrTxt+'. Сега „③ Генерирай сметки".',lrk.length?'err':'ok');if(alk.length)detail('Под партидата от по-рано днес (НЕ е произведено сега): '+mk(al));}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function doAccounts(){if(!shops.length){msg('Първо натисни „Зареди", за да заредиш деня.','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}var pd=$('pdate').value||$('date').value;var lot=pd?('L.'+pd.split('-').reverse().join('.')):'';if(!confirm('Ще СЪЗДАМ отворени сметки в Barsy за '+sel.length+' магазина'+(lot?(', ВЕЧЕ с партида '+lot):'')+'.\\nЦените ги слага Barsy по правилото на клиента.\\nПродължавам?'))return;msg('Създавам сметките…');api({action:'create_accounts',date:($('pdate').value||$('date').value),shops:sel}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}var cr=j.created||[];var ok=cr.filter(function(c){return c.ok}).length,bad=cr.filter(function(c){return c.ok===false}).length;sel.forEach(function(s,i){if(cr[i]&&cr[i].account_id)s.account_id=cr[i].account_id});saveGrid();LASTACC=cr.filter(function(c){return c.ok&&c.account_id}).map(function(c){return c.account_id});msg('✓ Създадени '+ok+' сметки'+(bad?(', '+bad+' с грешка'):'')+'. После натисни ③ Стокова.',bad?'err':'ok');renderCreated(cr)}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
@@ -1990,10 +1990,27 @@ module.exports = async function handler(req, res) {
   if (body.action === "produce_plan") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
-    const shopsIn = Array.isArray(body.shops) ? body.shops.map(s => ({ order: s.order || {} })) : [];
+    const shopsIn = Array.isArray(body.shops) ? body.shops.map(s => ({ order: s.order || {}, client_id: s.client_id, person_id: s.person_id })) : [];
     if (!shopsIn.length) { res.status(400).json({ ok: false, error: "no_shops" }); return; }
-    const { agg } = compute(shopsIn);
     const prodDate = /^\d{4}-\d{2}-\d{2}$/.test(body.prod_date || "") ? body.prod_date : sofiaToday();
+    // ★ S24 — ДОБАВЕН МАГАЗИН ПО-КЪСНО. underLot е ЦЯЛОТО произведено под L (за магазините от
+    // сутринта), а agg беше само ТИКНАТИТЕ → новият магазин се „покриваше" от чуждото производство
+    // → ② казваше „нищо ново". Сега към нуждата добавяме ВЕЧЕ СЪЗДАДЕНИТЕ сметки на ДРУГИТЕ
+    // (нетикнати) обекти за същата партида/разнос → произвежда се точно разликата. Тикнат обект,
+    // който вече има сметка, не се брои два пъти (ключ client_id:person_id).
+    const keyOf = s => String(s.client_id || "") + ":" + String(s.person_id || "");
+    const ticked = new Set(shopsIn.map(keyOf));
+    const others = [], tickedAccts = [];
+    if (body.only !== "zag") {
+      const seen = new Set();
+      // по партида L — ВСИЧКИ (и затворените: те също са изяли от брутното underLot);
+      // по разнос-дата — само ОТВОРЕНИТЕ (затворените там може да са от друга партида).
+      const add = (list, openOnly) => { for (const x of (list || [])) { if (!x || seen.has(x.account_id) || (openOnly && x.close_date)) continue; seen.add(x.account_id); (ticked.has(keyOf(x)) ? tickedAccts : others).push(x); } };
+      try { add((await seedByLot(prodDate, user, pass)).shops, false); } catch (e) {}
+      if (/^\d{4}-\d{2}-\d{2}$/.test(body.razos_date || "")) { try { add((await seedRazos(body.razos_date, user, pass, true)).shops, true); } catch (e) {} }
+    }
+    const { agg } = compute(shopsIn.concat(others));   // нуждата по партида: тикнатите + сметките на другите
+    const aggTicked = compute(shopsIn).agg;              // физическата нужда: само тикнатите
     const auto = body.auto_lot === true; // авто-партида (същия ден) → празна партида
     const { lot, lot_exp } = auto ? { lot: "", lot_exp: null } : lotFor(prodDate);
     const toRows = (map) => Object.entries(map)
@@ -2023,7 +2040,17 @@ module.exports = async function handler(req, res) {
     // Ако справката за партиди НЕ е надеждна (паднала заявка) → падаме на СВОБОДНОТО: по-малко
     // производство (③ допроизвежда точно колкото липсва), но НИКОГА двойно.
     const soldBase = underRel ? underLot : freeStock;
-    const plan = dayPlan(agg, freeStock, soldBase); // продаваните нетно спрямо L; компонентите спрямо СВОБОДНОТО
+    const planLot = dayPlan(agg, freeStock, soldBase); // по партида: продаваните нетно спрямо L; компонентите спрямо СВОБОДНОТО
+    // ★ S24 — ФИЗИЧЕСКА проверка. Брутното под L не вижда, че сетовете са изяли НАЧИ (Barsy ги
+    // тегли от по-стара наличност, не от L) → 26 ORO се броят два пъти. Затова смятаме и спрямо
+    // РЕАЛНО СВОБОДНОТО в цеха (склад − запазено от отворени сметки), като връщаме запазеното от
+    // собствените сметки на тикнатите (иначе повторно тикнат магазин със сметка би се удвоил).
+    // Произвеждаме ПО-СТРОГОТО от двете → идемпотентно (и двете мерки растат след производство).
+    const physBase = Object.assign({}, freeStock);
+    for (const x of tickedAccts) for (const [n, q] of Object.entries(x.order || {})) { const a = resolve(n); if (a) physBase[String(a.id)] = (Number(physBase[String(a.id)]) || 0) + (Number(q) || 0); }
+    const planPhys = dayPlan(aggTicked, physBase, physBase);
+    const maxMerge = (x, y) => { const o = Object.assign({}, x); for (const k in y) o[k] = Math.max(o[k] || 0, y[k] || 0); return o; };
+    const plan = { produce: maxMerge(planLot.produce, planPhys.produce), loadRaw: maxMerge(planLot.loadRaw, planPhys.loadRaw) };
     const zagProduce = {}, rollProduce = {}, setProduce = {}, loadRawNamed = {};
     for (const [id, q] of Object.entries(plan.produce)) { const a = byId(id); if (!a || !(q > 0)) continue; if (a.is_set) setProduce[a.name] = round(q); else if (a.cat === "Заготовки") zagProduce[a.name] = round(q); else if (a.is_menu) rollProduce[a.name] = round(q); }
     for (const [id, q] of Object.entries(plan.loadRaw)) { const a = byId(id); if (a && q > 0 && a.name !== "Опаковка" && a.name !== "Етикет Опаковка") loadRawNamed[a.name] = round(q); }
@@ -2039,7 +2066,7 @@ module.exports = async function handler(req, res) {
     const zagRows = toRows(zagProduce).sort((a, b) => zagDepth(byId(a.article_id)) - zagDepth(byId(b.article_id)));
     const rollRows = toRows(rollProduce), setRows = toRows(setProduce);
     const alreadyNamed = {}; for (const [id, q] of Object.entries(underLot)) { const a = byId(id); if (a && q > 0) alreadyNamed[a.name] = round(q); }
-    const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate, already_under_lot: sortObj(alreadyNamed, 2), load_raw: sortObj(loadRawNamed, 3), produced_zagotovki: sortObj(zagProduce, 3), produced_rolls: sortObj(rollProduce, 2), produced_sets: sortObj(setProduce, 2) };
+    const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate, other_accounts: others.map(x => (x.client || "") + (x.rep ? " / " + x.rep : "") + " #" + x.account_id), already_under_lot: sortObj(alreadyNamed, 2), load_raw: sortObj(loadRawNamed, 3), produced_zagotovki: sortObj(zagProduce, 3), produced_rolls: sortObj(rollProduce, 2), produced_sets: sortObj(setProduce, 2) };
     // Ред: заготовки → ролки → сетове.
     try {
       // Заготовките — ЕДНА ПО ЕДНА (best-effort): някои нямат производствена рецепта в
