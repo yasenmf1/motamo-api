@@ -144,7 +144,8 @@ async function shopDashData(from, to, expenses, user, pass) {
   const products = (salesRep && salesRep.articles || []).map(a => {
     const un = round(a.units), rev = round(a.revenue);
     const cat = cats[String(a.article_id)] || null;
-    const food = costOf(a.article_id, rev, cat) * un;
+    // costOf очаква оборот на БРОЙКА — иначе резервният % се умножава по бройките два пъти
+    const food = costOf(a.article_id, un ? rev / un : 0, cat) * un;
     const pack = packOf(cat) * un;
     const tc = round(food + pack);
     if (cat) byCat[cat] = round((byCat[cat] || 0) + rev);
