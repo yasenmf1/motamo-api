@@ -166,8 +166,8 @@ function artList(r) {
 // ТОЧКАТА (по мапнатото id) + наличност в цеха (има ли изобщо какво да даде).
 async function buildList() {
   const [cr, sr] = await Promise.all([
-    cexCall("Articles_getlistobject", { extra_properties: ["store_amount"] }),
-    shopCall("Articles_getlistobject", { extra_properties: ["store_amount"] })
+    cexCall("Articles_getlistobject", { filters: { depot_id: CEX_DEPOT_FROM }, extra_properties: ["store_amount"] }),
+    shopCall("Articles_getlistobject", { filters: { depot_id: SHOP_DEPOT }, extra_properties: ["store_amount"] })
   ]);
   const cex = {}, shop = {};
   for (const a of artList(cr)) cex[Number(a.article_id)] = a;
@@ -281,7 +281,7 @@ function daysToDelivery(key, from) {
 // (стабилната база); покритието е по по-бързата, защото е по-скъпо да закъснееш.
 async function stockReport() {
   const [ar, pr] = await Promise.all([
-    cexCall("Articles_getlistobject", { extra_properties: ["store_amount", "avg_delivery_price"] }),
+    cexCall("Articles_getlistobject", { filters: { depot_id: CEX_DEPOT_FROM }, extra_properties: ["store_amount", "avg_delivery_price"] }),
     cexCall("Storeproductions_getlist", { filters: {}, extra_properties: ["all", "details"], length: 5000, limit: 5000 })
   ]);
   const A = {}; for (const a of artList(ar)) A[Number(a.article_id)] = a;
@@ -1183,7 +1183,7 @@ module.exports = async function handler(req, res) {
 
       // пресни данни: наличност + себестойност (цех) и партидите по артикул
       const [cr, lots] = await Promise.all([
-        cexCall("Articles_getlistobject", { extra_properties: ["store_amount", "avg_delivery_price"] }),
+        cexCall("Articles_getlistobject", { filters: { depot_id: CEX_DEPOT_FROM }, extra_properties: ["store_amount", "avg_delivery_price"] }),
         lotsByArticle(items.map(it => it.cex_id))
       ]);
       const cexA = {}; for (const a of artList(cr)) cexA[Number(a.article_id)] = a;

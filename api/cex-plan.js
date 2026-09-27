@@ -173,7 +173,7 @@ async function mapLimit(items, limit, fn) {
 // ЕДНА заявка: Articles_getlistobject с depots + extra_properties:["store_amount"]
 // връща store_amount за всеки артикул (~2 сек), вместо по една заявка на артикул.
 async function readStock(user, pass) {
-  const r = await cexCall("Articles_getlistobject", { filters: {}, depots: [CEX_DEPOT], extra_properties: ["store_amount"] }, user, pass);
+  const r = await cexCall("Articles_getlistobject", { filters: { depot_id: CEX_DEPOT }, extra_properties: ["store_amount"] }, user, pass);
   const L = r.data && (r.data.list || r.data) || {};
   const list = Array.isArray(L) ? L : Object.values(L);
   const rows = [];
@@ -188,7 +188,7 @@ async function readStock(user, pass) {
 }
 // Карта {article_id: наличност} за всички артикули (една заявка).
 async function stockMap(user, pass) {
-  const r = await cexCall("Articles_getlistobject", { filters: {}, depots: [CEX_DEPOT], extra_properties: ["store_amount"] }, user, pass);
+  const r = await cexCall("Articles_getlistobject", { filters: { depot_id: CEX_DEPOT }, extra_properties: ["store_amount"] }, user, pass);
   const L = r.data && (r.data.list || r.data) || {};
   const list = Array.isArray(L) ? L : Object.values(L);
   const m = {};
@@ -372,7 +372,7 @@ async function dashData(from, to, expenses, user, pass) {
   const [accR, invR, artR, stoR, salesRep, lotsRep] = await Promise.all([
     cexCall("Accounts_getlist", { order_by: "account_id desc", length: 8000 }, user, pass),
     cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 5000 }, user, pass).catch(() => ({ data: [] })),
-    cexCall("Articles_getlistobject", { filters: {}, depots: [1], extra_properties: ["avg_delivery_price", "store_amount"] }, user, pass).catch(() => ({ data: [] })),
+    cexCall("Articles_getlistobject", { filters: { depot_id: CEX_DEPOT }, extra_properties: ["avg_delivery_price", "store_amount"] }, user, pass).catch(() => ({ data: [] })),
     cexCall("Storeloads_getlist", { order_by: "store_load_id desc", length: 2000, extra_properties: ["all"] }, user, pass).catch(() => ({ data: [] })),
     reportSalesByArticles(from, to, user, pass).catch(() => ({ ok: false, incomplete: true, articles: [] })),
   ]);
