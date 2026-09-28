@@ -892,6 +892,58 @@ function preflightPlan(agg, stock) {
 //  • СУРОВИНИ → недостиг = зареди (не се произвеждат).
 // Повторно ① с пресни данни → нищо (не дублира → не трупа излишък). Без никакъв буфер.
 const RAWCATS = new Set(["Суровини", "Консумативи", "Некатегоризирани"]);
+// ★ S24 — ЕДИН план за деня, общ за ①/② (produce_plan) И панела на „Изчисли" → панелът
+// показва точно каквото ①/② ще направят (преди панелът ползваше брутния склад sm, а ①/② —
+// свободното = склад − запазено от отворените сметки → разминаваха се).
+async function computeDayPlan(shopsIn, prodDate, lot, razosDate, withOthers, user, pass) {
+  const keyOf = s => String(s.client_id || "") + ":" + String(s.person_id || "");
+  const ticked = new Set(shopsIn.map(keyOf));
+  const others = [], tickedAccts = [];
+  if (withOthers) {
+    const seen = new Set();
+    // по партида L — ВСИЧКИ (и затворените: те също са изяли от брутното underLot);
+    // по разнос-дата — само ОТВОРЕНИТЕ (затворените там може да са от друга партида).
+    const add = (list, openOnly) => { for (const x of (list || [])) { if (!x || seen.has(x.account_id) || (openOnly && x.close_date)) continue; seen.add(x.account_id); (ticked.has(keyOf(x)) ? tickedAccts : others).push(x); } };
+    try { add((await seedByLot(prodDate, user, pass)).shops, false); } catch (e) {}
+    if (/^\d{4}-\d{2}-\d{2}$/.test(razosDate || "")) { try { add((await seedRazos(razosDate, user, pass, true)).shops, true); } catch (e) {} }
+  }
+  const { agg } = compute(shopsIn.concat(others));   // нуждата по партида: тикнатите + сметките на другите
+  const aggTicked = compute(shopsIn).agg;              // физическата нужда: само тикнатите
+  let sm = {};
+  try { sm = await stockMap(user, pass); } catch (e) { sm = {}; }
+  // ★ S23 — ЧЕТЕМ произведеното под партида L (БРУТНО, от справката за партиди). То е
+  // основата на идемпотентността на ② (виж soldBase по-долу). Преди беше игнорирано (underL={}),
+  // затова всяко повторно ② преправяше ЦЯЛАТА поръчка → свръхпроизводство (S21, 24.09).
+  let underLot = {}, underRel = false;
+  if (lot) { try { underLot = await producedUnderLot(lot, user, pass); underRel = underLot._ok !== false; } catch (e) { underLot = {}; underRel = false; } }
+  // ★ РЕАЛНО СВОБОДНО = склад − запазено от отворените сметки (Barsy не приспада при отворена
+  // сметка). Иначе компонентите (НАЧИ за сетовете) се подценяваха → последните сметки падаха.
+  let reserved = {};
+  try { const ro = await reservedOpen(user, pass); reserved = ro.reserved || {}; } catch (e) { reserved = {}; }
+  const freeStock = {};
+  for (const k in sm) freeStock[k] = (Number(sm[k]) || 0) - (Number(reserved[k]) || 0);
+  for (const k in reserved) if (!(k in freeStock)) freeStock[k] = -(Number(reserved[k]) || 0);
+  // ★ S23 — СТРОГА ИДЕМПОТЕНТНОСТ на ②. Трети аргумент = вече произведеното под партида L
+  // (БРУТНО от справката): продаваме max(0, поръчка − вече произведено). Повторно ② → нищо;
+  // добавен магазин → само разликата; грешка 200-вместо-20 → второто ② не дублира.
+  // Не вадим „запазеното от отворени сметки" тук — справката брои ПРОИЗВОДСТВОТО, а нуждата
+  // е цялата поръчка на тикнатите; иначе след ③ същите магазини биха се произвели пак.
+  // Ако справката за партиди НЕ е надеждна (паднала заявка) → падаме на СВОБОДНОТО: по-малко
+  // производство (③ допроизвежда точно колкото липсва), но НИКОГА двойно.
+  const soldBase = underRel ? underLot : freeStock;
+  const planLot = dayPlan(agg, freeStock, soldBase); // по партида: продаваните нетно спрямо L; компонентите спрямо СВОБОДНОТО
+  // ★ S24 — ФИЗИЧЕСКА проверка. Брутното под L не вижда, че сетовете са изяли НАЧИ (Barsy ги
+  // тегли от по-стара наличност, не от L) → 26 ORO се броят два пъти. Затова смятаме и спрямо
+  // РЕАЛНО СВОБОДНОТО в цеха (склад − запазено от отворени сметки), като връщаме запазеното от
+  // собствените сметки на тикнатите (иначе повторно тикнат магазин със сметка би се удвоил).
+  // Произвеждаме ПО-СТРОГОТО от двете → идемпотентно (и двете мерки растат след производство).
+  const physBase = Object.assign({}, freeStock);
+  for (const x of tickedAccts) for (const [n, q] of Object.entries(x.order || {})) { const a = resolve(n); if (a) physBase[String(a.id)] = (Number(physBase[String(a.id)]) || 0) + (Number(q) || 0); }
+  const planPhys = dayPlan(aggTicked, physBase, physBase);
+  const maxMerge = (x, y) => { const o = Object.assign({}, x); for (const k in y) o[k] = Math.max(o[k] || 0, y[k] || 0); return o; };
+  const plan = { produce: maxMerge(planLot.produce, planPhys.produce), loadRaw: maxMerge(planLot.loadRaw, planPhys.loadRaw) };
+  return { plan, sm, underLot, underRel, freeStock, others };
+}
 function dayPlan(agg, total, underL) {
   const aT = {}; for (const k in (total || {})) aT[k] = Number(total[k]) || 0;
   const aL = {}; for (const k in (underL || {})) aL[k] = Number(underL[k]) || 0;
@@ -1998,59 +2050,14 @@ module.exports = async function handler(req, res) {
     // → ② казваше „нищо ново". Сега към нуждата добавяме ВЕЧЕ СЪЗДАДЕНИТЕ сметки на ДРУГИТЕ
     // (нетикнати) обекти за същата партида/разнос → произвежда се точно разликата. Тикнат обект,
     // който вече има сметка, не се брои два пъти (ключ client_id:person_id).
-    const keyOf = s => String(s.client_id || "") + ":" + String(s.person_id || "");
-    const ticked = new Set(shopsIn.map(keyOf));
-    const others = [], tickedAccts = [];
-    if (body.only !== "zag") {
-      const seen = new Set();
-      // по партида L — ВСИЧКИ (и затворените: те също са изяли от брутното underLot);
-      // по разнос-дата — само ОТВОРЕНИТЕ (затворените там може да са от друга партида).
-      const add = (list, openOnly) => { for (const x of (list || [])) { if (!x || seen.has(x.account_id) || (openOnly && x.close_date)) continue; seen.add(x.account_id); (ticked.has(keyOf(x)) ? tickedAccts : others).push(x); } };
-      try { add((await seedByLot(prodDate, user, pass)).shops, false); } catch (e) {}
-      if (/^\d{4}-\d{2}-\d{2}$/.test(body.razos_date || "")) { try { add((await seedRazos(body.razos_date, user, pass, true)).shops, true); } catch (e) {} }
-    }
-    const { agg } = compute(shopsIn.concat(others));   // нуждата по партида: тикнатите + сметките на другите
-    const aggTicked = compute(shopsIn).agg;              // физическата нужда: само тикнатите
     const auto = body.auto_lot === true; // авто-партида (същия ден) → празна партида
     const { lot, lot_exp } = auto ? { lot: "", lot_exp: null } : lotFor(prodDate);
     const toRows = (map) => Object.entries(map)
       .map(([name, qty]) => { const a = resolve(name); return a ? { article_id: a.id, article_name: a.name, amount: round(Number(qty)) } : null; })
       .filter(r => r && r.amount > 0);
-    let sm = {};
-    try { sm = await stockMap(user, pass); } catch (e) { sm = {}; }
+    const { plan, sm, underLot, others } = await computeDayPlan(shopsIn, prodDate, lot, body.razos_date, body.only !== "zag", user, pass);
     const rawStock = id => { const q = sm[String(id)]; return (q == null || isNaN(q)) ? 0 : q; };
     const shortfall = (need, id) => Math.max(0, Number(need) - rawStock(id));
-    // ★ S23 — ЧЕТЕМ произведеното под партида L (БРУТНО, от справката за партиди). То е
-    // основата на идемпотентността на ② (виж soldBase по-долу). Преди беше игнорирано (underL={}),
-    // затова всяко повторно ② преправяше ЦЯЛАТА поръчка → свръхпроизводство (S21, 24.09).
-    let underLot = {}, underRel = false;
-    if (lot) { try { underLot = await producedUnderLot(lot, user, pass); underRel = underLot._ok !== false; } catch (e) { underLot = {}; underRel = false; } }
-    // ★ РЕАЛНО СВОБОДНО = склад − запазено от отворените сметки (Barsy не приспада при отворена
-    // сметка). Иначе компонентите (НАЧИ за сетовете) се подценяваха → последните сметки падаха.
-    let reserved = {};
-    try { const ro = await reservedOpen(user, pass); reserved = ro.reserved || {}; } catch (e) { reserved = {}; }
-    const freeStock = {};
-    for (const k in sm) freeStock[k] = (Number(sm[k]) || 0) - (Number(reserved[k]) || 0);
-    for (const k in reserved) if (!(k in freeStock)) freeStock[k] = -(Number(reserved[k]) || 0);
-    // ★ S23 — СТРОГА ИДЕМПОТЕНТНОСТ на ②. Трети аргумент = вече произведеното под партида L
-    // (БРУТНО от справката): продаваме max(0, поръчка − вече произведено). Повторно ② → нищо;
-    // добавен магазин → само разликата; грешка 200-вместо-20 → второто ② не дублира.
-    // Не вадим „запазеното от отворени сметки" тук — справката брои ПРОИЗВОДСТВОТО, а нуждата
-    // е цялата поръчка на тикнатите; иначе след ③ същите магазини биха се произвели пак.
-    // Ако справката за партиди НЕ е надеждна (паднала заявка) → падаме на СВОБОДНОТО: по-малко
-    // производство (③ допроизвежда точно колкото липсва), но НИКОГА двойно.
-    const soldBase = underRel ? underLot : freeStock;
-    const planLot = dayPlan(agg, freeStock, soldBase); // по партида: продаваните нетно спрямо L; компонентите спрямо СВОБОДНОТО
-    // ★ S24 — ФИЗИЧЕСКА проверка. Брутното под L не вижда, че сетовете са изяли НАЧИ (Barsy ги
-    // тегли от по-стара наличност, не от L) → 26 ORO се броят два пъти. Затова смятаме и спрямо
-    // РЕАЛНО СВОБОДНОТО в цеха (склад − запазено от отворени сметки), като връщаме запазеното от
-    // собствените сметки на тикнатите (иначе повторно тикнат магазин със сметка би се удвоил).
-    // Произвеждаме ПО-СТРОГОТО от двете → идемпотентно (и двете мерки растат след производство).
-    const physBase = Object.assign({}, freeStock);
-    for (const x of tickedAccts) for (const [n, q] of Object.entries(x.order || {})) { const a = resolve(n); if (a) physBase[String(a.id)] = (Number(physBase[String(a.id)]) || 0) + (Number(q) || 0); }
-    const planPhys = dayPlan(aggTicked, physBase, physBase);
-    const maxMerge = (x, y) => { const o = Object.assign({}, x); for (const k in y) o[k] = Math.max(o[k] || 0, y[k] || 0); return o; };
-    const plan = { produce: maxMerge(planLot.produce, planPhys.produce), loadRaw: maxMerge(planLot.loadRaw, planPhys.loadRaw) };
     const zagProduce = {}, rollProduce = {}, setProduce = {}, loadRawNamed = {};
     for (const [id, q] of Object.entries(plan.produce)) { const a = byId(id); if (!a || !(q > 0)) continue; if (a.is_set) setProduce[a.name] = round(q); else if (a.cat === "Заготовки") zagProduce[a.name] = round(q); else if (a.is_menu) rollProduce[a.name] = round(q); }
     for (const [id, q] of Object.entries(plan.loadRaw)) { const a = byId(id); if (a && q > 0 && a.name !== "Опаковка" && a.name !== "Етикет Опаковка") loadRawNamed[a.name] = round(q); }
@@ -2438,13 +2445,11 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (user && pass) {
       try {
-        const sm = await stockMap(user, pass);
-        // Същата dayPlan като ① → панелът показва ТОЧНО каквото ① ще произведе. underLot от
-        // деня на разноса (kitchen_date), за да е вярно продаваното под L и без дублаж.
+        // ★ S24 — СЪЩИЯТ computeDayPlan като ①/② (свободно = склад − запазено; продаваните
+        // нетно спрямо L; физическа проверка) → панелът показва ТОЧНО каквото ще се произведе.
         const pfDay = /^\d{4}-\d{2}-\d{2}$/.test(body.kitchen_date || "") ? body.kitchen_date : sofiaToday();
-        let underLot = {};
-        try { underLot = await producedUnderLot(lotFor(pfDay).lot, user, pass); } catch (e) { underLot = {}; }
-        const pf = dayPlan(agg, sm, underLot);
+        const pfShops = (shops || []).map(x => ({ order: x.order || {}, client_id: x.client_id, person_id: x.person_id }));
+        const { plan: pf } = await computeDayPlan(pfShops, pfDay, lotFor(pfDay).lot, null, false, user, pass); // = ① (only:zag)
         const zag = {}; for (const [id, q] of Object.entries(pf.produce)) { const a = byId(id); if (a && a.cat === "Заготовки" && q > 0) zag[id] = q; }
         const named = (m, d) => { const o = {}; for (const [k, q] of Object.entries(m)) { const a = resolve(k); o[a ? a.name : k] = Math.round(q * 10 ** d) / 10 ** d; } return o; };
         preflight = {
