@@ -151,6 +151,7 @@ function formValues(node) {
   return values;
 }
 
+function isoMinusDays(n) { const d = new Date(Date.parse(sofiaToday() + "T12:00:00Z") - n * 864e5); return d.toISOString().slice(0, 10); }
 function sofiaToday() {
   const f = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Sofia", year: "numeric", month: "2-digit", day: "2-digit" });
   return f.format(new Date());
@@ -280,11 +281,26 @@ function daysToDelivery(key, from) {
 // производства не влизат. Две скорости: 7 дни (какво става сега) и 28 дни
 // (стабилната база); покритието е по по-бързата, защото е по-скъпо да закъснееш.
 async function stockReport() {
-  const [ar, pr] = await Promise.all([
+  // ★ S24 — ЗА ПОРЪЧКИ към доставчиците гледаме ДВАТА склада: цеха + точката (живата
+  // наличност на Каравелов, по мапнатото id). Разходът = цеховото производство + каквото
+  // точката реално е взела (изпълнените заявки за прехвърляне). ПРОИЗВОДСТВОТО (cex-plan)
+  // продължава да гледа САМО цеха — там е стоката, от която се произвежда.
+  const [ar, pr, sr, tq] = await Promise.all([
     cexCall("Articles_getlistobject", { filters: { depot_id: CEX_DEPOT_FROM }, extra_properties: ["store_amount", "avg_delivery_price"] }),
-    cexCall("Storeproductions_getlist", { filters: {}, extra_properties: ["all", "details"], length: 5000, limit: 5000 })
+    cexCall("Storeproductions_getlist", { filters: {}, extra_properties: ["all", "details"], length: 5000, limit: 5000 }),
+    shopCall("Articles_getlistobject", { filters: { depot_id: SHOP_DEPOT }, extra_properties: ["store_amount"] }).catch(() => null),
+    sbSelect(`status=in.(done,partial)&for_date=gte.${isoMinusDays(28)}&order=created_at.asc&limit=500`).catch(() => [])
   ]);
   const A = {}; for (const a of artList(ar)) A[Number(a.article_id)] = a;
+  const SHOPA = {}; if (sr) for (const a of artList(sr)) SHOPA[Number(a.article_id)] = a;
+  const pointStock = id => (MAP[id] && SHOPA[MAP[id]]) ? (Number(SHOPA[MAP[id]].store_amount) || 0) : 0;
+  // скорост на точката: прехвърленото за последните 7 дни ÷ дните (от първата заявка насам, макс. 7)
+  const reqs = Array.isArray(tq) ? tq : [];
+  const d7iso = isoMinusDays(7);
+  const firstIso = reqs.length ? String(reqs[0].for_date) : null;
+  const pDays = firstIso ? Math.max(1, Math.min(7, Math.round((Date.parse(sofiaToday()) - Date.parse(firstIso > d7iso ? firstIso : d7iso)) / 864e5) + 1)) : 7;
+  const pUse = {};
+  for (const q of reqs) { if (String(q.for_date) < d7iso) continue; for (const it of (q.items || [])) { const id = Number(it.cex_id), n = Number(it.qty); if (id && n > 0) pUse[id] = (pUse[id] || 0) + n; } }
   let P = (pr && pr.data) || [];
   if (!Array.isArray(P)) P = P && typeof P === "object" ? Object.values(P) : [];
 
@@ -312,14 +328,18 @@ async function stockReport() {
   const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
   const r3 = (n) => Math.round(n * 1000) / 1000;
   const raw = [], made = [];
-  for (const key of Object.keys(u28)) {
+  const keys = new Set(Object.keys(u28));
+  for (const k of Object.keys(pUse)) { const c = (CEXDATA.articles[k] || {}).cat; if (c === "Суровини" || c === "Консумативи") keys.add(k); }
+  for (const key of keys) {
     const id = Number(key), a = A[id] || {}, rec = CEXDATA.articles[key] || {};
     const cat = rec.cat || "";
-    const v28 = u28[id] / 28, v7 = (u7[id] || 0) / 7, v = Math.max(v28, v7);
-    const stock = num(a.store_amount), cost = num(a.avg_delivery_price);
+    const isRaw = cat === "Суровини" || cat === "Консумативи";
+    const vp = isRaw ? (pUse[id] || 0) / pDays : 0;
+    const v28 = (u28[id] || 0) / 28, v7 = (u7[id] || 0) / 7, v = Math.max(v28, v7) + vp;
+    const sc = num(a.store_amount), sp = isRaw ? pointStock(id) : 0, stock = sc + sp, cost = num(a.avg_delivery_price);
     const base = {
       id, n: rec.name || a.article_name || ("#" + id), u: a.amount_type_name_short || "",
-      s: r3(stock), v7: r3(v7), v28: r3(v28), c: v > 0 ? Math.round(stock / v * 10) / 10 : null,
+      s: r3(stock), sc: r3(sc), sp: r3(sp), vp: r3(vp), v7: r3(v7), v28: r3(v28), c: v > 0 ? Math.round(stock / v * 10) / 10 : null,
       val: Math.round(stock * cost)
     };
     if (cat === "Суровини" || cat === "Консумативи") {
@@ -333,7 +353,7 @@ async function stockReport() {
   // Наличност без НИТО грам разход за 28 дни: или наистина стои, или се движи
   // извън рецептите. Тези, които се прехвърлят в точката, се отделят — там
   // разходът им е реален, просто не минава през цехово производство.
-  const moving = new Set(Object.keys(u28).map(Number));
+  const moving = new Set([...keys].map(Number));
   const toPoint = [], rest = [];
   for (const a of artList(ar)) {
     const id = Number(a.article_id), rec = CEXDATA.articles[String(id)] || {};
@@ -347,7 +367,7 @@ async function stockReport() {
   const byVal = (x, y) => y.val - x.val;
   toPoint.sort(byVal); rest.sort(byVal);
 
-  return { for_date: sofiaToday(), prods, annulled, work_days: days.size, raw, made, toPoint, rest };
+  return { for_date: sofiaToday(), prods, annulled, work_days: days.size, raw, made, toPoint, rest, point: { ok: !!sr, requests: reqs.length, days: pDays } };
 }
 
 // ── ПАРТИДИ ──────────────────────────────────────────────────────────────────
@@ -863,6 +883,7 @@ m.textContent=bits.length?bits.join(' · '):'Няма чакащи заявки,
 // Същият разрез като еднократния отчет, но данните се четат от Barsy при всяко
 // отваряне: наличности, себестойности и производствата за последните 28 дни.
 const STOCK_CSS = `
+i.br{display:block;font-size:11px;color:var(--dim);font-style:normal}
 .sum{display:flex;flex-wrap:wrap;border-top:2px solid var(--fg);border-bottom:1px solid var(--line);margin:4px 0 8px}
 .sum div{flex:1 1 150px;padding:14px 16px 13px;border-right:1px solid var(--line)}
 .sum div:last-child{border-right:0}
@@ -918,7 +939,7 @@ ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}${STOCK_CSS}</style></head><body>
     <div><b id="sDead">–</b><span>€ без движение</span></div>
   </div>
   <h2>Суровини</h2>
-  <p class="nt">Подредени по <b>запас</b> — дните покритие минус дните до следващата доставка от този доставчик. Отрицателно значи, че ще свърши преди камионът да дойде.</p>
+  <p class="nt"><b>Цех + точка заедно</b> — за поръчки към доставчиците. Разходът е цеховото производство плюс каквото точката е взела през прехвърлянията. Подредени по <b>запас</b> — дните покритие минус дните до следващата доставка от този доставчик. Отрицателно значи, че ще свърши преди камионът да дойде.</p>
   <div class="tw"><table id="tRaw"><thead><tr><th>Суровина</th><th>Стига за</th><th class="l">Доставчик</th><th class="l">Състояние</th><th>Налично</th><th>Разход / ден</th><th>Стойност</th></tr></thead><tbody></tbody></table></div>
   <h2>Графикът на доставчиците</h2>
   <div class="sched">
@@ -957,8 +978,8 @@ return '<tr class="'+s+'"><td>'+esc(r.n)+'</td>'+
 '<td class="cov">'+(r.c===null?'—':r.c)+' <i>дни</i></td>'+
 '<td class="l"><span class="sup">'+esc(r.sup)+'<em>идва след '+r.lead+' дни</em></span></td>'+
 '<td class="l"><span class="pl '+s+'">'+LBL[s]+'</span></td>'+
-'<td>'+fmt(r.s)+' <i>'+esc(r.u)+'</i></td>'+
-'<td>'+fmt(r.v28)+' <i>7дн '+fmt(r.v7)+'</i></td>'+
+'<td>'+fmt(r.s)+' <i>'+esc(r.u)+'</i>'+(r.sp?'<i class="br">цех '+fmt(r.sc)+' · точка '+fmt(r.sp)+'</i>':'')+'</td>'+
+'<td>'+fmt(r.v28)+' <i>7дн '+fmt(r.v7)+'</i>'+(r.vp?'<i class="br">+ точка '+fmt(r.vp)+'</i>':'')+'</td>'+
 '<td><i>'+fmt(r.val)+' €</i></td></tr>'}).join('');
 $('tMade').tBodies[0].innerHTML=(d.made||[]).slice().sort(function(a,b){return (a.c===null?1e9:a.c)-(b.c===null?1e9:b.c)})
 .map(function(r){return '<tr><td>'+esc(r.n)+'</td><td class="cov">'+(r.c===null?'—':r.c)+'</td><td>'+fmt(r.s)+' <i>'+esc(r.u)+'</i></td><td><i>'+fmt(r.v)+'</i></td></tr>'}).join('');
@@ -969,7 +990,7 @@ $('sNow').textContent=raw.filter(function(r){return st(r)==='now'}).length;
 $('sSoon').textContent=raw.filter(function(r){return st(r)==='soon'}).length;
 $('sVal').textContent=fmt(sum(d.raw||[]));
 $('sDead').textContent=fmt(sum(d.rest||[]));
-$('meta').textContent='Живо от Barsy · '+d.for_date+' · разходът е от '+d.prods+' производства за 28 дни ('+d.work_days+' работни дни), разгънати по рецепта; '+d.annulled+' анулирани не влизат. Всички суми са в евро.';
+$('meta').textContent='Живо от Barsy · '+d.for_date+' · разходът е от '+d.prods+' производства за 28 дни ('+d.work_days+' работни дни), разгънати по рецепта; '+d.annulled+' анулирани не влизат; точката: '+((d.point||{}).ok?((d.point||{}).requests+' прехвърляния, скорост за '+(d.point||{}).days+' дни'):'НЕ се прочете (само цехът)')+'. Всички суми са в евро.';
 msg('Готово · '+raw.length+' суровини','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 load();
 </script></body></html>`;
