@@ -1606,12 +1606,13 @@ module.exports = async function handler(req, res) {
   // Пишещите действия искат силен токен; „stock" е само четене → и CEX_VIEW_TOKEN.
   const strong = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN];
   // Само ПИШЕЩИТЕ действия искат силен токен; четенето/смятането приемат и четящия.
-  const writeActions = ["create_accounts", "produce_plan", "create_production", "create_stokova", "replace_account"];
+  const writeActions = ["create_accounts", "produce_plan", "create_production", "create_stokova", "replace_account", "create_load"];
   // create_stokova/replace_account с dry само СГЛОБЯВАТ (не записват) → приемат и четящия токен.
   // replace_account е DRY по подразбиране (пише само при изричен dry:false).
   const isWrite = writeActions.includes(body.action)
     && !(body.action === "create_stokova" && body.dry === true)
-    && !(body.action === "replace_account" && body.dry !== false);
+    && !(body.action === "replace_account" && body.dry !== false)
+    && !(body.action === "create_load" && body.dry !== false);
   const allowed = isWrite ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
@@ -1810,6 +1811,67 @@ module.exports = async function handler(req, res) {
       try { const r = await cexCall("Suppliers_getlist", { length: 500 }, user, pass); let L = r.data || []; if (!Array.isArray(L)) L = Object.values(L); const q = String(body.supplier).toLowerCase(); out.suppliers = L.filter(x => JSON.stringify(x).toLowerCase().includes(q)).slice(0, 10); out.suppliers_total = L.length; } catch (e) { out.sup_err = String(e && e.message); }
     }
     res.status(200).json(out);
+    return;
+  }
+  // ★ S24 — ЗАРЕЖДАНЕ ОТ СНИМКА НА ФАКТУРА. Редовете идват вече в БАЗОВА мярка (кг/л/бр) и
+  // цена БЕЗ ДДС (превръщането от бр/пакети е моя работа при четенето — виж паметта
+  // supplier-doc-units). По подразбиране: dry (само сглобява) ; draft:true = чернова (собственикът
+  // я преглежда и сам натиска „вкарай в склада"); draft:false = вкарва директно.
+  // Гард срещу двойно: отказва, ако вече има зареждане със същия doc_num.
+  if (body.action === "create_load") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const rowsIn = Array.isArray(body.rows) ? body.rows : [];
+    const docNum = String(body.doc_num || "").trim();
+    const docDate = /^\d{4}-\d{2}-\d{2}$/.test(body.doc_date || "") ? body.doc_date : sofiaToday();
+    if (!rowsIn.length || !docNum) { res.status(400).json({ ok: false, error: "rows_and_doc_num_required" }); return; }
+    // доставчик по id или по част от името
+    let supplierId = Number(body.supplier_id) || null, supplierName = null;
+    try {
+      const r = await cexCall("Suppliers_getlist", { length: 500 }, user, pass); let L = r.data || []; if (!Array.isArray(L)) L = Object.values(L);
+      const hit = supplierId ? L.find(x => Number(x.supplier_id) === supplierId) : L.find(x => String(x.supplier_name || "").toLowerCase().includes(String(body.supplier || "").toLowerCase()) && body.supplier);
+      if (hit) { supplierId = Number(hit.supplier_id); supplierName = hit.supplier_name; }
+    } catch (e) {}
+    if (!supplierId) { res.status(200).json({ ok: false, error: "supplier_not_found", supplier: body.supplier || null }); return; }
+    // двойно?
+    try {
+      const hr = await cexCall("Storeloads_getlist", { length: 300, order_by: "store_load_id desc", extra_properties: ["all"] }, user, pass);
+      let H = hr.data || []; if (!Array.isArray(H)) H = Object.values(H);
+      const dup = H.find(h => String(h.doc_num || "").trim() === docNum && Number(h.supplier_id) === supplierId);
+      if (dup) { res.status(200).json({ ok: false, error: "already_loaded", store_load_id: dup.store_load_id }); return; }
+    } catch (e) {}
+    const TAX = 20, TAX_ID = "2"; // 20% (Б)
+    let net = 0; const rows = [], bad = [];
+    for (const r of rowsIn) {
+      const a = byId(Number(r.article_id)); const q = Number(r.amount), pr = Number(r.price);
+      if (!a || !(q > 0) || !(pr >= 0)) { bad.push(r); continue; }
+      const tot = Math.round(q * pr * 100) / 100; net += tot;
+      rows.push({ store_load_row_id: "", article_id: String(a.id), original_article_name: a.name, amount: String(q),
+        current_price: String(pr), delivery_price: String(pr), delivery_total: String(tot),
+        delivery_tax_id: TAX_ID, actual_tax_id: TAX_ID, tax: String(TAX), tax_sum: String(Math.round(tot * TAX) / 100),
+        discount: "0", lot_value: String(r.lot || ""), lot_exp_date: r.lot_exp || null, lot_detail_id: "",
+        notes: String(r.notes || ""), amount_unit: "1", is_group_art: 0 });
+    }
+    if (bad.length) { res.status(400).json({ ok: false, error: "bad_rows", bad }); return; }
+    net = Math.round(net * 100) / 100;
+    const draft = body.draft !== false;
+    const payload = { Storeloads_save: { id: null, action_type: draft ? "save" : "save_and_close", values: {
+      store_load_id: null, operation_type: "1", depot_id: String(CEX_DEPOT), doc_type_id: String(body.doc_type_id || "1"),
+      doc_date: docDate + " 00:00:00", doc_num: docNum, supplier_id: String(supplierId), has_tax: 1, price_mode: 0, fill_delivery_price: 0,
+      currency_id: "1", currency_rate: "1", store_load_cat_id: "1", discount: "0", total_costs: 0,
+      description: String(body.description || ("Заредено от снимка на документа (" + (supplierName || "") + " № " + docNum + ")"))
+    }, rows } };
+    const summary = { supplier: supplierName, supplier_id: supplierId, doc_num: docNum, doc_date: docDate, net, vat: Math.round(net * TAX) / 100, rows: rows.map(r => ({ name: r.original_article_name, amount: Number(r.amount), price: Number(r.delivery_price), total: Number(r.delivery_total) })) };
+    if (body.dry !== false) { res.status(200).json({ ok: true, dry: true, draft, ...summary }); return; }
+    const sv = await cexCallRoot(payload, user, pass);
+    let lid = null, status = null, total = null;
+    try {
+      const hr = await cexCall("Storeloads_getlist", { length: 5, order_by: "store_load_id desc", extra_properties: ["all"] }, user, pass);
+      let H = hr.data || []; if (!Array.isArray(H)) H = Object.values(H);
+      const last = H.find(h => String(h.doc_num || "").trim() === docNum);
+      if (last) { lid = last.store_load_id; status = last.status; total = last.total_sum; }
+    } catch (e) {}
+    res.status(200).json({ ok: !!lid, draft, store_load_id: lid, status, total_sum: total, ...summary, raw: lid ? undefined : String(sv.raw || "").slice(0, 500) });
     return;
   }
   if (body.action === "account_inspect") {
