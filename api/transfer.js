@@ -1166,6 +1166,15 @@ module.exports = async function handler(req, res) {
       const days = Math.min(Math.max(Number(body.days) || 14, 1), 90);
       const from = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
       const rows = await sbSelect(`for_date=gte.${from}&order=created_at.desc&limit=500`);
+      // ★ S24 — чакащите заявки показват ТЕКУЩАТА наличност в цеха, не снимката от момента на
+      // заявката (иначе произведените след това заготовки излизат „на минус" и „Изпращам" е 0).
+      if (rows.some(r => r.status === "pending")) {
+        try {
+          const cr = await cexCall("Articles_getlistobject", { filters: { depot_id: CEX_DEPOT_FROM }, extra_properties: ["store_amount"] });
+          const now = {}; for (const a of artList(cr)) now[Number(a.article_id)] = Number(a.store_amount);
+          for (const r of rows) if (r.status === "pending") for (const it of (r.items || [])) { const q = now[Number(it.cex_id)]; if (Number.isFinite(q)) it.cex_stock = Math.round(q * 1000) / 1000; }
+        } catch (e) {}
+      }
       // по дата, най-новата отгоре — лентата с дати се строи от това
       const byDate = {};
       for (const r of rows) (byDate[r.for_date] = byDate[r.for_date] || []).push(r);
