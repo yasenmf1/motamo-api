@@ -426,6 +426,32 @@ function hasLetters(value) {
 // shape and fall back to our own.
 // `W-7K3QD` today. The old `WEB-…-…` shape is still accepted because a copy of the
 // previous page can sit in LiteSpeed's cache for a while after a deploy.
+// ── Източник на поръчката (UTM/реклама) → Supabase `order_attribution` ─────────
+// Само маркетинг-данни + номер и сума — БЕЗ име и телефон. Best-effort: никога не
+// бави и не чупи поръчката (кратък таймаут, грешката само се логва).
+const SB_URL = "https://ptzgxreojfvdltbavlop.supabase.co";
+const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0emd4cmVvamZ2ZGx0YmF2bG9wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyNjIxNzksImV4cCI6MjEwMTgzODE3OX0.o4i60i2Q9eCEhEOjw8OLmNqAkXVXpnqYYvx9_9BrkPs";
+function cleanAttr(a) {
+  if (!a || typeof a !== "object") return null;
+  const t = (v, n) => (typeof v === "string" && v.trim()) ? v.trim().slice(0, n || 120) : null;
+  const ts = Number(a.ts); 
+  return { utm_source: t(a.utm_source), utm_medium: t(a.utm_medium), utm_campaign: t(a.utm_campaign), utm_content: t(a.utm_content), utm_term: t(a.utm_term),
+    fbclid: !!a.fbclid, gclid: !!a.gclid, referrer: t(a.referrer, 200), landing: t(a.landing, 200),
+    first_seen: Number.isFinite(ts) && ts > 1.7e12 && ts < Date.now() + 864e5 ? new Date(ts).toISOString() : null };
+}
+async function saveAttribution(ref, total, pay, attr) {
+  const last = cleanAttr(attr && attr.last), first = cleanAttr(attr && attr.first);
+  const a = last || first; if (!a) return;
+  const row = { ref: String(ref), total: Number(total) || null, pay: pay || null, touch: last ? "last" : "first", ...a };
+  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 1500);
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/order_attribution`, { method: "POST", signal: ctrl.signal,
+      headers: { apikey: SB_ANON, Authorization: `Bearer ${SB_ANON}`, "Content-Type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify(row) });
+    if (!r.ok) console.error(JSON.stringify({ event: "attribution_failed", ref, status: r.status }));
+  } catch (e) { console.error(JSON.stringify({ event: "attribution_error", ref, message: String(e && e.message) })); }
+  finally { clearTimeout(timer); }
+}
+
 const REF_PATTERN = /^(W-[A-Z0-9]{4,8}|WEB-[A-Z0-9]{4,12}-[A-Z0-9]{2,8})$/;
 
 function makeRef(clientRef) {
@@ -910,6 +936,7 @@ module.exports = async function handler(req, res) {
       event: "clientorder_placed", ref: ref, client_order_id: clientOrderId, due_total: dueTotal
     }));
 
+    await saveAttribution(ref, dueTotal, pay, body.attr);
     res.status(200).json({
       ok: true,
       ref: ref,
@@ -1091,6 +1118,7 @@ module.exports = async function handler(req, res) {
     }
   }
 
+  await saveAttribution(ref, dueTotal, pay, body.attr);
   res.status(200).json({
     ok: true,
     ref: ref,
