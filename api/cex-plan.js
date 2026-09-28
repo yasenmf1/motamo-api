@@ -89,10 +89,10 @@ function withTimeout(run) {
   const c = new AbortController(); const t = setTimeout(() => c.abort(), TIMEOUT_MS);
   return Promise.resolve(run(c.signal)).finally(() => clearTimeout(t));
 }
-function cexCall(action, params, user, pass) {
+function cexCall(action, params, user, pass, base) {
   const auth = Buffer.from(`${user}:${pass}`).toString("base64");
   return withTimeout(async (signal) => {
-    const r = await fetch(`${CEX_API}/endpoints/json/${action}?bid=${CEX_BID}`, {
+    const r = await fetch(`${base || CEX_API}/endpoints/json/${action}?bid=${CEX_BID}`, {
       method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify(params || {}), signal
     });
@@ -104,10 +104,10 @@ function cexCall(action, params, user, pass) {
 // /endpoints/json?bid=1 (БЕЗ действие в пътя), а тялото е обвито под ключа
 // „Storeproductions_save". Затова обикновените извиквания не хващаха склада —
 // depot_id живее в values, вътре в обвивката. (Разбито живо, S12.)
-function cexCallRoot(bodyObj, user, pass) {
+function cexCallRoot(bodyObj, user, pass, base) {
   const auth = Buffer.from(`${user}:${pass}`).toString("base64");
   return withTimeout(async (signal) => {
-    const r = await fetch(`${CEX_API}/endpoints/json?bid=${CEX_BID}`, {
+    const r = await fetch(`${base || CEX_API}/endpoints/json?bid=${CEX_BID}`, {
       method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify(bodyObj || {}), signal
     });
@@ -1819,8 +1819,12 @@ module.exports = async function handler(req, res) {
   // я преглежда и сам натиска „вкарай в склада"); draft:false = вкарва директно.
   // Гард срещу двойно: отказва, ако вече има зареждане със същия doc_num.
   if (body.action === "create_load") {
-    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
-    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    // host:"shop" → Barsy на ТОЧКАТА (Каравелов, motamoshop); иначе цехът. Артикулите на
+    // точката имат СВОИ id-та → там името идва от реда (r.name), не от данните на цеха.
+    const SHOP = body.host === "shop";
+    const user = SHOP ? process.env.BARSY_USER : process.env.BARSY_CEX_USER, pass = SHOP ? process.env.BARSY_PASS : process.env.BARSY_CEX_PASS;
+    const BASE = SHOP ? "https://motamoshop.barsy.online" : CEX_API;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
     const rowsIn = Array.isArray(body.rows) ? body.rows : [];
     const docNum = String(body.doc_num || "").trim();
     const docDate = /^\d{4}-\d{2}-\d{2}$/.test(body.doc_date || "") ? body.doc_date : sofiaToday();
@@ -1828,14 +1832,14 @@ module.exports = async function handler(req, res) {
     // доставчик по id или по част от името
     let supplierId = Number(body.supplier_id) || null, supplierName = null;
     try {
-      const r = await cexCall("Suppliers_getlist", { length: 500 }, user, pass); let L = r.data || []; if (!Array.isArray(L)) L = Object.values(L);
+      const r = await cexCall("Suppliers_getlist", { length: 500 }, user, pass, BASE); let L = r.data || []; if (!Array.isArray(L)) L = Object.values(L);
       const hit = supplierId ? L.find(x => Number(x.supplier_id) === supplierId) : L.find(x => String(x.supplier_name || "").toLowerCase().includes(String(body.supplier || "").toLowerCase()) && body.supplier);
       if (hit) { supplierId = Number(hit.supplier_id); supplierName = hit.supplier_name; }
     } catch (e) {}
     if (!supplierId) { res.status(200).json({ ok: false, error: "supplier_not_found", supplier: body.supplier || null }); return; }
     // двойно?
     try {
-      const hr = await cexCall("Storeloads_getlist", { length: 300, order_by: "store_load_id desc", extra_properties: ["all"] }, user, pass);
+      const hr = await cexCall("Storeloads_getlist", { length: 300, order_by: "store_load_id desc", extra_properties: ["all"] }, user, pass, BASE);
       let H = hr.data || []; if (!Array.isArray(H)) H = Object.values(H);
       const dup = H.find(h => String(h.doc_num || "").trim() === docNum && Number(h.supplier_id) === supplierId);
       if (dup) { res.status(200).json({ ok: false, error: "already_loaded", store_load_id: dup.store_load_id }); return; }
@@ -1843,7 +1847,7 @@ module.exports = async function handler(req, res) {
     const TAX = 20, TAX_ID = "2"; // 20% (Б)
     let net = 0; const rows = [], bad = [];
     for (const r of rowsIn) {
-      const a = byId(Number(r.article_id)); const q = Number(r.amount), pr = Number(r.price);
+      const a = SHOP ? (Number(r.article_id) > 0 && r.name ? { id: Number(r.article_id), name: String(r.name) } : null) : byId(Number(r.article_id)); const q = Number(r.amount), pr = Number(r.price);
       if (!a || !(q > 0) || !(pr >= 0)) { bad.push(r); continue; }
       const tot = Math.round(q * pr * 100) / 100; net += tot;
       rows.push({ store_load_row_id: "", article_id: String(a.id), original_article_name: a.name, amount: String(q),
@@ -1856,17 +1860,17 @@ module.exports = async function handler(req, res) {
     net = Math.round(net * 100) / 100;
     const draft = body.draft !== false;
     const payload = { Storeloads_save: { id: null, action_type: draft ? "save" : "save_and_close", values: {
-      store_load_id: null, operation_type: "1", depot_id: String(CEX_DEPOT), doc_type_id: String(body.doc_type_id || "1"),
+      store_load_id: null, operation_type: "1", depot_id: String(SHOP ? 1 : CEX_DEPOT), doc_type_id: String(body.doc_type_id || "1"),
       doc_date: docDate + " 00:00:00", doc_num: docNum, supplier_id: String(supplierId), has_tax: 1, price_mode: 0, fill_delivery_price: 0,
       currency_id: "1", currency_rate: "1", store_load_cat_id: "1", discount: "0", total_costs: 0,
       description: String(body.description || ("Заредено от снимка на документа (" + (supplierName || "") + " № " + docNum + ")"))
     }, rows } };
-    const summary = { supplier: supplierName, supplier_id: supplierId, doc_num: docNum, doc_date: docDate, net, vat: Math.round(net * TAX) / 100, rows: rows.map(r => ({ name: r.original_article_name, amount: Number(r.amount), price: Number(r.delivery_price), total: Number(r.delivery_total) })) };
+    const summary = { host: SHOP ? "точка" : "цех", supplier: supplierName, supplier_id: supplierId, doc_num: docNum, doc_date: docDate, net, vat: Math.round(net * TAX) / 100, rows: rows.map(r => ({ name: r.original_article_name, amount: Number(r.amount), price: Number(r.delivery_price), total: Number(r.delivery_total) })) };
     if (body.dry !== false) { res.status(200).json({ ok: true, dry: true, draft, ...summary }); return; }
-    const sv = await cexCallRoot(payload, user, pass);
+    const sv = await cexCallRoot(payload, user, pass, BASE);
     let lid = null, status = null, total = null;
     try {
-      const hr = await cexCall("Storeloads_getlist", { length: 5, order_by: "store_load_id desc", extra_properties: ["all"] }, user, pass);
+      const hr = await cexCall("Storeloads_getlist", { length: 5, order_by: "store_load_id desc", extra_properties: ["all"] }, user, pass, BASE);
       let H = hr.data || []; if (!Array.isArray(H)) H = Object.values(H);
       const last = H.find(h => String(h.doc_num || "").trim() === docNum);
       if (last) { lid = last.store_load_id; status = last.status; total = last.total_sum; }
