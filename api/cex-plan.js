@@ -1796,6 +1796,22 @@ module.exports = async function handler(req, res) {
   }
 
   // ── ДИАГНОСТИК за „Замести сметка" (само четене): Accounts_edit + редовете + save-метод ──
+  // ── ДИАГНОСТИК (само четене): един документ за зареждане — заглавие + редове (суров формат),
+  // за да се копира точният формат при създаване на зареждане от снимка на фактура. ──
+  if (body.action === "load_inspect") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const lid = Number(body.id);
+    const out = { ok: true, id: lid };
+    if (lid) {
+      try { const r = await cexCallRoot({ Storeloads_edit: { id: lid, store_load_id: lid, params: { bid: 1, id: lid } } }, user, pass); out.edit = String(r.raw || JSON.stringify(r.data || null)).slice(0, 12000); } catch (e) { out.edit_err = String(e && e.message); }
+    }
+    if (body.supplier) {
+      try { const r = await cexCall("Suppliers_getlist", { length: 500 }, user, pass); let L = r.data || []; if (!Array.isArray(L)) L = Object.values(L); const q = String(body.supplier).toLowerCase(); out.suppliers = L.filter(x => JSON.stringify(x).toLowerCase().includes(q)).slice(0, 10); out.suppliers_total = L.length; } catch (e) { out.sup_err = String(e && e.message); }
+    }
+    res.status(200).json(out);
+    return;
+  }
   if (body.action === "account_inspect") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
