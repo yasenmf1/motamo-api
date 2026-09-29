@@ -288,6 +288,7 @@ const DELIVERY = {
 };
 const CEXDATA = require("../lib/_cexdata.js");
 const TG = require("../lib/telegram.js");
+const DRV = require("../lib/driver.js");
 
 // Дни до следващата доставка от този доставчик (0 не се връща — днешният ден е
 // изпуснат). Доставчик без седмичен график чака фиксиран срок.
@@ -1298,6 +1299,16 @@ module.exports = async function handler(req, res) {
     const ROLE_BG = { tochka: "Точка", sklad: "Склад (цех)", shofior: "Шофьор", owner: "Собственик", none: "без роля" };
     try {
       // собственикът натиска бутон за роля
+      if (up.callback_query && /^(st|ok|pb|pr):/.test(String(up.callback_query.data || ""))) {
+        const cu = await TG.userGet(Number((up.callback_query.from || {}).id));
+        if (cu && (cu.role === "shofior" || cu.role === "owner")) { await DRV.handleCallback(up.callback_query, (req.headers && req.headers.host) || "motamo-api.vercel.app"); res.status(200).json({ ok: true }); return; }
+      }
+      // живото местоположение идва като РЕДАКТИРАНО съобщение
+      if (up.edited_message && up.edited_message.location && up.edited_message.chat && up.edited_message.chat.type === "private") {
+        const eu = await TG.userGet(Number((up.edited_message.from || {}).id));
+        if (eu && (eu.role === "shofior" || eu.role === "owner")) await DRV.handleLocation(Number(up.edited_message.from.id), up.edited_message.location, (req.headers && req.headers.host) || "motamo-api.vercel.app");
+        res.status(200).json({ ok: true }); return;
+      }
       if (up.callback_query) {
         const cq = up.callback_query, from = cq.from || {};
         const m = /^role:(\d+):(tochka|sklad|shofior|none)$/.exec(String(cq.data || ""));
@@ -1309,7 +1320,7 @@ module.exports = async function handler(req, res) {
         if (cq.message) await TG.tgApi("editMessageText", { chat_id: cq.message.chat.id, message_id: cq.message.message_id, parse_mode: "HTML",
           text: `✓ <b>${TG.escHtml((u && u.name) || uid)}</b> е <b>${ROLE_BG[role]}</b>` });
         if (role === "tochka") await TG.tgSend("✅ Одобрен си като <b>Точка</b>.\nЗа заявка към цеха напиши <b>заявка</b> (до 10:00 всеки ден).", String(uid), null, formBtn());
-        else if (role === "shofior") await TG.tgSend("✅ Одобрен си като <b>Шофьор</b>. Скоро тук ще е маршрутът за разноса.", String(uid));
+        else if (role === "shofior") await TG.tgSend("✅ Одобрен си като <b>Шофьор</b>.\nСлед като натовариш, напиши <b>маршрут</b> — ще ти дам спирките за деня с навигация.", String(uid));
         else if (role === "sklad") await TG.tgSend("✅ Одобрена си като <b>Склад (цех)</b>.\nТук ще идват заявките от точката. Напиши <b>заявка</b>, за да ги отвориш.", String(uid), null, skladBtn());
         res.status(200).json({ ok: true }); return;
       }
@@ -1327,6 +1338,13 @@ module.exports = async function handler(req, res) {
           res.status(200).json({ ok: true }); return;
         }
         const role = u.role;
+        const hostD = (req.headers && req.headers.host) || "motamo-api.vercel.app";
+        if (role === "shofior" || (role === "owner" && (msgU.location || /маршрут/i.test(text)))) {
+          if (msgU.location) await DRV.handleLocation(uid, msgU.location, hostD);
+          else if (msgU.photo) await DRV.handlePhoto(uid, msgU);
+          else await DRV.handleText(uid, text, hostD);
+          res.status(200).json({ ok: true }); return;
+        }
         const wantsReq = /заявк|zayav|^\/zayavka/i.test(text);
         if (role === "tochka" || role === "owner") {
           if (wantsReq || /^\/start/.test(text)) { await TG.tgSend("📝 Попълни заявката към цеха (до 10:00):", String(uid), null, formBtn()); res.status(200).json({ ok: true }); return; }

@@ -2284,6 +2284,21 @@ module.exports = async function handler(req, res) {
     res.status(200).json({ ok: true, kind: oldCur ? "addition" : "full", shops: shopsN });
     return;
   }
+  // ★ S25 — кои обекти имат СТОКОВА за деня (за маршрута на шофьора). Досинхронизира кеша на
+  // документите (кратко) и връща ключовете „client:person". Само четене.
+  if (body.action === "driver_stops") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    let sync = null;
+    try { sync = await syncDocCache(user, pass, 20000); } catch (e) { sync = { error: String(e && e.message).slice(0, 200) }; }
+    try {
+      const docs = await sbAll(`cex_docs?select=inv_id,client_id,person_id&type_id=eq.11&is_anulate=eq.0&doc_date=eq.${date}`);
+      const keys = [...new Set(docs.map(d => (d.client_id != null ? d.client_id : "") + ":" + (d.person_id != null ? d.person_id : "")))];
+      res.status(200).json({ ok: true, date, keys, docs: docs.length, sync });
+    } catch (e) { res.status(502).json({ ok: false, error: String(e && e.message).slice(0, 200), sync }); }
+    return;
+  }
   if (body.action === "suggest") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
