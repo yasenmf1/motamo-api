@@ -427,6 +427,17 @@ async function dashData(from, to, expenses, user, pass) {
     }
   }
 
+  // ── КЛИЕНТ × АРТИКУЛ: кой клиент колко бройки от всеки артикул (справка „Продажби по
+  // артикули" с filters.client — проверено 29.09: СиБиЕс ≠ общото). По 4 паралелно.
+  await mapLimit(clients, 4, async (c) => {
+    try {
+      const r = await reportSalesByArticles(from, to, user, pass, c.client_id);
+      c.arts = (r.articles || []).filter(a => a.units > 0).map(a => ({ id: a.article_id, name: a.name,
+        units: Math.round(a.units * 100) / 100, revenue: Math.round(a.revenue * 100) / 100 }));
+      c.arts_incomplete = !!r.incomplete;
+    } catch (e) { c.arts = null; }
+  });
+
   // ── ФАЗА 2: себестойност + печалба по артикул (от справка „Продажби по артикули") ──
   // СКЛАД в пари: наличност (store_amount) × средна себестойност/бр, само положителните
   // (суровини със знак минус са незаписани зареждания и биха обезсмислили сумата).
@@ -1098,6 +1109,7 @@ form.period button{font:14px system-ui;font-weight:700;padding:7px 14px;border:0
 .quick{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .quick a{font:12px system-ui;font-weight:700;text-decoration:none;color:#374151;background:#e7eaef;border-radius:20px;padding:5px 12px}
 .quick a:hover{background:#d7dbe2}
+table.cxa th.v{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;font-size:12px;padding:6px 4px}table.cxa td{white-space:nowrap}table.cxa td.n{position:sticky;left:0;background:#fff}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
 .kpi{background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 2px 8px rgba(20,23,26,.08);border-left:5px solid #cfd4da;transition:transform .12s}
 .kpi:hover{transform:translateY(-2px)}
@@ -1170,6 +1182,21 @@ ${tips ? `<div class="card"><h2>💡 Съвети / Наблюдения</h2><ul
   <details class="tbl" open><summary>таблица</summary>
   <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Маржин</th><th class="q">Фактурирано</th><th class="q">Без фактура</th><th class="q">Сметки</th></tr></thead>
   <tbody>${rows || '<tr><td colspan="6" class="note">Няма затворени сметки в периода.</td></tr>'}</tbody></table></details></div>
+${(() => {
+  const cl = err ? [] : (data.clients || []).filter(c => Array.isArray(c.arts) && c.arts.length);
+  if (!cl.length) return "";
+  const tot = {}, nm = {};
+  for (const c of cl) for (const a of c.arts) { tot[a.id] = (tot[a.id] || 0) + a.units; nm[a.id] = a.name; }
+  const menuId = id => { const m = ARTS[String(id)]; return m ? (m.is_menu || m.is_set) : true; };
+  const cols = Object.keys(tot).filter(menuId).sort((a, b) => tot[b] - tot[a]).slice(0, 14);
+  const n0 = v => v ? Math.round(v).toLocaleString("bg-BG") : "";
+  const head = cols.map(id => `<th class="q v">${esc(nm[id])}</th>`).join("");
+  const body = cl.map(c => { const u = {}; let rest = 0, all = 0; for (const a of c.arts) { if (cols.includes(String(a.id))) u[a.id] = a.units; else if (menuId(a.id)) rest += a.units; if (menuId(a.id)) all += a.units; }
+    return `<tr><td class="n">${esc(c.name)}</td>${cols.map(id => `<td class="q">${n0(u[id])}</td>`).join("")}<td class="q">${n0(rest)}</td><td class="q"><b>${n0(all)}</b></td></tr>`; }).join("");
+  const foot = `<tr><td class="n"><b>Общо</b></td>${cols.map(id => `<td class="q"><b>${n0(tot[id])}</b></td>`).join("")}<td class="q"></td><td class="q"></td></tr>`;
+  return `<div class="card"><h2>🧾 Кой клиент какво купува<span>бройки за периода</span></h2>
+  <div style="overflow-x:auto"><table class="cxa"><thead><tr><th>Клиент</th>${head}<th class="q">Други</th><th class="q">Общо</th></tr></thead><tbody>${body}${foot}</tbody></table></div></div>`;
+})()}
 <div class="card"><h2>📄 Чакат фактура<span>${waiting.length} клиента · общо ${bg(gapNeto)} €</span></h2>
   <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Фактурирано</th><th class="q">Без фактура</th></tr></thead>
   <tbody>${waitRows || '<tr><td colspan="4" class="note">Всичко е фактурирано 🎉</td></tr>'}</tbody></table></div>
