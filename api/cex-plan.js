@@ -12,6 +12,7 @@
 
 const crypto = require("crypto");
 const DATA = require("../lib/_cexdata.js");
+const TG = require("../lib/telegram.js");
 const ARTS = DATA.articles, NAME2ID = DATA.name2id;
 const MENU = Object.values(ARTS).filter(a => a.is_menu)
   .sort((a, b) => (a.is_set - b.is_set) || (a.id - b.id))
@@ -1505,7 +1506,7 @@ h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.
 <span id="tokwrap"><input id="tok" type="password" placeholder="токен" size="16"></span>
 <span class="grp"><label>Зареди</label><input id="date" type="date" lang="bg-BG"><b class="dlab" id="dlab"></b><button class="alt" onclick="loadRazos()" title="Зарежда РАЗНОСА за деня = отворените сметки (направени в навечерието/сутринта), без вчерашните затворени. За ③ Стокова.">Отворени сметки</button><button class="alt" onclick="loadByLot()" title="Зарежда сметките от партида L.[деня от Зареди] (±2 дни), през реалните движения. За референтен минал ден или преди ③ Стокова.">↻ По партида</button></span>
 <span class="grp"><button class="alt" onclick="loadSug()" title="Средно изпратено в същия ден от седмицата (последните 4) минус % връщане. Датата е от „Партида". Не пише в Barsy.">Предложение</button><button class="alt" onclick="fillSug()" title="Слага предложението в полетата на ТИКНАТИТЕ магазини">Попълни</button></span>
-<span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="openPicker()" title="Добави магазин, който днешният разнос не е заредил">+ Магазин</button></span>
+<span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="openPicker()" title="Добави магазин, който днешният разнос не е заредил">+ Магазин</button><button class="alt" onclick="sendTg()" title="Праща плана от последното Изчисли (датата в Партида) в Telegram групата на цеха. Пак натиснато = само разликата.">📤 Прати на цеха</button></span>
 <span class="grp"><label>Партида</label><input id="pdate" type="date" lang="bg-BG" title="Партида L.<тази дата>, срок +3 дни"><b class="dlab" id="plab"></b></span>
 <span class="grp"><button class="prod" onclick="doZagotovki()">① Заготовки</button><button class="prod" onclick="doArticles()">② Артикули</button><button class="acc" onclick="doAccounts()">③ Генерирай сметки</button><button class="acc" onclick="doStokova()">④ Генерирай стокова</button></span></header>
 <div class="wrap"><div id="msg" class="msg"></div><div class="scroll"><table id="grid"></table></div><div id="planbox"></div></div>
@@ -1538,6 +1539,7 @@ shops.forEach(function(s,i){var full=(s.client||'')+(s.rep?(' · '+s.rep):'');va
 var sg=sugFor(s);MENU.forEach(function(m){var v=(s.order&&s.order[m.name])||0;var p=sg?sg[m.name]:null;var ph=sg?'<small class="sug" title="'+(p?('средно '+p.avg+' за '+p.weeks+(p.same?' същи дни':' последни доставки')+(p.rate?(', връщане '+p.rate+'%'):'')):'не е взимал')+'">пр. '+(p?p.n:0)+'</small>':'';h+='<td class="'+(m.is_set?'set':'')+'"><input data-i="'+i+'" data-n="'+esc(m.name)+'" value="'+v+'" inputmode="numeric">'+ph+'</td>'});h+='</tr>'});$('grid').innerHTML=h;
 var sa=$('selall');if(sa){sa.addEventListener('change',function(){document.querySelectorAll('#grid .selbox').forEach(function(cb){cb.checked=sa.checked});syncRows()})}
 document.querySelectorAll('#grid .selbox').forEach(function(cb){cb.addEventListener('change',syncRows)});syncRows();saveGrid()}
+function sendTg(){var d=$('pdate').value||$('date').value;if(!d){msg('Избери дата в «Партида».','err');return}if(!confirm('Да пратя плана за '+d.split('-').reverse().join('.')+' в Telegram групата на цеха?'))return;msg('Пращам в Telegram…');api({action:'tg_send_plan',date:d}).then(function(j){if(j.ok){msg(j.unchanged?j.message:(j.kind==='addition'?'✓ Пратено ДОПЪЛНЕНИЕ (само разликата).':'✓ Планът е пратен в групата.'),'ok')}else msg('Не е пратено: '+(j.message||j.error||''),'err')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 var SUG=null;function sugFor(s){if(!SUG)return null;var k=(s.client_id!=null?s.client_id:'')+':'+(s.person_id!=null?s.person_id:'');return SUG[k]||null}
 function loadSug(){var d=$('pdate').value||$('date').value;if(!d){msg('Избери дата в „Партида" (деня на разноса).','err');return}var n=0;msg('Смятам предложението за '+d.split('-').reverse().join('.')+'…');
 (function go(){api({action:'suggest',date:d}).then(function(j){if(!j.ok){msg('Грешка: '+(j.message||j.error||''),'err');return}var p=j.sync&&j.sync.pending;if(p&&++n<5){msg('Чета стари стокови от Barsy… остават '+p+'.');go();return}SUG=j.by||{};collect();renderGrid();var c=shops.filter(function(s){return sugFor(s)}).length;msg('Предложение за '+d.split('-').reverse().join('.')+': сивото „пр. N" под всяко поле ('+c+' от '+shops.length+' магазина имат история). „Попълни" го слага в полетата.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})})()}
@@ -1777,7 +1779,7 @@ module.exports = async function handler(req, res) {
   // Пишещите действия искат силен токен; „stock" е само четене → и CEX_VIEW_TOKEN.
   const strong = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN];
   // Само ПИШЕЩИТЕ действия искат силен токен; четенето/смятането приемат и четящия.
-  const writeActions = ["create_accounts", "produce_plan", "create_production", "create_stokova", "replace_account", "create_load"];
+  const writeActions = ["tg_send_plan", "create_accounts", "produce_plan", "create_production", "create_stokova", "replace_account", "create_load"];
   // create_stokova/replace_account с dry само СГЛОБЯВАТ (не записват) → приемат и четящия токен.
   // replace_account е DRY по подразбиране (пише само при изричен dry:false).
   const isWrite = writeActions.includes(body.action)
@@ -2220,6 +2222,60 @@ module.exports = async function handler(req, res) {
   // Партида→сметка през справка Reports_lot_list_details (движения „AC", ref_id=сметка).
   // Предложение за поръчка: досинхронизира кеша (бюджет ~35 s) и смята за деня.
   // pending > 0 → първото пълнене не е свършило, клиентът вика пак. Не пише в Barsy.
+  // ★ S25 — „📤 Прати на цеха": планът от последното „Изчисли" за деня отива в Telegram
+  // групата. Първо натискане = целият план; следващо (добавен магазин) = само разликата
+  // („ДОПЪЛНЕНИЕ"). Помни пратеното в Supabase `cex_tg_sent` (kind "plan").
+  if (body.action === "tg_send_plan") {
+    const NL = "\n";
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    const snap = await sbGetPlan(date).catch(() => null);
+    if (!snap || String(snap.for_date).slice(0, 10) !== date) {
+      res.status(200).json({ ok: false, error: "no_plan", message: "Няма изчислен план за " + date + " — натисни «Изчисли» с тази дата в «Партида»." }); return;
+    }
+    const p = snap.produce || {};
+    const groups = [["🍱 Сетове", p.sets || {}], ["🍣 Ролки / поке", p.rolls || {}], ["🥣 Заготовки", p.zagotovki || {}]];
+    const cur = {};
+    for (const [g, o] of groups) for (const [n, q] of Object.entries(o)) if (Number(q)) cur[g + "|" + n] = Number(q);
+    const prev = body.full ? null : await TG.sentGet("plan", date).catch(() => null);
+    const old = (prev && prev.payload) || null;
+    const dd = date.split("-").reverse().slice(0, 2).join(".");
+    const fmtQ = q => String(Math.round(q * 1000) / 1000).replace(".", ",");
+    const shopsN = Array.isArray(snap.shops) ? snap.shops.length : 0;
+    let text;
+    if (!old) {
+      const parts = [`📋 <b>План за ${dd}</b> (${shopsN} магазина)`];
+      for (const [g, o] of groups) {
+        const rows = Object.entries(o).filter(([, q]) => Number(q));
+        if (rows.length) parts.push(NL + `<b>${g}</b>` + NL + rows.map(([n, q]) => `• ${TG.escHtml(n)} — <b>${fmtQ(Number(q))}</b>`).join(NL));
+      }
+      text = parts.join(NL);
+    } else {
+      const add = [], less = [];
+      for (const k of new Set([...Object.keys(cur), ...Object.keys(old)])) {
+        const d = (cur[k] || 0) - (old[k] || 0);
+        if (Math.abs(d) < 1e-9) continue;
+        const [g, n] = k.split("|");
+        (d > 0 ? add : less).push(`• ${TG.escHtml(n)} — <b>${d > 0 ? "+" : "−"}${fmtQ(Math.abs(d))}</b> <i>(${g.split(" ").slice(1).join(" ").toLowerCase()})</i>`);
+      }
+      if (!add.length && !less.length) { res.status(200).json({ ok: true, unchanged: true, message: "Няма промяна спрямо пратеното — нищо не е изпратено." }); return; }
+      text = `➕ <b>ДОПЪЛНЕНИЕ към плана за ${dd}</b> (вече ${shopsN} магазина)`
+        + (add.length ? NL + NL + "<b>Направете още:</b>" + NL + add.join(NL) : "")
+        + (less.length ? NL + NL + "<b>По-малко от пратеното:</b>" + NL + less.join(NL) : "");
+      // Собственикът (29.09): при допълнение — и ОБЩОТО за деня, за да не събират на ръка.
+      const tot = [];
+      for (const [g, o] of groups) {
+        const rows = Object.entries(o).filter(([, q]) => Number(q));
+        if (rows.length) tot.push(`<b>${g}</b>` + NL + rows.map(([n, q]) => `• ${TG.escHtml(n)} — <b>${fmtQ(Number(q))}</b>`).join(NL));
+      }
+      if (tot.length) text += NL + NL + "━━━━━━━━━━" + NL + `📋 <b>ОБЩО за ${dd}</b>` + NL + NL + tot.join(NL + NL);
+    }
+    if (body.dry) { res.status(200).json({ ok: true, dry: true, kind: old ? "addition" : "full", text }); return; }
+    const r = await TG.tgSend(text);
+    if (!r.ok) { res.status(502).json({ ok: false, error: "telegram", message: r.error }); return; }
+    await TG.sentSave("plan", date, cur).catch(() => {});
+    res.status(200).json({ ok: true, kind: old ? "addition" : "full", items: Object.keys(cur).length });
+    return;
+  }
   if (body.action === "suggest") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }

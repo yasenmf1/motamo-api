@@ -10,5 +10,11 @@
     "api/cex-plan.js": {
       "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/transfer?cron=stock",
+      "schedule": "0 4 * * 1-6"
+    }
+  ]
 }
