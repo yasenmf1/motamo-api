@@ -1181,6 +1181,8 @@ const SUPPLY_PACK = {
   127: { name: "плик 500 г", size: 0.5 }      // Пиле панирано (Брадърс, Майстор Гош 500 г)
 };
 const ORDER_SUPPLIERS = ["Фиш Експрес", "Алекс Фиш", "Брадърс", "Айсбокс"];
+// Viber номерата на доставчиците (собственикът, 29.09). Брадърс — предстои.
+const SUPPLIER_VIBER = { "Фиш Експрес": "+359889809424", "Айсбокс": "+359887333179", "Алекс Фиш": "+359893612634" };
 function orderPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Поръчка към доставчик</title>
@@ -1205,7 +1207,7 @@ pre.tx{white-space:pre-wrap;font:inherit;font-size:14px;border:1px solid var(--l
 <div class="acts" id="acts" style="display:none"><a class="btn" id="vb" href="#">Viber до доставчика</a><button class="ghost" onclick="cp()">📋 Копирай</button><button class="ghost" onclick="toOwner()">✈️ Прати на Ясен</button></div>
 </div>
 <script>
-var K=${JSON.stringify(k)},PK=${JSON.stringify(SUPPLY_PACK)},SUPS=${JSON.stringify(ORDER_SUPPLIERS)},RAW=[],SEL=SUPS[0];
+var K=${JSON.stringify(k)},PK=${JSON.stringify(SUPPLY_PACK)},SUPS=${JSON.stringify(ORDER_SUPPLIERS)},PH=${JSON.stringify(SUPPLIER_VIBER)},RAW=[],SEL=SUPS[0];
 function $(i){return document.getElementById(i)}
 function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
@@ -1224,7 +1226,8 @@ function lines(){var out=[];document.querySelectorAll('#tb input').forEach(funct
 out.push('• '+r.n+' — '+(p?f(v)+' × '+p.name+' (общо '+f(v*p.size)+' '+r.u+')':f(v)+' '+r.u))});return out}
 function txt(){var l=lines();if(!l.length){$('tx').style.display='none';$('acts').style.display='none';return}
 var d=new Date();var t='Здравейте! Поръчка от Човек и Бъдеще Ст.Загора, Хрищенско 30:'+String.fromCharCode(10)+l.join(String.fromCharCode(10))+String.fromCharCode(10)+'Благодаря!';
-$('tx').textContent=t;$('tx').style.display='';$('acts').style.display='';$('vb').href='viber://forward?text='+encodeURIComponent(t)}
+$('tx').textContent=t;$('tx').style.display='';$('acts').style.display='';var ph=PH[SEL];$('vb').textContent=ph?('Viber до '+SEL):'Viber (избери чат)';$('vb').href=ph?('viber://chat?number='+encodeURIComponent(ph)):('viber://forward?text='+encodeURIComponent(t))}
+$('vb')&&document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('#vb');if(!a||!PH[SEL])return;var t=$('tx').textContent;try{navigator.clipboard&&navigator.clipboard.writeText(t)}catch(x){}msg('✓ Поръчката е копирана — в чата задръж и натисни Paste / Постави.','ok')})
 function cp(){var t=$('tx').textContent;(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){msg('✓ Копирано','ok')},function(){prompt('Копирай:',t)})}
 function toOwner(){var t='Поръчка към '+SEL+':'+String.fromCharCode(10)+lines().join(String.fromCharCode(10));if(!confirm('Да пратя на Ясен в Telegram?'))return;
 fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:K,action:'tg_supply',text:t})}).then(function(r){return r.json()}).then(function(j){msg(j.ok?'✓ Пратено на Ясен':'Не мина: '+(j.error||''),j.ok?'ok':'err')})}
