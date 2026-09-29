@@ -1838,7 +1838,7 @@ module.exports = async function handler(req, res) {
     if (body.inv_id) {
       const out = {};
       for (const [m, p] of [["Invoices_get", { inv_id: Number(body.inv_id), id: Number(body.inv_id) }], ["Invoices_getitems", { inv_id: Number(body.inv_id) }], ["Invoiceitems_getlist", { filters: { inv_id: Number(body.inv_id) } }]]) {
-        try { const r = await cexCall(m, p, user, pass); out[m] = String(r.raw || "").slice(0, 2500); } catch (e) { out[m] = "ERR " + e.message; }
+        try { const r = await cexCall(m, p, user, pass); out[m] = String(r.raw || "").slice(0, 30000); } catch (e) { out[m] = "ERR " + e.message; }
       }
       res.status(200).json({ ok: true, out }); return;
     }
