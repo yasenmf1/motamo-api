@@ -1041,6 +1041,15 @@ module.exports = async function handler(req, res) {
   // ★ S25 — сигнал за склада в Telegram групата: Vercel cron всяка сутрин (GET ?cron=stock)
   // или ръчно (POST action tg_stock_alert). Суровини, които НЯМА да стигнат до доставката
   // (+2 дни резерв). Най-много веднъж на ден (Supabase `cex_tg_sent`, kind "stock").
+  // ★ S25 — полунощ: ботът трие съобщенията си, чийто ден е минал (Vercel cron ?cron=clean).
+  if (req.method === "GET" && q.cron === "clean") {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    res.status(200).json(await TG.tgCleanup());
+    return;
+  }
   const isCron = req.method === "GET" && q.cron === "stock";
   const manual = req.method === "POST" && req.body && (typeof req.body === "object" ? req.body : {}).action === "tg_stock_alert";
   if (isCron || manual) {
@@ -1051,7 +1060,7 @@ module.exports = async function handler(req, res) {
     const manOk = manual && viewTokens.some(t => b.token === t);
     if (!cronOk && !manOk) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
     const NL = "\n";
-    const today = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+    const today = TG.sofiaDate();
     if (!b.force && !b.dry) { const was = await TG.sentGet("stock", today).catch(() => null); if (was) { res.status(200).json({ ok: true, skipped: "already_sent_today" }); return; } }
     const rep = await stockReport();
     const low = (rep.raw || []).filter(r => r.c !== null && r.c - r.lead < 2).sort((a, b2) => (a.c - a.lead) - (b2.c - b2.lead));
@@ -1061,7 +1070,7 @@ module.exports = async function handler(req, res) {
     const link = staffKey() ? NL + NL + `Склад и поръчка: https://motamo-api.vercel.app/api/transfer?view=stock&k=${staffKey()}` : "";
     const text = `⚠️ <b>Склад — няма да стигнат до доставката</b>` + NL + lines.join(NL) + link;
     if (b.dry) { res.status(200).json({ ok: true, dry: true, text }); return; }
-    const r = await TG.tgSend(text);
+    const r = await TG.tgSend(text, null, today);
     if (!r.ok) { res.status(502).json({ ok: false, error: "telegram", message: r.error }); return; }
     await TG.sentSave("stock", today, { items: low.map(x => x.n) }).catch(() => {});
     res.status(200).json({ ok: true, sent: low.length });

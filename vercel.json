@@ -15,6 +15,10 @@
     {
       "path": "/api/transfer?cron=stock",
       "schedule": "0 4 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=clean",
+      "schedule": "5 21 * * *"
     }
   ]
 }

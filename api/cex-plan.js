@@ -2278,7 +2278,7 @@ module.exports = async function handler(req, res) {
         + NL + NL + "━━━━━━━━━━" + NL + `📋 <b>ОБЩО за ${dd}</b> (${shopsN} магазина)` + NL + NL + listing();
     }
     if (body.dry) { res.status(200).json({ ok: true, dry: true, kind: oldCur ? "addition" : "full", text }); return; }
-    const r = await TG.tgSend(text);
+    const r = await TG.tgSend(text, null, date);
     if (!r.ok) { res.status(502).json({ ok: false, error: "telegram", message: r.error }); return; }
     await TG.sentSave("plan", date, { shops: merged }).catch(() => {});
     res.status(200).json({ ok: true, kind: oldCur ? "addition" : "full", shops: shopsN });
