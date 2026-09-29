@@ -19,6 +19,14 @@
     {
       "path": "/api/transfer?cron=clean",
       "schedule": "5 21 * * *"
+    },
+    {
+      "path": "/api/transfer?cron=rice",
+      "schedule": "0 6 * * 1-5"
+    },
+    {
+      "path": "/api/transfer?cron=remind",
+      "schedule": "30 6 * * 1-5"
     }
   ]
 }

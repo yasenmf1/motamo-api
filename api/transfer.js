@@ -685,7 +685,7 @@ ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
 <div class="wrap">${navBar(k, "cex")}<div id="days" class="days"></div><div id="msg" class="msg info">Зареждам…</div><div id="list"></div></div>
 <div id="busy"><div class="sp"></div><div class="tx">Обработва се…</div><div class="sub" id="busysub">Не натискай пак — Barsy записва документите.</div></div>
 <script>
-var K=${JSON.stringify(k)};
+var K=${JSON.stringify(k)};var ZAGIDS=${JSON.stringify(ZAG)};
 function $(i){return document.getElementById(i)}
 /* Съобщението е най-горе, а бутоните са долу в разгънатата карта — без това
    скролване изглежда, че натискаш и „нищо не става". */
@@ -716,7 +716,7 @@ var stock=x.cex_stock,low=(stock!=null&&stock<x.qty),p=x.pack;
 h+='<tr><td>'+esc(x.name)+(p?'<span class="sub2">'+n3(p.count)+' '+esc(p.plural)+' по '+(p.size*1000)+' г</span>':'')+'</td><td class="num">'+n3(x.qty)+' '+esc(x.unit||'')+'</td>';
 if(edit){h+='<td class="num"><input class="q" type="number" min="0" step="any" inputmode="decimal" data-r="'+esc(r.id)+'" data-id="'+x.cex_id+'" data-max="'+(stock==null?'':stock)+'" value="'+n3(Math.min(x.qty,stock==null?x.qty:Math.max(0,stock)))+'" oninput="chk(this)"></td>'}
 else{var s=x.sent;h+='<td class="num '+(s==null?'':(Number(s)<Number(x.qty)?'cut':'sent'))+'">'+(s==null?'—':n3(s))+'</td>'}
-h+='<td class="num'+(low?' neg':'')+'">'+(stock==null?'—':n3(stock))+'</td></tr>'});
+h+='<td class="num'+(low?' neg':'')+'">'+(stock==null?'—':n3(stock))+(edit&&low&&ZAGIDS.indexOf(Number(x.cex_id))>=0?'<br><button class="ghost" style="margin-top:4px;padding:4px 8px;font-size:12px" onclick="produce('+Number(x.cex_id)+','+(Number(x.qty)-Math.max(0,Number(stock)))+',&quot;'+esc(x.name)+'&quot;)">Произведи '+n3(Number(x.qty)-Math.max(0,Number(stock)))+'</button>':'')+'</td></tr>'});
 h+='</table>';
 if(r.error)h+='<div class="msg err" style="display:block">'+esc(r.error)+'</div>';
 if(r.status==='done')h+='<div class="docs">цех прехвърляне №'+esc(r.cex_doc_id||'?')+' · точка зареждане №'+esc(r.shop_doc_id||'?')+'</div>';
@@ -724,6 +724,9 @@ if(edit)h+='<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><bu
 if(r.status==='partial')h+='<div style="margin-top:12px"><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Опитай пак точката</button></div>';
 h+='</div></div>'});
 $('list').innerHTML=h}
+function produce(cid,amt,name){amt=Math.round(amt*1000)/1000;if(!confirm('Да произведа '+amt+' от «'+name+'» по рецептата (записва се в Barsy)?'))return;
+busy('Произвеждам…','Записвам производството в Barsy. Не натискай пак.');
+api({action:'produce_zag',cex_id:cid,amount:amt}).then(function(j){free();if(!j.ok){msg('Производството НЕ мина: '+(j.error||''),'err',1);return}msg('✓ Произведено '+amt+' «'+name+'». Провери количествата и натисни «Издай документите».','ok',1);load()}).catch(function(e){free();msg('Мрежова грешка: '+e,'err',1)})}
 function tog(id){OPEN[id]=!OPEN[id];renderList()}
 function chk(i){var mx=i.dataset.max;if(mx!==''&&Number(i.value)>Number(mx)){i.value=n3(mx);i.style.borderColor='#d97706'}else{i.style.borderColor=''}}
 function sendMap(id){var m={};document.querySelectorAll('input.q[data-r="'+id+'"]').forEach(function(i){m[i.dataset.id]=Number(i.value)||0});return m}
@@ -827,6 +830,7 @@ const NAV = [
   { v: "stock", t: "Складът на цеха", own: true }
 ];
 function navBar(k, cur) {
+  if (k && (k === TG.skladKey() || k === TG.pointKey())) return ""; // ролевите ключове виждат само своя екран
   const own = isOwner(k);
   const items = NAV.filter(x => own || !x.own).map(x =>
     x.v === cur ? `<span class="on">${x.t}</span>`
@@ -994,7 +998,10 @@ function renderOrd(){var by=orderLines(),sups=Object.keys(by);TX=[];if(!sups.len
 var all='Заявка за поръчка — цех MOTAMO, '+today()+NL;var h='';
 sups.forEach(function(s){var t='Поръчка от MOTAMO (цех, Стара Загора) — '+today()+NL+by[s].join(NL);all+=NL+s+':'+NL+by[s].join(NL)+NL;
 h+='<div class="og"><b>'+esc(s)+'</b><pre>'+esc(by[s].join(NL))+'</pre>'+btns(t)+'Viber до доставчика</a></div>'});
-$('ord').innerHTML='<div class="og all"><b>Всичко до Ясен</b>'+btns(all)+'Viber до Ясен</a></div>'+h}
+var ti=TX.push(all)-1;
+$('ord').innerHTML='<div class="og all"><b>Всичко до Ясен</b><button class="tgs" data-x="'+ti+'">✈️ Telegram до Ясен</button> '+btns(all)+'Viber до Ясен</a></div>'+h}
+document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('button.tgs');if(!b)return;var t=TX[+b.getAttribute('data-x')];if(!confirm('Да пратя заявката за зареждане на Ясен в Telegram?'))return;b.disabled=true;b.textContent='Пращам…';
+fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:K,action:'tg_supply',text:t})}).then(function(r){return r.json()}).then(function(j){b.textContent=j.ok?'✓ Пратено на Ясен':'✗ Не мина';if(!j.ok)b.disabled=false}).catch(function(){b.textContent='✗ Мрежова грешка';b.disabled=false})});
 document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('button.cp');if(!b)return;var t=TX[+b.getAttribute('data-x')];
 (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){b.textContent='✓ Копирано'},function(){prompt('Копирай текста:',t)})});
 function slack(r){return r.c===null?999:(r.c-r.lead)}
@@ -1035,27 +1042,8 @@ load();
 // Постоянна дневна заявка: всеки работен ден 4 кг заг. Сварен суши ориз (собственикът, 29.09 —
 // „към момента им стига"; при увеличение се сменя тук).
 const STANDING_REQUEST = [{ cex_id: 67, qty: 4 }];
-// Автоматичното изпълнение е ИЗКЛЮЧЕНО, докато собственикът не каже в колко часа тръгва оризът
-// (трябва да е СЛЕД ① Заготовки, иначе в цеха няма 4 кг „на хартия"). Оризът вече не е във формата.
-const STANDING_ENABLED = false;
-// Постоянното прехвърляне се ИЗПЪЛНЯВА само (двата документа в Barsy), без никой да натиска:
-// вика собствения обработчик с process_request, dry:false — същият път като бутона на цеха.
-async function runStanding(handler) {
-  const cr = await createRequest(STANDING_REQUEST, "постоянно дневно прехвърляне", "", true);
-  if (!cr.ok) return cr;
-  const tok = [process.env.OWNER_TOKEN, process.env.TRANSFER_TOKEN, process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].find(Boolean);
-  const out = await new Promise((resolve) => {
-    const res = { statusCode: 200, setHeader() {}, status(c) { this.statusCode = c; return this; }, json(o) { resolve(o); }, send(b) { resolve({ ok: false, error: String(b).slice(0, 200) }); } };
-    Promise.resolve(handler({ method: "POST", query: {}, headers: {}, body: { token: tok, action: "process_request", id: cr.id, dry: false } }, res))
-      .catch(e => resolve({ ok: false, error: String(e && e.message) }));
-  });
-  const it = STANDING_REQUEST.map(x => x.qty + " кг").join(", ");
-  const text = out.ok
-    ? `✅ <b>Дневно прехвърляне в точката</b> — заг. Сварен суши ориз ${it}` + "\n" + `цех №${out.cex_doc_id || "?"} → точка №${out.shop_doc_id || "?"}` + (out.short && out.short.length ? "\n⚠ " + TG.escHtml(out.short.join(" · ")) : "")
-    : `⚠️ <b>Дневното прехвърляне на ориз НЕ мина</b>` + "\n" + TG.escHtml(String(out.error || "").slice(0, 300)) + "\nПусни го ръчно от екрана на цеха (заявките).";
-  await TG.tgSend(text, null, TG.sofiaDate()).catch(() => {});
-  return { ok: !!out.ok, request_id: cr.id, cex_doc_id: out.cex_doc_id, shop_doc_id: out.shop_doc_id, error: out.error };
-}
+// Автоматичното изпълнение: cron ?cron=rice в 9:00; ако в цеха няма 4 кг „на хартия" — произвежда липсата.
+const STANDING_ENABLED = true; // 9:00 Пн–Пт (собственикът, 29.09: „произвеждаме и изпращаме всяка сутрин в 9.00")
 async function createRequest(raw, note, tag, silent) {
   const want = new Map();
   for (const r of raw) {
@@ -1085,10 +1073,60 @@ async function createRequest(raw, note, tag, silent) {
     const lines = items.map(it => `• ${TG.escHtml(it.name)} — <b>${it.pack ? fq(it.pack.count) + " " + TG.escHtml(it.pack.count === 1 ? it.pack.name : it.pack.plural) : fq(it.qty) + " " + TG.escHtml(it.unit)}</b>`
       + (it.cex_stock != null ? ` <i>(в цеха: ${fq(it.cex_stock)})</i>` : ""));
     const hm = new Intl.DateTimeFormat("bg-BG", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit" }).format(new Date());
-    const text = `🏪 <b>${tag || "Заявка от точката (Каравелов)"}</b> · ${hm}` + NL + NL + lines.join(NL) + (note ? NL + NL + "📝 " + TG.escHtml(note) : "");
+    const late = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Sofia", hour: "2-digit", hour12: false }).format(new Date())) >= 10;
+    const text = `🏪 <b>${tag || "Заявка от точката (Каравелов)"}</b> · ${hm}${late ? " ⏰ след 10:00" : ""}` + NL + NL + lines.join(NL) + (note ? NL + NL + "📝 " + TG.escHtml(note) : "");
     await TG.tgSend(text, null, TG.plusDays(TG.sofiaDate(), 1));
+    await TG.sendToRole("sklad", text, TG.plusDays(TG.sofiaDate(), 1),
+      { inline_keyboard: [[{ text: "📦 Отвори и изпълни", url: `https://motamo-api.vercel.app/api/transfer?view=cex&k=${TG.skladKey()}` }]] });
   } catch (e) {}
   return { ok: true, id: ins.row && ins.row.id, items_count: items.length };
+}
+
+// Производство на заготовка през цех калкулатора (create_production, без партида —
+// заготовките не са на партиди). Вика се от сървъра със силния токен от env.
+async function produceZag(cexId, amount, host) {
+  const tok = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN].find(Boolean);
+  if (!tok) return { ok: false, error: "няма силен токен в env" };
+  const r = await fetch(`https://${host || "motamo-api.vercel.app"}/api/cex-plan`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: tok, action: "create_production", rows: [{ article_id: Number(cexId), amount: Math.round(Number(amount) * 1000) / 1000 }], lot: "",
+      description: "Заготовка за прехвърляне към точката" }) });
+  const j = await r.json().catch(() => ({ ok: false, error: "не-JSON отговор " + r.status }));
+  return j;
+}
+// Постоянното прехвърляне в 9:00: ако в цеха няма 4 кг ориз „на хартия" → произвежда
+// разликата, после създава и ИЗПЪЛНЯВА заявката (двата документа) — същият път като
+// бутона на склада.
+async function runStanding(handler, host) {
+  const list = await buildList();
+  const byId = {}; for (const x of list) byId[x.cex_id] = x;
+  const produced = [];
+  for (const s of STANDING_REQUEST) {
+    const have = Number((byId[s.cex_id] || {}).cex_stock) || 0;
+    const miss = Math.round((s.qty - have) * 1000) / 1000;
+    if (miss > 0) {
+      const p = await produceZag(s.cex_id, miss, host);
+      if (!p.ok) {
+        await TG.tgSend(`⚠️ <b>Дневният ориз:</b> в цеха няма ${s.qty} кг и производството на ${String(miss).replace(".", ",")} кг НЕ мина` + "\n" + TG.escHtml(String(p.error || "").slice(0, 300)), null, TG.sofiaDate()).catch(() => {});
+        return { ok: false, error: "production: " + (p.error || "") };
+      }
+      produced.push(miss);
+    }
+  }
+  const cr = await createRequest(STANDING_REQUEST, "постоянно дневно прехвърляне", "", true);
+  if (!cr.ok) return cr;
+  const tok = [process.env.OWNER_TOKEN, process.env.TRANSFER_TOKEN, process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].find(Boolean);
+  const out = await new Promise((resolve) => {
+    const res = { statusCode: 200, setHeader() {}, status(c) { this.statusCode = c; return this; }, json(o) { resolve(o); }, send(b) { resolve({ ok: false, error: String(b).slice(0, 200) }); } };
+    Promise.resolve(handler({ method: "POST", query: {}, headers: { host }, body: { token: tok, action: "process_request", id: cr.id, dry: false } }, res))
+      .catch(e => resolve({ ok: false, error: String(e && e.message) }));
+  });
+  const it = STANDING_REQUEST.map(x => String(x.qty).replace(".", ",") + " кг").join(", ");
+  const text = out.ok
+    ? `✅ <b>Дневно прехвърляне в точката</b> — заг. Сварен суши ориз ${it}` + (produced.length ? ` (произведени ${produced.map(x => String(x).replace(".", ",")).join(", ")} кг)` : "")
+      + "\n" + `цех №${out.cex_doc_id || "?"} → точка №${out.shop_doc_id || "?"}`
+    : `⚠️ <b>Дневното прехвърляне на ориз НЕ мина</b>` + "\n" + TG.escHtml(String(out.error || "").slice(0, 300)) + "\n" + "Пусни го ръчно от екрана със заявките.";
+  await TG.tgSend(text, null, TG.sofiaDate()).catch(() => {});
+  return { ok: !!out.ok, request_id: cr.id, produced, cex_doc_id: out.cex_doc_id, shop_doc_id: out.shop_doc_id, error: out.error };
 }
 
 // ── HANDLER ──────────────────────────────────────────────────────────────────
@@ -1122,16 +1160,7 @@ module.exports = async function handler(req, res) {
     if (!cronOk && !manOk) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
     const NL = "\n";
     const today = TG.sofiaDate();
-    let standing = null;
-    if (isCron) {
-      const dow = new Date(today + "T12:00:00Z").getUTCDay();
-      if (STANDING_ENABLED && dow >= 1 && dow <= 5 && !(await TG.sentGet("standing", today).catch(() => null))) {
-        // записваме ПРЕДИ изпълнението — при таймаут/повторен cron да няма двойно прехвърляне
-        await TG.sentSave("standing", today, { started: new Date().toISOString() }).catch(() => {});
-        standing = await runStanding(module.exports).catch(e => ({ ok: false, error: String(e && e.message) }));
-        await TG.sentSave("standing", today, standing || {}).catch(() => {});
-      }
-    }
+    const standing = null;
     if (!b.force && !b.dry) { const was = await TG.sentGet("stock", today).catch(() => null); if (was) { res.status(200).json({ ok: true, skipped: "already_sent_today", standing }); return; } }
     const rep = await stockReport();
     const low = (rep.raw || []).filter(r => r.c !== null && r.c - r.lead < 2).sort((a, b2) => (a.c - a.lead) - (b2.c - b2.lead));
@@ -1148,9 +1177,93 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // ★ S25 — TELEGRAM WEBHOOK („ушите" на бота). Telegram праща всяко съобщение тук с
+  // тайната в X-Telegram-Bot-Api-Secret-Token. Роли: нов човек пише /start → собственикът
+  // получава бутони „Точка / Склад / Нищо". Точката пише „заявка" → бутон към формата;
+  // складът пише „заявка" → бутон към екрана със заявките. Групата засега се игнорира.
+  if (req.method === "POST" && q.tg === "hook") {
+    const sec = String((req.headers && req.headers["x-telegram-bot-api-secret-token"]) || "");
+    if (!TG.hookSecret() || sec !== TG.hookSecret()) { res.status(403).json({ ok: false }); return; }
+    const up = (typeof req.body === "object" && req.body) ? req.body : (() => { try { return JSON.parse(req.body || "{}"); } catch (e) { return {}; } })();
+    const base = "https://" + ((req.headers && req.headers.host) || "motamo-api.vercel.app") + "/api/transfer";
+    const formBtn = () => ({ inline_keyboard: [[{ text: "📝 Отвори формата за заявка", url: `${base}?view=shop&k=${TG.pointKey()}` }]] });
+    const skladBtn = () => ({ inline_keyboard: [[{ text: "📦 Отвори заявките", url: `${base}?view=cex&k=${TG.skladKey()}` }], [{ text: "🧾 Склад и поръчка към доставчик", url: `${base}?view=stock&k=${staffKey()}` }]] });
+    const ROLE_BG = { tochka: "Точка", sklad: "Склад (цех)", owner: "Собственик", none: "без роля" };
+    try {
+      // собственикът натиска бутон за роля
+      if (up.callback_query) {
+        const cq = up.callback_query, from = cq.from || {};
+        const m = /^role:(\d+):(tochka|sklad|none)$/.exec(String(cq.data || ""));
+        if (String(from.id) !== TG.OWNER_CHAT_ID || !m) { await TG.tgApi("answerCallbackQuery", { callback_query_id: cq.id, text: "Само собственикът задава роли." }); res.status(200).json({ ok: true }); return; }
+        const uid = Number(m[1]), role = m[2];
+        const u = await TG.userGet(uid);
+        await TG.userUpsert({ user_id: uid, name: u && u.name, username: u && u.username, role });
+        await TG.tgApi("answerCallbackQuery", { callback_query_id: cq.id, text: "Записано: " + ROLE_BG[role] });
+        if (cq.message) await TG.tgApi("editMessageText", { chat_id: cq.message.chat.id, message_id: cq.message.message_id, parse_mode: "HTML",
+          text: `✓ <b>${TG.escHtml((u && u.name) || uid)}</b> е <b>${ROLE_BG[role]}</b>` });
+        if (role === "tochka") await TG.tgSend("✅ Одобрен си като <b>Точка</b>.\nЗа заявка към цеха напиши <b>заявка</b> (до 10:00 всеки ден).", String(uid), null, formBtn());
+        else if (role === "sklad") await TG.tgSend("✅ Одобрена си като <b>Склад (цех)</b>.\nТук ще идват заявките от точката. Напиши <b>заявка</b>, за да ги отвориш.", String(uid), null, skladBtn());
+        res.status(200).json({ ok: true }); return;
+      }
+      const msgU = up.message;
+      if (msgU && msgU.chat && msgU.chat.type === "private") {
+        const from = msgU.from || {}, uid = Number(from.id), text = String(msgU.text || "").trim();
+        const name = [from.first_name, from.last_name].filter(Boolean).join(" ") || from.username || String(uid);
+        let u = await TG.userGet(uid);
+        if (String(uid) === TG.OWNER_CHAT_ID && (!u || u.role !== "owner")) { await TG.userUpsert({ user_id: uid, name, username: from.username || null, role: "owner" }); u = { role: "owner" }; }
+        if (!u) {
+          await TG.userUpsert({ user_id: uid, name, username: from.username || null, role: null });
+          await TG.tgSend(`👤 Нов човек при бота: <b>${TG.escHtml(name)}</b>${from.username ? " (@" + TG.escHtml(from.username) + ")" : ""}\nКаква роля да има?`, TG.OWNER_CHAT_ID, null,
+            { inline_keyboard: [[{ text: "🏪 Точка", callback_data: `role:${uid}:tochka` }, { text: "📦 Склад (цех)", callback_data: `role:${uid}:sklad` }, { text: "✖ Нищо", callback_data: `role:${uid}:none` }]] });
+          await TG.tgSend("Здравей! 👋 Аз съм ботът на MOTAMO. Изчакай собственикът да те одобри.", String(uid));
+          res.status(200).json({ ok: true }); return;
+        }
+        const role = u.role;
+        const wantsReq = /заявк|zayav|^\/zayavka/i.test(text);
+        if (role === "tochka" || role === "owner") {
+          if (wantsReq || /^\/start/.test(text)) { await TG.tgSend("📝 Попълни заявката към цеха (до 10:00):", String(uid), null, formBtn()); res.status(200).json({ ok: true }); return; }
+        }
+        if (role === "sklad" || role === "owner") {
+          if (wantsReq || /^\/start/.test(text) || /склад/i.test(text)) { await TG.tgSend("📦 Заявките от точката и складът:", String(uid), null, skladBtn()); res.status(200).json({ ok: true }); return; }
+        }
+        if (role == null) { await TG.tgSend("Изчакай собственикът да те одобри. 🙏", String(uid)); res.status(200).json({ ok: true }); return; }
+        if (role === "tochka") { await TG.tgSend("Напиши <b>заявка</b>, за да отвориш формата за цеха.", String(uid)); }
+      }
+    } catch (e) { console.error(JSON.stringify({ event: "tg_hook_error", message: String(e && e.message) })); }
+    res.status(200).json({ ok: true }); // Telegram иска 200, иначе преповтаря
+    return;
+  }
+
+  // ★ S25 — 9:30 напомняне към Точката (само ако днес няма заявка) — cron ?cron=remind.
+  // ★ S25 — 9:00 дневният ориз (cron ?cron=rice) — произвежда липсата и прехвърля.
+  if (req.method === "GET" && (q.cron === "remind" || q.cron === "rice")) {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    const today = TG.sofiaDate(), dow = new Date(today + "T12:00:00Z").getUTCDay();
+    if (dow < 1 || dow > 5) { res.status(200).json({ ok: true, skipped: "weekend" }); return; }
+    if (q.cron === "rice") {
+      if (!STANDING_ENABLED) { res.status(200).json({ ok: true, skipped: "disabled" }); return; }
+      if (await TG.sentGet("standing", today).catch(() => null)) { res.status(200).json({ ok: true, skipped: "already" }); return; }
+      await TG.sentSave("standing", today, { started: new Date().toISOString() }).catch(() => {});
+      const st = await runStanding(module.exports, (req.headers && req.headers.host) || "motamo-api.vercel.app").catch(e => ({ ok: false, error: String(e && e.message) }));
+      await TG.sentSave("standing", today, st || {}).catch(() => {});
+      res.status(200).json({ ok: true, standing: st }); return;
+    }
+    // remind: има ли днес заявка от точката (не автоматичната)?
+    const rows = await sbSelect(`for_date=eq.${today}&limit=50`).catch(() => []);
+    const hasReq = (rows || []).some(r => r.for_date === today && !/постоянно дневно/.test(String(r.note || "")));
+    if (hasReq) { res.status(200).json({ ok: true, skipped: "has_request" }); return; }
+    const base = "https://" + ((req.headers && req.headers.host) || "motamo-api.vercel.app") + "/api/transfer";
+    const n = await TG.sendToRole("tochka", "⏰ <b>Напомняне:</b> заявката към цеха е <b>до 10:00</b>. Още няма заявка за днес.", today,
+      { inline_keyboard: [[{ text: "📝 Отвори формата за заявка", url: `${base}?view=shop&k=${TG.pointKey()}` }]] });
+    res.status(200).json({ ok: true, reminded: n }); return;
+  }
+
   // Манифестът се сервира от същия адрес, за да е в обхвата на страницата.
   if (req.method === "GET" && q.view === "manifest") {
-    if (!viewTokens.some(t => q.k === t) && !isStaff(q.k)) { res.status(403).json({ error: "forbidden" }); return; }
+    if (!viewTokens.some(t => q.k === t) && !isStaff(q.k) && q.k !== TG.skladKey() && q.k !== TG.pointKey()) { res.status(403).json({ error: "forbidden" }); return; }
     res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
     res.status(200).json(manifest(q.k, isOwner(q.k)));
     return;
@@ -1159,7 +1272,8 @@ module.exports = async function handler(req, res) {
   const VIEWS = ["shop", "cex", "stock", "hub"];
   if (req.method === "GET" && (VIEWS.includes(q.view) || (!q.view && q.k))) {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    const okTok = viewTokens.some(t => q.k === t) || (q.view === "stock" && ((process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN) || isStaff(q.k)));
+    const okTok = viewTokens.some(t => q.k === t) || (q.view === "stock" && ((process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN) || isStaff(q.k)))
+      || (q.view === "cex" && TG.skladKey() && q.k === TG.skladKey()) || (q.view === "shop" && TG.pointKey() && q.k === TG.pointKey());
     if (!okTok) {
       res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп — липсва или грешен ключ (?k=).</body>");
       return;
@@ -1168,7 +1282,8 @@ module.exports = async function handler(req, res) {
     // отваря само заявката — там не бива да се пуска производство или да се
     // гледа себестойност.
     if ((q.view === "cex" || q.view === "stock") && !isOwner(q.k)
-      && !(q.view === "stock" && ((process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN) || isStaff(q.k)))) {
+      && !(q.view === "stock" && ((process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN) || isStaff(q.k)))
+      && !(q.view === "cex" && TG.skladKey() && q.k === TG.skladKey())) {
       res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Този екран е само за цеха.</body>");
       return;
     }
@@ -1189,8 +1304,10 @@ module.exports = async function handler(req, res) {
   // разработка); всичко, което пише, иска пълния токен.
   const readOnly = ["list", "list_requests", "inspect", "stock_report"].includes(body.action);
   const allowed = readOnly ? viewTokens.concat([process.env.PEEK_TOKEN].filter(Boolean)) : viewTokens;
-  const staff = body.action === "stock_report" && isStaff(token);
-  if (!staff && !allowed.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+  const staff = ["stock_report", "tg_supply"].includes(body.action) && isStaff(token);
+  const skladOk = TG.skladKey() && token === TG.skladKey() && ["list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply"].includes(body.action);
+  const pointOk = TG.pointKey() && token === TG.pointKey() && ["list", "create_request", "list_requests"].includes(body.action);
+  if (!staff && !skladOk && !pointOk && !allowed.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
   if (!process.env.BARSY_CEX_USER || !process.env.BARSY_USER) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
 
   try {
@@ -1236,6 +1353,23 @@ module.exports = async function handler(req, res) {
     }
 
     // ── складовото табло (чете живо от Barsy при всяко отваряне) ──
+    // ★ S25 — складът произвежда заготовка, която не стига за заявката (само заготовки).
+    if (body.action === "produce_zag") {
+      const cid = Number(body.cex_id), amt = Number(body.amount);
+      if (!ZAG.includes(cid)) { res.status(200).json({ ok: false, error: "това не е заготовка — не се произвежда тук (зареди доставка)" }); return; }
+      if (!(amt > 0 && amt <= 60)) { res.status(200).json({ ok: false, error: "невалидно количество" }); return; }
+      const p = await produceZag(cid, amt, (req.headers && req.headers.host) || "motamo-api.vercel.app");
+      res.status(200).json(p && p.ok ? { ok: true, store_production_id: p.store_production_id } : { ok: false, error: String((p && (p.error || p.message)) || "грешка") });
+      return;
+    }
+    // ★ S25 — заявка за зареждане (какво да се купи) от склада → личния чат на собственика.
+    if (body.action === "tg_supply") {
+      const t = String(body.text || "").slice(0, 3500).trim();
+      if (!t) { res.status(200).json({ ok: false, error: "празно" }); return; }
+      const r = await TG.tgSend("🧾 <b>Заявка за зареждане от цеха</b>\n\n" + TG.escHtml(t), TG.OWNER_CHAT_ID);
+      res.status(200).json(r.ok ? { ok: true } : { ok: false, error: r.error });
+      return;
+    }
     if (body.action === "stock_report") {
       const rep = await stockReport();
       if (staff) {   // персоналът не вижда пари
@@ -1515,6 +1649,11 @@ module.exports = async function handler(req, res) {
           restId = ins.row && ins.row.id;
         }
         await sbPatch(id, { status: "done", items: itemsSent, cex_doc_id: mvId ? String(mvId) : null, shop_doc_id: ldId ? String(ldId) : null, processed_at: new Date().toISOString(), error: null });
+        try {
+          const fq = x => String(Math.round(Number(x) * 1000) / 1000).replace(".", ",");
+          const ls = itemsSent.filter(it => Number(it.sent) > 0 || Number(it.qty) > 0).map(it => `• ${TG.escHtml(it.name)} — <b>${fq(it.sent)} ${TG.escHtml(it.unit || "")}</b>` + (Number(it.sent) < Number(it.qty) ? ` <i>(поискахте ${fq(it.qty)})</i>` : ""));
+          await TG.sendToRole("tochka", "✅ <b>Цехът изпрати</b>\n\n" + ls.join("\n") + (rest.length ? "\n\nОстатъкът е в нова заявка." : ""), TG.plusDays(TG.sofiaDate(), 1));
+        } catch (e) {}
         res.status(200).json({
           ok: true, dry: false, id, cex_doc_id: mvId, shop_doc_id: ldId, short, rest_id: restId, rest_count: rest.length,
           message: "✓ Готово: цех прехвърляне " + (mvId || "") + " (" + moveRows.length + " реда) → точка зареждане " + (ldId || "") + " (" + loadRows.length + " реда)."
