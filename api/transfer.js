@@ -1680,6 +1680,13 @@ module.exports = async function handler(req, res) {
         if (rest.length) {
           const ins = await sbInsert({ for_date: today, status: "pending", items: rest, parent_id: id, note: "остатък от предишна заявка" });
           restId = ins.row && ins.row.id;
+          // ★ S25 — остатъкът е нова заявка → складът получава съобщение (собственикът, 29.09).
+          try {
+            const fq = x => String(Math.round(Number(x) * 1000) / 1000).replace(".", ",");
+            const ls = rest.map(it => `• ${TG.escHtml(it.name)} — <b>${fq(it.qty)} ${TG.escHtml(it.unit || "")}</b>`);
+            await TG.sendToRole("sklad", "↪️ <b>Остатък от заявката на точката</b> (не стигна при изпращането)\n\n" + ls.join("\n"), TG.plusDays(TG.sofiaDate(), 1),
+              { inline_keyboard: [[{ text: "📦 Отвори и изпълни", url: `https://motamo-api.vercel.app/api/transfer?view=cex&k=${TG.skladKey()}` }]] });
+          } catch (e) {}
         }
         await sbPatch(id, { status: "done", items: itemsSent, cex_doc_id: mvId ? String(mvId) : null, shop_doc_id: ldId ? String(ldId) : null, processed_at: new Date().toISOString(), error: null });
         try {
