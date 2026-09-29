@@ -1835,6 +1835,13 @@ module.exports = async function handler(req, res) {
   if (body.action === "invoices_probe") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    if (body.inv_id) {
+      const out = {};
+      for (const [m, p] of [["Invoices_get", { inv_id: Number(body.inv_id), id: Number(body.inv_id) }], ["Invoices_getitems", { inv_id: Number(body.inv_id) }], ["Invoiceitems_getlist", { filters: { inv_id: Number(body.inv_id) } }]]) {
+        try { const r = await cexCall(m, p, user, pass); out[m] = String(r.raw || "").slice(0, 2500); } catch (e) { out[m] = "ERR " + e.message; }
+      }
+      res.status(200).json({ ok: true, out }); return;
+    }
     const r = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: Number(body.length) || 60, extra_properties: body.details ? ["all", "details"] : undefined }, user, pass);
     let L = r.data || []; if (!Array.isArray(L)) L = Object.values(L);
     const types = {}; for (const x of L) { const k = String(x.type_id) + " " + (x.type_name || x.doc_type_name || ""); types[k] = (types[k] || 0) + 1; }
