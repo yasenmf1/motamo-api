@@ -1831,6 +1831,17 @@ module.exports = async function handler(req, res) {
   // ── ДИАГНОСТИК за „Замести сметка" (само четене): Accounts_edit + редовете + save-метод ──
   // ── ДИАГНОСТИК (само четене): един документ за зареждане — заглавие + редове (суров формат),
   // за да се копира точният формат при създаване на зареждане от снимка на фактура. ──
+  // ДИАГНОСТИК (само четене): документи (стокови/фактури/кредитни) — типове и редове.
+  if (body.action === "invoices_probe") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const r = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: Number(body.length) || 60, extra_properties: body.details ? ["all", "details"] : undefined }, user, pass);
+    let L = r.data || []; if (!Array.isArray(L)) L = Object.values(L);
+    const types = {}; for (const x of L) { const k = String(x.type_id) + " " + (x.type_name || x.doc_type_name || ""); types[k] = (types[k] || 0) + 1; }
+    const pick = L.filter(x => !body.type || String(x.type_id) === String(body.type)).slice(0, Number(body.n) || 3);
+    res.status(200).json({ ok: true, count: L.length, types, keys: L[0] ? Object.keys(L[0]) : [], sample: JSON.stringify(pick).slice(0, 6000) });
+    return;
+  }
   if (body.action === "load_inspect") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
