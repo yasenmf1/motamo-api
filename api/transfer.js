@@ -1272,16 +1272,34 @@ module.exports = async function handler(req, res) {
     if (!b.force && !b.dry) { const was = await TG.sentGet("stock", today).catch(() => null); if (was) { res.status(200).json({ ok: true, skipped: "already_sent_today", standing }); return; } }
     const rep = await stockReport();
     const low = (rep.raw || []).filter(r => r.c !== null && r.c - r.lead < 2).sort((a, b2) => (a.c - a.lead) - (b2.c - b2.lead));
-    if (!low.length) { res.status(200).json({ ok: true, nothing: true, standing }); return; }
+    // ★ S25 — слято със сутрешната задача „Суровини в цеха": какво НЕ стига за ДНЕШНОТО производство
+    // (разносът за деня по рецептата срещу склада; cex-plan action shortage). Суровините спират
+    // производството (трябва доставка); заготовките само се изброяват — ① ги прави.
+    let sh = null;
+    try {
+      const tok = [process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET].find(Boolean);
+      const rr = await fetch(`https://${(req.headers && req.headers.host) || "motamo-api.vercel.app"}/api/cex-plan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tok, action: "shortage", date: today }) });
+      sh = await rr.json();
+    } catch (e) { sh = null; }
+    const shRaw = sh && sh.ok ? (sh.shortages || []).filter(x => x.cat === "Суровини") : [];
+    const shZag = sh && sh.ok ? (sh.shortages || []).filter(x => x.cat === "Заготовки") : [];
     const fq = x => String(Math.round(x * 10) / 10).replace(".", ",");
-    const lines = low.map(r => `• <b>${TG.escHtml(r.n)}</b> — стига за ${fq(r.c)} дни · ${TG.escHtml(r.sup)} идва след ${r.lead}`);
+    const f3 = x => String(Math.round(Number(x) * 1000) / 1000).replace(".", ",");
+    const parts = [];
+    if (!sh || !sh.ok) parts.push("⚠️ Цехът не отговори — не мога да сметна недостига за днешното производство.");
+    else if (!sh.razos_accounts) parts.push("ℹ️ Още няма разнос за днес — недостигът за производството не е сметнат.");
+    else if (shRaw.length) parts.push("🔴 <b>НЕ стигат за днешното производство</b> (зареди ПРЕДИ ①):" + NL + shRaw.map(x => `• <b>${TG.escHtml(x.name)}</b> — има ${f3(x.have == null ? 0 : x.have)}, трябва ${f3(x.need)} → липсват <b>${f3(x.deficit)}</b>`).join(NL));
+    else parts.push("✅ Всички суровини стигат за днешното производство.");
+    if (shZag.length) parts.push("🥣 Заготовки за правене днес: " + shZag.map(x => TG.escHtml(x.name)).join(", "));
+    if (low.length) parts.push("⚠️ <b>Няма да стигнат до доставката</b> (поръчай):" + NL + low.map(r => `• <b>${TG.escHtml(r.n)}</b> — стига за ${fq(r.c)} дни · ${TG.escHtml(r.sup)} идва след ${r.lead}`).join(NL));
+    if (!shRaw.length && !low.length && sh && sh.ok) { res.status(200).json({ ok: true, nothing: true, standing }); return; }
     const link = staffKey() ? NL + NL + `Склад и поръчка: https://motamo-api.vercel.app/api/transfer?view=stock&k=${staffKey()}` : "";
-    const text = `⚠️ <b>Склад — няма да стигнат до доставката</b>` + NL + lines.join(NL) + link;
+    const text = `📦 <b>Склад — сутрин</b>` + NL + NL + parts.join(NL + NL) + link;
     if (b.dry) { res.status(200).json({ ok: true, dry: true, text }); return; }
     const r = await TG.tgSend(text, null, today);
     if (!r.ok) { res.status(502).json({ ok: false, error: "telegram", message: r.error }); return; }
-    await TG.sentSave("stock", today, { items: low.map(x => x.n) }).catch(() => {});
-    res.status(200).json({ ok: true, sent: low.length, standing });
+    await TG.sentSave("stock", today, { items: low.map(x => x.n), short: shRaw.map(x => x.name) }).catch(() => {});
+    res.status(200).json({ ok: true, sent: low.length, short: shRaw.length, standing });
     return;
   }
 
