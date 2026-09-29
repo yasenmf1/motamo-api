@@ -354,9 +354,12 @@ async function stockReport() {
   const raw = [], made = [];
   const keys = new Set(Object.keys(u28));
   for (const k of Object.keys(pUse)) { const c = (CEXDATA.articles[k] || {}).cat; if (c === "Суровини" || c === "Консумативи") keys.add(k); }
+  // ★ S25 — всеки артикул с доставчик влиза в списъка, дори без разход (за „Поръчка към доставчик");
+  // артикули, които ги няма в _cexdata (по-нови, напр. 166 чили сос, 167 люто сусамово олио), се броят за суровини.
+  for (const k of Object.keys(SUPPLIER)) if (A[Number(k)]) keys.add(k);
   for (const key of keys) {
     const id = Number(key), a = A[id] || {}, rec = CEXDATA.articles[key] || {};
-    const cat = rec.cat || "";
+    const cat = rec.cat || (SUPPLIER[id] ? "Суровини" : "");
     const isRaw = cat === "Суровини" || cat === "Консумативи";
     const vp = isRaw ? (pUse[id] || 0) / pDays : 0;
     const v28 = (u28[id] || 0) / 28, v7 = (u7[id] || 0) / 7, v = Math.max(v28, v7) + vp;
