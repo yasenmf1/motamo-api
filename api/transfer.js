@@ -1030,6 +1030,46 @@ load();
 </script></body></html>`;
 }
 
+// ★ S25 — една функция за заявка точка→цех: ръчната (формата на точката) и ПОСТОЯННАТА
+// дневна (cron). Записва в Supabase и праща в Telegram групата (грешка там не спира заявката).
+// Постоянна дневна заявка: всеки работен ден 4 кг заг. Сварен суши ориз (собственикът, 29.09 —
+// „към момента им стига"; при увеличение се сменя тук).
+const STANDING_REQUEST = [{ cex_id: 67, qty: 4 }];
+async function createRequest(raw, note, tag) {
+  const want = new Map();
+  for (const r of raw) {
+    const id = Number(r && r.cex_id), qty = Number(r && r.qty);
+    if (!MAP[id] || !(qty > 0)) continue;
+    want.set(id, (want.get(id) || 0) + qty); // един ред на артикул
+  }
+  if (!want.size) return { ok: false, error: "празна заявка — няма нито едно количество > 0" };
+  const list = await buildList();
+  const byId = {}; for (const x of list) byId[x.cex_id] = x;
+  // `qty` е ВИНАГИ в базовата единица (кг/л/бр) — така документите и складът
+  // не се разминават. При артикул с опаковка пазим и колко опаковки е поискала
+  // точката, за да се покаже пак като „2 тарелки".
+  const items = [...want.entries()].map(([id, qty]) => {
+    const p = PACK[id];
+    return {
+      cex_id: id, shop_id: MAP[id], name: (byId[id] || {}).name || ("#" + id),
+      unit: (byId[id] || {}).unit || "бр", qty,
+      pack: p ? { name: p.name, plural: p.plural, size: p.size, count: Math.round((qty / p.size) * 1000) / 1000 } : null,
+      shop_stock: (byId[id] || {}).shop_stock, cex_stock: (byId[id] || {}).cex_stock
+    };
+  });
+  const ins = await sbInsert({ for_date: sofiaToday(), status: "pending", items, note: note || null });
+  if (!ins.ok) return { ok: false, error: "не се записа: " + ins.raw };
+  try {
+    const NL = "\n", fq = x => String(Math.round(Number(x) * 1000) / 1000).replace(".", ",");
+    const lines = items.map(it => `• ${TG.escHtml(it.name)} — <b>${it.pack ? fq(it.pack.count) + " " + TG.escHtml(it.pack.count === 1 ? it.pack.name : it.pack.plural) : fq(it.qty) + " " + TG.escHtml(it.unit)}</b>`
+      + (it.cex_stock != null ? ` <i>(в цеха: ${fq(it.cex_stock)})</i>` : ""));
+    const hm = new Intl.DateTimeFormat("bg-BG", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit" }).format(new Date());
+    const text = `🏪 <b>${tag || "Заявка от точката (Каравелов)"}</b> · ${hm}` + NL + NL + lines.join(NL) + (note ? NL + NL + "📝 " + TG.escHtml(note) : "");
+    await TG.tgSend(text, null, TG.plusDays(TG.sofiaDate(), 1));
+  } catch (e) {}
+  return { ok: true, id: ins.row && ins.row.id, items_count: items.length };
+}
+
 // ── HANDLER ──────────────────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -1061,10 +1101,18 @@ module.exports = async function handler(req, res) {
     if (!cronOk && !manOk) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
     const NL = "\n";
     const today = TG.sofiaDate();
-    if (!b.force && !b.dry) { const was = await TG.sentGet("stock", today).catch(() => null); if (was) { res.status(200).json({ ok: true, skipped: "already_sent_today" }); return; } }
+    let standing = null;
+    if (isCron) {
+      const dow = new Date(today + "T12:00:00Z").getUTCDay();
+      if (dow >= 1 && dow <= 5 && !(await TG.sentGet("standing", today).catch(() => null))) {
+        standing = await createRequest(STANDING_REQUEST, "постоянна дневна заявка", "Дневна заявка за точката (автоматична)").catch(e => ({ ok: false, error: String(e && e.message) }));
+        if (standing && standing.ok) await TG.sentSave("standing", today, { id: standing.id }).catch(() => {});
+      }
+    }
+    if (!b.force && !b.dry) { const was = await TG.sentGet("stock", today).catch(() => null); if (was) { res.status(200).json({ ok: true, skipped: "already_sent_today", standing }); return; } }
     const rep = await stockReport();
     const low = (rep.raw || []).filter(r => r.c !== null && r.c - r.lead < 2).sort((a, b2) => (a.c - a.lead) - (b2.c - b2.lead));
-    if (!low.length) { res.status(200).json({ ok: true, nothing: true }); return; }
+    if (!low.length) { res.status(200).json({ ok: true, nothing: true, standing }); return; }
     const fq = x => String(Math.round(x * 10) / 10).replace(".", ",");
     const lines = low.map(r => `• <b>${TG.escHtml(r.n)}</b> — стига за ${fq(r.c)} дни · ${TG.escHtml(r.sup)} идва след ${r.lead}`);
     const link = staffKey() ? NL + NL + `Склад и поръчка: https://motamo-api.vercel.app/api/transfer?view=stock&k=${staffKey()}` : "";
@@ -1073,7 +1121,7 @@ module.exports = async function handler(req, res) {
     const r = await TG.tgSend(text, null, today);
     if (!r.ok) { res.status(502).json({ ok: false, error: "telegram", message: r.error }); return; }
     await TG.sentSave("stock", today, { items: low.map(x => x.n) }).catch(() => {});
-    res.status(200).json({ ok: true, sent: low.length });
+    res.status(200).json({ ok: true, sent: low.length, standing });
     return;
   }
 
@@ -1212,40 +1260,8 @@ module.exports = async function handler(req, res) {
 
     // ── точката праща заявка ──
     if (body.action === "create_request") {
-      const raw = Array.isArray(body.items) ? body.items : [];
-      const want = new Map();
-      for (const r of raw) {
-        const id = Number(r && r.cex_id), qty = Number(r && r.qty);
-        if (!MAP[id] || !(qty > 0)) continue;
-        want.set(id, (want.get(id) || 0) + qty); // един ред на артикул
-      }
-      if (!want.size) { res.status(200).json({ ok: false, error: "празна заявка — няма нито едно количество > 0" }); return; }
-      const list = await buildList();
-      const byId = {}; for (const x of list) byId[x.cex_id] = x;
-      // `qty` е ВИНАГИ в базовата единица (кг/л/бр) — така документите и складът
-      // не се разминават. При артикул с опаковка пазим и колко опаковки е поискала
-      // точката, за да се покаже пак като „2 тарелки".
-      const items = [...want.entries()].map(([id, qty]) => {
-        const p = PACK[id];
-        return {
-          cex_id: id, shop_id: MAP[id], name: (byId[id] || {}).name || ("#" + id),
-          unit: (byId[id] || {}).unit || "бр", qty,
-          pack: p ? { name: p.name, plural: p.plural, size: p.size, count: Math.round((qty / p.size) * 1000) / 1000 } : null,
-          shop_stock: (byId[id] || {}).shop_stock, cex_stock: (byId[id] || {}).cex_stock
-        };
-      });
-      const ins = await sbInsert({ for_date: sofiaToday(), status: "pending", items, note: body.note || null });
-      if (!ins.ok) { res.status(200).json({ ok: false, error: "не се записа: " + ins.raw }); return; }
-      // ★ S25 — заявката отива и в Telegram групата на цеха (не чупи заявката при грешка).
-      try {
-        const NL = "\n", fq = x => String(Math.round(Number(x) * 1000) / 1000).replace(".", ",");
-        const lines = items.map(it => `• ${TG.escHtml(it.name)} — <b>${it.pack ? fq(it.pack.count) + " " + TG.escHtml(it.pack.count === 1 ? it.pack.name : it.pack.plural) : fq(it.qty) + " " + TG.escHtml(it.unit)}</b>`
-          + (it.cex_stock != null ? ` <i>(в цеха: ${fq(it.cex_stock)})</i>` : ""));
-        const hm = new Intl.DateTimeFormat("bg-BG", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit" }).format(new Date());
-        const text = `🏪 <b>Заявка от точката (Каравелов)</b> · ${hm}` + NL + NL + lines.join(NL) + (body.note ? NL + NL + "📝 " + TG.escHtml(body.note) : "");
-        await TG.tgSend(text, null, TG.plusDays(TG.sofiaDate(), 1));
-      } catch (e) {}
-      res.status(200).json({ ok: true, id: ins.row && ins.row.id, items_count: items.length });
+      const out = await createRequest(Array.isArray(body.items) ? body.items : [], body.note || null, "");
+      res.status(200).json(out);
       return;
     }
 
