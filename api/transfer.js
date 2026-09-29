@@ -1236,6 +1236,15 @@ module.exports = async function handler(req, res) {
       });
       const ins = await sbInsert({ for_date: sofiaToday(), status: "pending", items, note: body.note || null });
       if (!ins.ok) { res.status(200).json({ ok: false, error: "не се записа: " + ins.raw }); return; }
+      // ★ S25 — заявката отива и в Telegram групата на цеха (не чупи заявката при грешка).
+      try {
+        const NL = "\n", fq = x => String(Math.round(Number(x) * 1000) / 1000).replace(".", ",");
+        const lines = items.map(it => `• ${TG.escHtml(it.name)} — <b>${it.pack ? fq(it.pack.count) + " " + TG.escHtml(it.pack.count === 1 ? it.pack.name : it.pack.plural) : fq(it.qty) + " " + TG.escHtml(it.unit)}</b>`
+          + (it.cex_stock != null ? ` <i>(в цеха: ${fq(it.cex_stock)})</i>` : ""));
+        const hm = new Intl.DateTimeFormat("bg-BG", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit" }).format(new Date());
+        const text = `🏪 <b>Заявка от точката (Каравелов)</b> · ${hm}` + NL + NL + lines.join(NL) + (body.note ? NL + NL + "📝 " + TG.escHtml(body.note) : "");
+        await TG.tgSend(text, null, TG.plusDays(TG.sofiaDate(), 1));
+      } catch (e) {}
       res.status(200).json({ ok: true, id: ins.row && ins.row.id, items_count: items.length });
       return;
     }
