@@ -305,7 +305,7 @@ async function seedByLot(dateIso, user, pass) {
 // на артикул: cnt (бройки), total_no_dds (оборот без ДДС) и delivery_total (себестойност
 // без ДДС, от AVG_DELIVERY_PRICE). Заменя крехкото Orders-страниране за COGS/маржин.
 // Данните идват през „values" извикване (action_type:values + active_struct_id).
-async function reportSalesByArticles(from, to, user, pass) {
+async function reportSalesByArticles(from, to, user, pass, clientId) {
   const by = {};   // article_id → { name, units, revenue, cost }
   let ok = false, incomplete = false;
   const PAGE = 50, MAXPG = 30;
@@ -314,7 +314,7 @@ async function reportSalesByArticles(from, to, user, pass) {
     for (let t = 0; t < 3 && rows === null; t++) {
       try {
         const r = await cexCall("Reports_sales_by_articles",
-          { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { ref_date: [from, to] } }, user, pass);
+          { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: clientId != null ? { ref_date: [from, to], client: clientId } : { ref_date: [from, to] } }, user, pass);
         if (r && r.ok && r.data && Array.isArray(r.data.rows)) { rows = r.data.rows; ok = true; }
       } catch (e) {}
       if (rows === null) await new Promise(res => setTimeout(res, 250 * (t + 1)));
@@ -1677,7 +1677,7 @@ module.exports = async function handler(req, res) {
     const from = /^\d{4}-\d{2}-\d{2}$/.test(body.from || "") ? body.from : "2026-03-01";
     const to = /^\d{4}-\d{2}-\d{2}$/.test(body.to || "") ? body.to : sofiaToday();
     let rep;
-    try { rep = await reportSalesByArticles(from, to, user, pass); }
+    try { rep = await reportSalesByArticles(from, to, user, pass, body.client != null ? Number(body.client) : undefined); }
     catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
     const arts = (rep.articles || []).map(a => {
       const profit = a.revenue - a.cost;
