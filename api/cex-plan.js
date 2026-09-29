@@ -46,6 +46,135 @@ async function sbGetPlan(forDate) {
   });
 }
 
+// ── ПРЕДЛОЖЕНИЕ ЗА ПОРЪЧКА (S25) ─────────────────────────────────────────────
+// Кеш на документите (стокови type 11 + кредитни type 2) в Supabase: `cex_docs`
+// (заглавие; person_id от сметката на стоковата) + `cex_doc_rows` (редове:
+// article_id, qty, lot_date). Barsy списъкът НЯМА редове → всеки нов документ се
+// чете веднъж с Invoices_get. Сметката: средно изпратено в СЪЩИЯ ден от седмицата
+// (последните 4 доставки на обекта) × (1 − % връщане за 4 седм.). Връщанията се
+// броят по датата на ПАРТИДАТА (lot_date = деня на доставката), не на документа.
+// Стоковите носят обекта; кредитните (Мерканто) — само клиента → ставката се
+// прилага към всички обекти на клиента. Връщане при СиБиЕс/Антоний = ред за 0 €
+// със стара партида в стоковата (подмяна; потвърдено от собственика 29.09 на №3114).
+// НЕ пише в Barsy.
+const SUG_DOC_TYPES = [11, 2], SUG_WEEKS = 4, SUG_KEEP_DAYS = 49, SUG_RATE_CAP = 0.8;
+async function sbReq(path, opts, ms) {
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), ms || 20000);
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/${path}`, { ...(opts || {}), headers: { ...sbHeaders(), ...((opts && opts.headers) || {}) }, signal: c.signal });
+    if (!r.ok) throw new Error(`sb ${r.status} ${String(await r.text()).slice(0, 200)}`);
+    const tx = await r.text(); return tx ? JSON.parse(tx) : null;
+  } finally { clearTimeout(t); }
+}
+async function sbAll(path) {                       // PostgREST връща ≤1000 реда → страницираме
+  const out = [];
+  for (let off = 0; off < 100000; off += 1000) {
+    const d = await sbReq(`${path}${path.includes("?") ? "&" : "?"}limit=1000&offset=${off}`);
+    out.push(...(d || [])); if (!d || d.length < 1000) break;
+  }
+  return out;
+}
+const lotDateOf = v => { const m = /L\.(\d{2})\.(\d{2})\.(\d{4})/.exec(String(v || "")); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; };
+
+// Досинхронизира кеша: нови документи (от последните SUG_KEEP_DAYS дни) + сменен
+// is_anulate. Спира при изтичане на бюджета → `pending` > 0 = извикай пак.
+async function syncDocCache(user, pass, budgetMs) {
+  const t0 = Date.now(), since = isoPlusDays(sofiaToday(), -SUG_KEEP_DAYS);
+  const r = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 1500 }, user, pass);
+  let L = r.data || []; if (!Array.isArray(L)) L = Object.values(L);
+  L = L.filter(x => SUG_DOC_TYPES.includes(Number(x.type_id)) && String(x.create_date || "") >= since);
+  const cached = await sbAll(`cex_docs?select=inv_id,is_anulate&doc_date=gte.${since}`);
+  const have = {}; for (const c of cached) have[c.inv_id] = Number(c.is_anulate) || 0;
+  // анулирани след кеширане → само флагът
+  for (const x of L) {
+    const an = Number(x.is_anulate) ? 1 : 0;
+    if (have[x.inv_id] != null && have[x.inv_id] !== an)
+      await sbReq(`cex_docs?inv_id=eq.${x.inv_id}`, { method: "PATCH", body: JSON.stringify({ is_anulate: an }) });
+  }
+  const todo = L.filter(x => have[x.inv_id] == null);
+  let accMap = null, done = 0, failed = 0;
+  const getAccMap = async () => {
+    if (accMap) return accMap;
+    const a = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 3000 }, user, pass);
+    let all = a.data || []; if (!Array.isArray(all)) all = Object.values(all);
+    accMap = {}; for (const x of all) accMap[x.account_id] = x; return accMap;
+  };
+  const one = async x => {
+    const g = await cexCall("Invoices_get", { inv_id: Number(x.inv_id), id: Number(x.inv_id) }, user, pass);
+    const d = g.data || {};
+    if (!Array.isArray(d.items)) throw new Error("no_items");
+    let person = null;
+    const accs = Array.isArray(d.accounts) ? d.accounts : [];
+    if (accs.length) { const m = await getAccMap(); const a = m[accs[0]]; if (a && a.person_id != null) person = Number(a.person_id); }
+    const doc = { inv_id: Number(x.inv_id), type_id: Number(x.type_id), doc_date: String(x.create_date).slice(0, 10),
+      client_id: x.client_id != null ? Number(x.client_id) : null, person_id: person, is_anulate: Number(x.is_anulate) ? 1 : 0 };
+    const rows = d.items.filter(it => it.article_id != null && it.article_id !== "" && Number(it.quantity))
+      .map(it => ({ inv_id: doc.inv_id, item_id: Number(it.item_id), article_id: Number(it.article_id), qty: Number(it.quantity), line_total: Number(it.line_total) || 0, lot_date: lotDateOf(it.lot_value) }));
+    await sbReq(`cex_docs?on_conflict=inv_id`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify([doc]) });
+    if (rows.length) await sbReq(`cex_doc_rows?on_conflict=inv_id,item_id`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(rows) });
+  };
+  for (let i = 0; i < todo.length; i += 4) {
+    if (Date.now() - t0 > budgetMs) break;
+    const res = await Promise.allSettled(todo.slice(i, i + 4).map(one));
+    for (const s of res) { if (s.status === "fulfilled") done++; else failed++; }
+  }
+  return { listed: L.length, cached_before: cached.length, added: done, failed, pending: todo.length - done - failed };
+}
+
+// Предложение за деня `target` (ISO) по обект „client:person" → { име на артикул: {n, avg, rate, weeks} }.
+async function computeSuggestion(target) {
+  const from = isoPlusDays(target, -SUG_KEEP_DAYS);
+  const docs = await sbAll(`cex_docs?select=inv_id,type_id,doc_date,client_id,person_id&is_anulate=eq.0&doc_date=gte.${from}&doc_date=lt.${target}`);
+  const byDoc = {}; for (const d of docs) byDoc[d.inv_id] = d;
+  const rows = docs.length ? await sbAll(`cex_doc_rows?select=inv_id,article_id,qty,line_total,lot_date&inv_id=gte.${Math.min(...docs.map(d => d.inv_id))}`) : [];
+  const dow = new Date(target + "T12:00:00Z").getUTCDay(), win = isoPlusDays(target, -7 * SUG_WEEKS);
+  const dowOf = iso => new Date(iso + "T12:00:00Z").getUTCDay();
+  const sent = {};      // key → date → artId → qty (положителни редове на стоковите)
+  const ret = {};       // key → artId → върнато (стокови, в прозореца по партида)
+  const cRet = {};      // client → artId → върнато (кредитни)
+  const sentWin = {}, cSentWin = {};   // изпратено в прозореца (база за %)
+  for (const r of rows) {
+    const d = byDoc[r.inv_id]; if (!d) continue;
+    const q = Number(r.qty) || 0, art = r.article_id;
+    const key = (d.client_id != null ? d.client_id : "") + ":" + (d.person_id != null ? d.person_id : "");
+    const rd = r.lot_date || d.doc_date;
+    // СиБиЕс/Антоний връщат като ред за 0 € със СТАРА партида (подмяна на върнатото) →
+    // това е връщане, не търсене. Отрицателен ред (кредитно) също е връщане.
+    const zero = q > 0 && r.line_total != null && Number(r.line_total) === 0;
+    if (zero) { if (rd >= win) (ret[key] = ret[key] || {})[art] = (ret[key][art] || 0) + q; continue; }
+    if (d.type_id === 11 && q > 0) {
+      ((sent[key] = sent[key] || {})[d.doc_date] = sent[key][d.doc_date] || {})[art] = (sent[key][d.doc_date][art] || 0) + q;
+      if (d.doc_date >= win) {
+        (sentWin[key] = sentWin[key] || {})[art] = (sentWin[key][art] || 0) + q;
+        (cSentWin[d.client_id] = cSentWin[d.client_id] || {})[art] = (cSentWin[d.client_id][art] || 0) + q;
+      }
+    } else if (q < 0 && rd >= win) {
+      if (d.type_id === 11) (ret[key] = ret[key] || {})[art] = (ret[key][art] || 0) - q;
+      else (cRet[d.client_id] = cRet[d.client_id] || {})[art] = (cRet[d.client_id][art] || 0) - q;
+    }
+  }
+  const out = {};
+  for (const key of Object.keys(sent)) {
+    const client = key.split(":")[0];
+    // липсваща седмица ≠ нула: броим само дните, в които обектът е получил стокова
+    let dates = Object.keys(sent[key]).filter(x => dowOf(x) === dow).sort().slice(-SUG_WEEKS), same = true;
+    if (dates.length < 2) { dates = Object.keys(sent[key]).filter(x => x >= win).sort().slice(-SUG_WEEKS); same = false; }
+    if (dates.length < 2) continue;
+    const arts = new Set(); dates.forEach(x => Object.keys(sent[key][x]).forEach(a => arts.add(a)));
+    const o = {};
+    for (const a of arts) {
+      const art = byId(a); if (!art || !art.is_menu) continue;
+      const avg = dates.reduce((s, x) => s + (sent[key][x][a] || 0), 0) / dates.length;
+      const sw = (sentWin[key] || {})[a] || 0, csw = (cSentWin[client] || {})[a] || 0;
+      let rate = (sw ? (((ret[key] || {})[a] || 0) / sw) : 0) + (csw ? (((cRet[client] || {})[a] || 0) / csw) : 0);
+      rate = Math.min(SUG_RATE_CAP, Math.max(0, rate));
+      o[art.name] = { n: Math.round(avg * (1 - rate)), avg: Math.round(avg * 10) / 10, rate: Math.round(rate * 100), weeks: dates.length, same };
+    }
+    out[key] = o;
+  }
+  return { target, docs: docs.length, rows: rows.length, by: out };
+}
+
 // ── Цех лист (ЧЕРНОВА): срок (дни) + препоръчителна наличност + доставчик, по
 // ръчния лист на собственика (числата за проверка/корекция). Наличността се тегли
 // от Barsy по id. производство/заявка = препоръчителна − наличност.
@@ -1347,6 +1476,7 @@ table{border-collapse:collapse;background:#fff}
 #grid th{background:#2b2f36;color:#fff;position:sticky;top:0;z-index:2;font-weight:600;font-size:12px;letter-spacing:.02em}
 #grid tr:nth-child(even) td{background:#fafbfc}
 #grid th.shop,#grid td.shop{position:sticky;left:0;text-align:left;min-width:210px;max-width:250px;overflow:hidden;text-overflow:ellipsis;background:#fff;box-shadow:1px 0 0 #d7dade}
+.sug{display:block;font-size:10px;color:#9aa0a6;line-height:12px;white-space:nowrap;cursor:help}
 .stok{display:inline-block;background:#c8151f;color:#fff;font-weight:800;font-size:11px;line-height:16px;width:16px;text-align:center;border-radius:4px;margin-left:4px}
 #grid td.shop{z-index:1;font-weight:500}#grid th.shop{z-index:3;background:#2b2f36}
 #grid td input{width:46px;text-align:center;border:1px solid #cfd3d8;border-radius:5px;padding:5px 3px;font-size:14px}
@@ -1370,6 +1500,7 @@ h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.
 <header><div class="brand"><img src="https://motamo.bg/icons/icon-192.png" alt="MOTAMO" onerror="this.style.display='none'"><h1>MOTAMO цех<small>производство · сметки · стокова</small></h1></div>
 <span id="tokwrap"><input id="tok" type="password" placeholder="токен" size="16"></span>
 <span class="grp"><label>Зареди</label><input id="date" type="date" lang="bg-BG"><b class="dlab" id="dlab"></b><button class="alt" onclick="loadRazos()" title="Зарежда РАЗНОСА за деня = отворените сметки (направени в навечерието/сутринта), без вчерашните затворени. За ③ Стокова.">Отворени сметки</button><button class="alt" onclick="loadByLot()" title="Зарежда сметките от партида L.[деня от Зареди] (±2 дни), през реалните движения. За референтен минал ден или преди ③ Стокова.">↻ По партида</button></span>
+<span class="grp"><button class="alt" onclick="loadSug()" title="Средно изпратено в същия ден от седмицата (последните 4) минус % връщане. Датата е от „Партида". Не пише в Barsy.">Предложение</button><button class="alt" onclick="fillSug()" title="Слага предложението в полетата на ТИКНАТИТЕ магазини">Попълни</button></span>
 <span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="openPicker()" title="Добави магазин, който днешният разнос не е заредил">+ Магазин</button></span>
 <span class="grp"><label>Партида</label><input id="pdate" type="date" lang="bg-BG" title="Партида L.<тази дата>, срок +3 дни"><b class="dlab" id="plab"></b></span>
 <span class="grp"><button class="prod" onclick="doZagotovki()">① Заготовки</button><button class="prod" onclick="doArticles()">② Артикули</button><button class="acc" onclick="doAccounts()">③ Генерирай сметки</button><button class="acc" onclick="doStokova()">④ Генерирай стокова</button></span></header>
@@ -1400,9 +1531,13 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return
 function shortName(client,rep){var r=(rep||client||'');r=r.replace(/[„“”"'']/g,'').replace(/^\\s*(ул\\.|бул\\.|ж\\.к\\.|жк|пл\\.)\\s*/i,'').replace(/\\s{2,}/g,' ').trim();return r||(client||'')}
 function renderGrid(){var h='<tr><th class="shop"><input type="checkbox" id="selall" checked title="Избери/махни всички"> Магазин</th>';MENU.forEach(function(m){h+='<th class="'+(m.is_set?'set':'')+'">'+m.name.replace('НACHI','')+'</th>'});h+='</tr>';
 shops.forEach(function(s,i){var full=(s.client||'')+(s.rep?(' · '+s.rep):'');var label=shortName(s.client,s.rep);var stok=s.has_stokova?' <span class="stok" title="Вече има издадена стокова">С</span>':'';h+='<tr><td class="shop" title="'+esc(full)+'"><input type="checkbox" class="selbox" data-i="'+i+'" '+(s.scheduled===false?'':'checked')+'> '+esc(label)+stok+'</td>';
-MENU.forEach(function(m){var v=(s.order&&s.order[m.name])||0;h+='<td class="'+(m.is_set?'set':'')+'"><input data-i="'+i+'" data-n="'+esc(m.name)+'" value="'+v+'" inputmode="numeric"></td>'});h+='</tr>'});$('grid').innerHTML=h;
+var sg=sugFor(s);MENU.forEach(function(m){var v=(s.order&&s.order[m.name])||0;var p=sg?sg[m.name]:null;var ph=sg?'<small class="sug" title="'+(p?('средно '+p.avg+' за '+p.weeks+(p.same?' същи дни':' последни доставки')+(p.rate?(', връщане '+p.rate+'%'):'')):'не е взимал')+'">пр. '+(p?p.n:0)+'</small>':'';h+='<td class="'+(m.is_set?'set':'')+'"><input data-i="'+i+'" data-n="'+esc(m.name)+'" value="'+v+'" inputmode="numeric">'+ph+'</td>'});h+='</tr>'});$('grid').innerHTML=h;
 var sa=$('selall');if(sa){sa.addEventListener('change',function(){document.querySelectorAll('#grid .selbox').forEach(function(cb){cb.checked=sa.checked});syncRows()})}
 document.querySelectorAll('#grid .selbox').forEach(function(cb){cb.addEventListener('change',syncRows)});syncRows();saveGrid()}
+var SUG=null;function sugFor(s){if(!SUG)return null;var k=(s.client_id!=null?s.client_id:'')+':'+(s.person_id!=null?s.person_id:'');return SUG[k]||null}
+function loadSug(){var d=$('pdate').value||$('date').value;if(!d){msg('Избери дата в „Партида" (деня на разноса).','err');return}var n=0;msg('Смятам предложението за '+d.split('-').reverse().join('.')+'…');
+(function go(){api({action:'suggest',date:d}).then(function(j){if(!j.ok){msg('Грешка: '+(j.message||j.error||''),'err');return}var p=j.sync&&j.sync.pending;if(p&&++n<5){msg('Чета стари стокови от Barsy… остават '+p+'.');go();return}SUG=j.by||{};collect();renderGrid();var c=shops.filter(function(s){return sugFor(s)}).length;msg('Предложение за '+d.split('-').reverse().join('.')+': сивото „пр. N" под всяко поле ('+c+' от '+shops.length+' магазина имат история). „Попълни" го слага в полетата.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})})()}
+function fillSug(){if(!SUG){msg('Първо натисни „Предложение".','err');return}collect();var c=0;document.querySelectorAll('#grid .selbox').forEach(function(cb){if(!cb.checked)return;var s=shops[+cb.getAttribute('data-i')],sg=sugFor(s);if(!sg)return;var o={};Object.keys(sg).forEach(function(k){if(sg[k].n>0)o[k]=sg[k].n});s.order=o;c++});renderGrid();msg('Попълнени '+c+' тикнати магазина с предложението. Провери и коригирай.','ok')}
 function syncRows(){document.querySelectorAll('#grid .selbox').forEach(function(cb){var tr=cb.closest('tr');if(tr)tr.className=cb.checked?'':'off'})}
 function collect(){document.querySelectorAll('#grid input[data-n]').forEach(function(inp){var i=+inp.getAttribute('data-i'),n=inp.getAttribute('data-n'),v=parseFloat(inp.value)||0;if(!shops[i].order)shops[i].order={};if(v)shops[i].order[n]=v;else delete shops[i].order[n]})}
 // Взима САМО избраните магазини (тикнати), след като събере числата от решетката.
@@ -2079,6 +2214,19 @@ module.exports = async function handler(req, res) {
   // ── ИЗТЕГЛИ СМЕТКИ за ③ Стокова — ПО ПАРТИДА L.<дата> (замени date-базирания load_accounts,
   // защото партидата дава 100% точните сметки по стари дати чрез реалните движения).
   // Партида→сметка през справка Reports_lot_list_details (движения „AC", ref_id=сметка).
+  // Предложение за поръчка: досинхронизира кеша (бюджет ~35 s) и смята за деня.
+  // pending > 0 → първото пълнене не е свършило, клиентът вика пак. Не пише в Barsy.
+  if (body.action === "suggest") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    let sync = null;
+    try { sync = await syncDocCache(user, pass, 35000); }
+    catch (e) { sync = { error: String(e && e.message).slice(0, 200) }; }
+    try { const s = await computeSuggestion(date); res.status(200).json({ ok: true, sync, ...s }); }
+    catch (e) { res.status(502).json({ ok: false, error: "suggest_failed", message: String(e && e.message).slice(0, 200), sync }); }
+    return;
+  }
   if (body.action === "load_by_lot") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
