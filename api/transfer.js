@@ -803,6 +803,12 @@ mark();load();setInterval(poll,20000);
 // САМО заявката. `OWNER_TOKEN` е на собственика: освен трите екрана, показва и
 // цех инструмента (производство, сметки, стокови), чийто ключ се вмъква от
 // сървъра — така по-силният ключ никога не стига до телефона в точката.
+// Ключ за персонала на цеха (S25): отваря САМО склада (без суми в €) и чете
+// stock_report. Изведен от PEEK_TOKEN, за да не трябва нова env променлива;
+// PEEK сам по себе си не се дава на персонала (той отваря целия Barsy през /api/peek).
+const staffKey = () => process.env.PEEK_TOKEN
+  ? require("crypto").createHash("sha256").update("motamo-stock-staff:" + process.env.PEEK_TOKEN).digest("hex").slice(0, 24) : null;
+const isStaff = (k) => !!(staffKey() && k === staffKey());
 const isOwner = (k) => !!(process.env.OWNER_TOKEN && k === process.env.OWNER_TOKEN)
   || [process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET, process.env.CEX_VIEW_TOKEN]
     .some(t => t && k === t);
@@ -884,6 +890,12 @@ m.textContent=bits.length?bits.join(' · '):'Няма чакащи заявки,
 // отваряне: наличности, себестойности и производствата за последните 28 дни.
 const STOCK_CSS = `
 i.br{display:block;font-size:11px;color:var(--dim);font-style:normal}
+.staff .money,.staff .sum div:nth-child(3),.staff .sum div:nth-child(4),.staff .cols{display:none}
+input.oq{width:64px;padding:6px;border:1px solid var(--line);border-radius:6px;font:inherit;text-align:right}
+.ord{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:8px}
+.og{border:1px solid var(--line);border-radius:8px;padding:12px}.og.all{border-color:var(--fg)}
+.og b{display:block;margin-bottom:6px}.og pre{white-space:pre-wrap;font:inherit;font-size:13.5px;margin:0 0 10px}
+.og .btn{display:inline-block;text-decoration:none}
 .sum{display:flex;flex-wrap:wrap;border-top:2px solid var(--fg);border-bottom:1px solid var(--line);margin:4px 0 8px}
 .sum div{flex:1 1 150px;padding:14px 16px 13px;border-right:1px solid var(--line)}
 .sum div:last-child{border-right:0}
@@ -922,7 +934,7 @@ ul.lst li em{font-style:normal;color:var(--dim);font-size:12.5px;display:block}
 .meta{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);color:var(--dim);font-size:12.5px}
 `;
 
-function stockPage(k) {
+function stockPage(k, staff) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Складът на цеха</title>
 ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}${STOCK_CSS}</style></head><body>
@@ -930,7 +942,7 @@ ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}${STOCK_CSS}</style></head><body>
 <h1>Складът на цеха<small>какво няма да стигне до следващата доставка</small></h1>
 <button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
 <div class="wrap">
-  ${navBar(k, "stock")}
+  ${staff ? "" : navBar(k, "stock")}
   <div id="msg" class="msg info">Чета от Barsy…</div>
   <div class="sum">
     <div class="r"><b id="sNow">–</b><span>няма да стигнат</span></div>
@@ -940,7 +952,10 @@ ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}${STOCK_CSS}</style></head><body>
   </div>
   <h2>Суровини</h2>
   <p class="nt"><b>Цех + точка заедно</b> — за поръчки към доставчиците. Разходът е цеховото производство плюс каквото точката е взела през прехвърлянията. Подредени по <b>запас</b> — дните покритие минус дните до следващата доставка от този доставчик. Отрицателно значи, че ще свърши преди камионът да дойде.</p>
-  <div class="tw"><table id="tRaw"><thead><tr><th>Суровина</th><th>Стига за</th><th class="l">Доставчик</th><th class="l">Състояние</th><th>Налично</th><th>Разход / ден</th><th>Стойност</th></tr></thead><tbody></tbody></table></div>
+  <div class="tw"><table id="tRaw"><thead><tr><th>Суровина</th><th>Стига за</th><th class="l">Доставчик</th><th class="l">Състояние</th><th>Налично</th><th>Разход / ден</th><th class="money">Стойност</th><th>Поръчай</th></tr></thead><tbody></tbody></table></div>
+  <h2>Поръчка</h2>
+  <p class="nt">Колоната „Поръчай" е предложение: да стигне до доставката <b>след</b> следващата (+7 дни). Поправи числата, после изпрати — на доставчика или на Ясен.</p>
+  <div id="ord" class="ord"><p class="nt">Няма нищо за поръчка.</p></div>
   <h2>Графикът на доставчиците</h2>
   <div class="sched">
     <div><b>Брадърс Комерс</b><span>всеки ден · крема сирене, майонеза, пиле, олио, захар, сол</span></div>
@@ -965,6 +980,22 @@ function $(i){return document.getElementById(i)}
 function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function fmt(n){return Number(n).toLocaleString('bg-BG')}
+var STAFF=${staff ? "true" : "false"};if(STAFF)document.documentElement.classList.add('staff');
+var RAW=[];
+var NL=String.fromCharCode(10);
+function sugQ(r){if(r.c===null||!r.v28)return 0;var q=r.v28*(r.lead+7)-r.s;if(q<=0)return 0;return /бр/.test(r.u)?Math.ceil(q):Math.ceil(q*2)/2}
+function today(){var d=new Date();return ('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)}
+function orderLines(){var by={};document.querySelectorAll('#tRaw input.oq').forEach(function(inp){var v=parseFloat(String(inp.value).replace(',','.'))||0;if(v<=0)return;var r=RAW[+inp.getAttribute('data-i')];(by[r.sup]=by[r.sup]||[]).push('• '+r.n+' — '+v+' '+r.u)});return by}
+function share(t){return 'viber://forward?text='+encodeURIComponent(t)}
+var TX=[];
+function btns(t){var i=TX.push(t)-1;return '<button class="ghost cp" data-x="'+i+'">📋 Копирай</button> <a class="btn ghost" href="'+share(t)+'">'}
+function renderOrd(){var by=orderLines(),sups=Object.keys(by);TX=[];if(!sups.length){$('ord').innerHTML='<p class="nt">Няма нищо за поръчка.</p>';return}
+var all='Заявка за поръчка — цех MOTAMO, '+today()+NL;var h='';
+sups.forEach(function(s){var t='Поръчка от MOTAMO (цех, Стара Загора) — '+today()+NL+by[s].join(NL);all+=NL+s+':'+NL+by[s].join(NL)+NL;
+h+='<div class="og"><b>'+esc(s)+'</b><pre>'+esc(by[s].join(NL))+'</pre>'+btns(t)+'Viber до доставчика</a></div>'});
+$('ord').innerHTML='<div class="og all"><b>Всичко до Ясен</b>'+btns(all)+'Viber до Ясен</a></div>'+h}
+document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('button.cp');if(!b)return;var t=TX[+b.getAttribute('data-x')];
+(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){b.textContent='✓ Копирано'},function(){prompt('Копирай текста:',t)})});
 function slack(r){return r.c===null?999:(r.c-r.lead)}
 function st(r){return slack(r)<0?'now':slack(r)<4?'soon':(r.c!==null&&r.c>120)?'over':'ok'}
 var LBL={now:'няма да стигне',soon:'на ръба',ok:'добре',over:'презапас'};
@@ -972,7 +1003,7 @@ function load(){msg('Чета от Barsy…','info');
 fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:K,action:'stock_report'})})
 .then(function(r){return r.json()}).then(function(d){
 if(!d.ok){msg('Грешка: '+(d.error||''),'err');return}
-var raw=(d.raw||[]).slice().sort(function(a,b){return slack(a)-slack(b)});
+var raw=(d.raw||[]).slice().sort(function(a,b){return slack(a)-slack(b)});RAW=raw;
 $('tRaw').tBodies[0].innerHTML=raw.map(function(r){var s=st(r);
 return '<tr class="'+s+'"><td>'+esc(r.n)+'</td>'+
 '<td class="cov">'+(r.c===null?'—':r.c)+' <i>дни</i></td>'+
@@ -980,7 +1011,9 @@ return '<tr class="'+s+'"><td>'+esc(r.n)+'</td>'+
 '<td class="l"><span class="pl '+s+'">'+LBL[s]+'</span></td>'+
 '<td>'+fmt(r.s)+' <i>'+esc(r.u)+'</i>'+(r.sp?'<i class="br">цех '+fmt(r.sc)+' · точка '+fmt(r.sp)+'</i>':'')+'</td>'+
 '<td>'+fmt(r.v28)+' <i>7дн '+fmt(r.v7)+'</i>'+(r.vp?'<i class="br">+ точка '+fmt(r.vp)+'</i>':'')+'</td>'+
-'<td><i>'+fmt(r.val)+' €</i></td></tr>'}).join('');
+'<td class="money"><i>'+fmt(r.val||0)+' €</i></td>'+
+'<td><input class="oq" inputmode="decimal" data-i="'+raw.indexOf(r)+'" value="'+((s==='now'||s==='soon')?sugQ(r):'')+'" placeholder="0"> <i>'+esc(r.u)+'</i></td></tr>'}).join('');
+document.querySelectorAll('#tRaw input.oq').forEach(function(i){i.addEventListener('input',renderOrd)});renderOrd();
 $('tMade').tBodies[0].innerHTML=(d.made||[]).slice().sort(function(a,b){return (a.c===null?1e9:a.c)-(b.c===null?1e9:b.c)})
 .map(function(r){return '<tr><td>'+esc(r.n)+'</td><td class="cov">'+(r.c===null?'—':r.c)+'</td><td>'+fmt(r.s)+' <i>'+esc(r.u)+'</i></td><td><i>'+fmt(r.v)+'</i></td></tr>'}).join('');
 function li(a){return a.map(function(x){return '<li><span>'+esc(x.n)+'<em>'+fmt(x.s)+' '+esc(x.u)+'</em></span><b>'+fmt(x.val)+' €</b></li>'}).join('')}
@@ -1006,7 +1039,7 @@ module.exports = async function handler(req, res) {
 
   // Манифестът се сервира от същия адрес, за да е в обхвата на страницата.
   if (req.method === "GET" && q.view === "manifest") {
-    if (!viewTokens.some(t => q.k === t)) { res.status(403).json({ error: "forbidden" }); return; }
+    if (!viewTokens.some(t => q.k === t) && !isStaff(q.k)) { res.status(403).json({ error: "forbidden" }); return; }
     res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
     res.status(200).json(manifest(q.k, isOwner(q.k)));
     return;
@@ -1015,7 +1048,7 @@ module.exports = async function handler(req, res) {
   const VIEWS = ["shop", "cex", "stock", "hub"];
   if (req.method === "GET" && (VIEWS.includes(q.view) || (!q.view && q.k))) {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    const okTok = viewTokens.some(t => q.k === t) || (q.view === "stock" && process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN);
+    const okTok = viewTokens.some(t => q.k === t) || (q.view === "stock" && ((process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN) || isStaff(q.k)));
     if (!okTok) {
       res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп — липсва или грешен ключ (?k=).</body>");
       return;
@@ -1024,14 +1057,14 @@ module.exports = async function handler(req, res) {
     // отваря само заявката — там не бива да се пуска производство или да се
     // гледа себестойност.
     if ((q.view === "cex" || q.view === "stock") && !isOwner(q.k)
-      && !(q.view === "stock" && process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN)) {
+      && !(q.view === "stock" && ((process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN) || isStaff(q.k)))) {
       res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Този екран е само за цеха.</body>");
       return;
     }
     const view = q.view || "hub";
     res.status(200).send(
       view === "shop" ? shopPage(q.k)
-      : view === "stock" ? stockPage(q.k)
+      : view === "stock" ? stockPage(q.k, isStaff(q.k))
       : view === "cex" ? cexPage(q.k)
       : hubPage(q.k));
     return;
@@ -1045,7 +1078,8 @@ module.exports = async function handler(req, res) {
   // разработка); всичко, което пише, иска пълния токен.
   const readOnly = ["list", "list_requests", "inspect", "stock_report"].includes(body.action);
   const allowed = readOnly ? viewTokens.concat([process.env.PEEK_TOKEN].filter(Boolean)) : viewTokens;
-  if (!allowed.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+  const staff = body.action === "stock_report" && isStaff(token);
+  if (!staff && !allowed.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
   if (!process.env.BARSY_CEX_USER || !process.env.BARSY_USER) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
 
   try {
@@ -1093,6 +1127,11 @@ module.exports = async function handler(req, res) {
     // ── складовото табло (чете живо от Barsy при всяко отваряне) ──
     if (body.action === "stock_report") {
       const rep = await stockReport();
+      if (staff) {   // персоналът не вижда пари
+        const strip = a => (a || []).map(({ val, ...r }) => r);
+        res.status(200).json({ ok: true, ...rep, raw: strip(rep.raw), made: strip(rep.made), toPoint: [], rest: [] });
+        return;
+      }
       res.status(200).json({ ok: true, ...rep });
       return;
     }
