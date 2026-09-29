@@ -639,7 +639,7 @@ function count(){var n=0;document.querySelectorAll('.q').forEach(function(i){if(
 function render(){var d=draft(),h='<tr><th>Продукт</th><th class="num">Имам</th><th class="num">Искам</th></tr>',lastZ=null;
 items.forEach(function(it){var z=it.zag?'Заготовки':'Суровини и други';if(z!==lastZ){lastZ=z;h+='<tr><td colspan="3" class="grp"><span>'+z+'</span></td></tr>'}
 var st=it.shop_stock,cls=st<0?'neg':(st===0?'zero':''),p=it.pack||(it.tpl&&it.tpl.name!=='кг'?it.tpl:null);
-var have=p?(Math.round(st/p.size*10)/10+' '+p.plural):(Math.round(st*1000)/1000+' '+esc(it.unit));
+var have=p?(Math.round(st/p.size)+' '+p.plural):(Math.round(st*1000)/1000+' '+esc(it.unit));
 h+='<tr><td>'+esc(it.name)+(p&&!it.tpl?' <span class="pk">по '+esc(p.name)+' '+(p.size*1000)+' г</span>':'')+(it.hint?' <span class="pk">'+esc(it.hint)+'</span>':'')+(it.missing?' <span class="pk" style="color:var(--sun)">липсва в '+esc(it.missing)+'</span>':'')+'</td>'+
 '<td class="num '+cls+'">'+have+'</td>'+
 '<td class="num">'+(it.tpl?tplSel(it,d[it.cex_id]):'<input class="q" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-size="'+(p?p.size:'')+'" value="'+(d[it.cex_id]||'')+'" oninput="saveDraft()">'+
