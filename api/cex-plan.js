@@ -1480,7 +1480,7 @@ table{border-collapse:collapse;background:#fff}
 #grid th{background:#2b2f36;color:#fff;position:sticky;top:0;z-index:2;font-weight:600;font-size:12px;letter-spacing:.02em}
 #grid tr:nth-child(even) td{background:#fafbfc}
 #grid th.shop,#grid td.shop{position:sticky;left:0;text-align:left;min-width:210px;max-width:250px;overflow:hidden;text-overflow:ellipsis;background:#fff;box-shadow:1px 0 0 #d7dade}
-.sug{display:block;font-size:10px;color:#9aa0a6;line-height:12px;white-space:nowrap;cursor:help}
+.sug{display:block;font-size:14px;font-weight:700;color:#1565c0;line-height:17px;margin-top:3px;white-space:nowrap;cursor:help}
 .stok{display:inline-block;background:#c8151f;color:#fff;font-weight:800;font-size:11px;line-height:16px;width:16px;text-align:center;border-radius:4px;margin-left:4px}
 #grid td.shop{z-index:1;font-weight:500}#grid th.shop{z-index:3;background:#2b2f36}
 #grid td input{width:46px;text-align:center;border:1px solid #cfd3d8;border-radius:5px;padding:5px 3px;font-size:14px}
