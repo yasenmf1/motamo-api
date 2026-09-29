@@ -1161,6 +1161,75 @@ async function runStanding(handler, host) {
   return { ok: !!out.ok, request_id: cr.id, produced, cex_doc_id: out.cex_doc_id, shop_doc_id: out.shop_doc_id, error: out.error };
 }
 
+// ★ S25 — „Поръчка към доставчик" за склада на цеха (view=order). Доставчик → неговите
+// артикули (по последното зареждане, както в склада), количество в НЕГОВИТЕ опаковки,
+// предложение да стигне до доставката след следващата (+7 дни), готово съобщение за Viber.
+// Без суми в €. Опаковките — паметта supplier-doc-units (потвърдени на реални документи).
+const SUPPLY_PACK = {
+  86:  { name: "плик 500 г", size: 0.5 },     // Едамаме зърна (Фиш)
+  60:  { name: "плик 500 г", size: 0.5 },     // Сурими/рулца от раци (Фиш)
+  51:  { name: "тарелка 180 г", size: 0.18 }, // Маки Еби (Фиш, SushiEBI 20×180 г)
+  53:  { name: "опаковка 2 кг", size: 2 },    // Унаги сос (Фиш)
+  64:  { name: "кутия 1 кг (40 бр)", size: 40 }, // Торпедо (бр в Barsy)
+  87:  { name: "торба 1 кг", size: 1 },       // Уакаме
+  36:  { name: "кофа 3 кг", size: 3 },        // Крема сирене (Брадърс, Арла 3 кг)
+  37:  { name: "кофа 3 кг", size: 3 },        // Майонеза (Брадърс, Олинеза 3 кг)
+  29:  { name: "туба 10 л", size: 10 },       // Олио (Брадърс)
+  127: { name: "плик 500 г", size: 0.5 }      // Пиле панирано (Брадърс, Майстор Гош 500 г)
+};
+const ORDER_SUPPLIERS = ["Фиш Експрес", "Алекс Фиш", "Брадърс", "Айсбокс"];
+function orderPage(k) {
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Поръчка към доставчик</title>
+${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}
+.sups{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 12px}.sups button{flex:1 1 40%}
+.sups button.on{background:var(--sun);color:#fff;border-color:var(--sun)}
+.ol{width:100%;border-collapse:collapse}.ol td{padding:9px 4px;border-bottom:1px solid var(--line);vertical-align:middle}
+.ol .n{font-size:15px}.ol .n i{display:block;font-style:normal;color:var(--dim);font-size:12.5px}
+.ol .num{text-align:right;white-space:nowrap}.ol input{width:64px;padding:8px;font:inherit;text-align:right;border-radius:8px;border:1px solid var(--line);background:transparent;color:inherit}
+.ol tr.low .n b{color:var(--sun)}
+pre.tx{white-space:pre-wrap;font:inherit;font-size:14px;border:1px solid var(--line);border-radius:10px;padding:12px;margin:12px 0}
+.acts{display:flex;gap:8px;flex-wrap:wrap}.acts>*{flex:1 1 30%;text-align:center;text-decoration:none}
+</style></head><body>
+<header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
+<h1>Поръчка към доставчик<small>цех · какво да поръчаме</small></h1>
+<button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
+<div class="wrap">
+<div class="sups" id="sups"></div>
+<div id="msg" class="msg info">Чета склада…</div>
+<table class="ol" id="tb"></table>
+<pre class="tx" id="tx" style="display:none"></pre>
+<div class="acts" id="acts" style="display:none"><a class="btn" id="vb" href="#">Viber до доставчика</a><button class="ghost" onclick="cp()">📋 Копирай</button><button class="ghost" onclick="toOwner()">✈️ Прати на Ясен</button></div>
+</div>
+<script>
+var K=${JSON.stringify(k)},PK=${JSON.stringify(SUPPLY_PACK)},SUPS=${JSON.stringify(ORDER_SUPPLIERS)},RAW=[],SEL=SUPS[0];
+function $(i){return document.getElementById(i)}
+function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function f(n){return String(Math.round(Number(n)*100)/100).replace('.',',')}
+function sug(r){if(r.c===null||!r.v28)return 0;var q=r.v28*(r.lead+7)-r.s;if(q<=0)return 0;var p=PK[r.id];return p?Math.ceil(q/p.size):(/бр/.test(r.u)?Math.ceil(q):Math.ceil(q*2)/2)}
+function unit(r){var p=PK[r.id];return p?p.name:r.u}
+function sups(){$('sups').innerHTML=SUPS.map(function(s){var n=RAW.filter(function(r){return r.sup===s}).length;return '<button class="'+(s===SEL?'on':'ghost')+'" onclick="pick(this.textContent.split(\\' (\\')[0])">'+esc(s)+' ('+n+')</button>'}).join('')}
+function pick(s){SEL=s;sups();draw()}
+function draw(){var rs=RAW.filter(function(r){return r.sup===SEL}).sort(function(a,b){return (a.c===null?999:a.c-a.lead)-(b.c===null?999:b.c-b.lead)});
+if(!rs.length){$('tb').innerHTML='<tr><td>Няма артикули от този доставчик.</td></tr>';txt();return}
+var lead=rs[0].lead;
+$('tb').innerHTML='<tr><td colspan="3" style="color:var(--dim);font-size:13px">Следваща доставка след '+lead+' дни. Числата са в опаковки на доставчика.</td></tr>'+rs.map(function(r){var low=r.c!==null&&r.c-r.lead<2,v=sug(r);
+return '<tr class="'+(low?'low':'')+'"><td class="n"><b>'+esc(r.n)+'</b><i>имаме '+f(r.s)+' '+esc(r.u)+' · стига '+(r.c===null?'—':f(r.c)+' дни')+'</i></td>'+
+'<td class="num"><input inputmode="decimal" data-id="'+r.id+'" value="'+(v||'')+'" placeholder="0" oninput="txt()"></td><td style="font-size:12.5px;color:var(--dim)">'+esc(unit(r))+'</td></tr>'}).join('');txt()}
+function lines(){var out=[];document.querySelectorAll('#tb input').forEach(function(i){var v=parseFloat(String(i.value).replace(',','.'))||0;if(v<=0)return;var r=RAW.filter(function(x){return String(x.id)===i.dataset.id})[0];var p=PK[r.id];
+out.push('• '+r.n+' — '+(p?f(v)+' × '+p.name+' (общо '+f(v*p.size)+' '+r.u+')':f(v)+' '+r.u))});return out}
+function txt(){var l=lines();if(!l.length){$('tx').style.display='none';$('acts').style.display='none';return}
+var d=new Date();var t='Здравейте! Поръчка от MOTAMO (цех, Стара Загора):'+String.fromCharCode(10)+l.join(String.fromCharCode(10))+String.fromCharCode(10)+'Благодаря!';
+$('tx').textContent=t;$('tx').style.display='';$('acts').style.display='';$('vb').href='viber://forward?text='+encodeURIComponent(t)}
+function cp(){var t=$('tx').textContent;(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){msg('✓ Копирано','ok')},function(){prompt('Копирай:',t)})}
+function toOwner(){var t='Поръчка към '+SEL+':'+String.fromCharCode(10)+lines().join(String.fromCharCode(10));if(!confirm('Да пратя на Ясен в Telegram?'))return;
+fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:K,action:'tg_supply',text:t})}).then(function(r){return r.json()}).then(function(j){msg(j.ok?'✓ Пратено на Ясен':'Не мина: '+(j.error||''),j.ok?'ok':'err')})}
+function load(){msg('Чета склада…','info');fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:K,action:'stock_report'})}).then(function(r){return r.json()}).then(function(d){if(!d.ok){msg('Грешка: '+(d.error||''),'err');return}RAW=d.raw||[];sups();draw();msg('Цех + точка заедно · предложението стига до доставката след следващата (+7 дни). Поправи числата и прати.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+load();
+</script></body></html>`;
+}
+
 // ── HANDLER ──────────────────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -1219,7 +1288,7 @@ module.exports = async function handler(req, res) {
     const up = (typeof req.body === "object" && req.body) ? req.body : (() => { try { return JSON.parse(req.body || "{}"); } catch (e) { return {}; } })();
     const base = "https://" + ((req.headers && req.headers.host) || "motamo-api.vercel.app") + "/api/transfer";
     const formBtn = () => ({ inline_keyboard: [[{ text: "📝 Отвори формата за заявка", url: `${base}?view=shop&k=${TG.pointKey()}` }]] });
-    const skladBtn = () => ({ inline_keyboard: [[{ text: "📦 Отвори заявките", url: `${base}?view=cex&k=${TG.skladKey()}` }], [{ text: "🧾 Склад и поръчка към доставчик", url: `${base}?view=stock&k=${staffKey()}` }]] });
+    const skladBtn = () => ({ inline_keyboard: [[{ text: "📦 Отвори заявките", url: `${base}?view=cex&k=${TG.skladKey()}` }], [{ text: "🛒 Поръчка към доставчик", url: `${base}?view=order&k=${TG.skladKey()}` }], [{ text: "🧾 Склад", url: `${base}?view=stock&k=${staffKey()}` }]] });
     const ROLE_BG = { tochka: "Точка", sklad: "Склад (цех)", owner: "Собственик", none: "без роля" };
     try {
       // собственикът натиска бутон за роля
@@ -1301,11 +1370,12 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const VIEWS = ["shop", "cex", "stock", "hub"];
+  const VIEWS = ["shop", "cex", "stock", "hub", "order"];
   if (req.method === "GET" && (VIEWS.includes(q.view) || (!q.view && q.k))) {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     const okTok = viewTokens.some(t => q.k === t) || (q.view === "stock" && ((process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN) || isStaff(q.k)))
-      || (q.view === "cex" && TG.skladKey() && q.k === TG.skladKey()) || (q.view === "shop" && TG.pointKey() && q.k === TG.pointKey());
+      || (q.view === "cex" && TG.skladKey() && q.k === TG.skladKey()) || (q.view === "shop" && TG.pointKey() && q.k === TG.pointKey())
+      || (q.view === "order" && ((TG.skladKey() && q.k === TG.skladKey()) || isStaff(q.k)));
     if (!okTok) {
       res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп — липсва или грешен ключ (?k=).</body>");
       return;
@@ -1313,9 +1383,10 @@ module.exports = async function handler(req, res) {
     // Цех екраните искат ключа на собственика. С ключа от телефона в точката се
     // отваря само заявката — там не бива да се пуска производство или да се
     // гледа себестойност.
-    if ((q.view === "cex" || q.view === "stock") && !isOwner(q.k)
+    if ((q.view === "cex" || q.view === "stock" || q.view === "order") && !isOwner(q.k)
       && !(q.view === "stock" && ((process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN) || isStaff(q.k)))
-      && !(q.view === "cex" && TG.skladKey() && q.k === TG.skladKey())) {
+      && !(q.view === "cex" && TG.skladKey() && q.k === TG.skladKey())
+      && !(q.view === "order" && ((TG.skladKey() && q.k === TG.skladKey()) || isStaff(q.k)))) {
       res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Този екран е само за цеха.</body>");
       return;
     }
@@ -1324,6 +1395,7 @@ module.exports = async function handler(req, res) {
       view === "shop" ? shopPage(q.k)
       : view === "stock" ? stockPage(q.k, isStaff(q.k))
       : view === "cex" ? cexPage(q.k)
+      : view === "order" ? orderPage(q.k)
       : hubPage(q.k));
     return;
   }
@@ -1337,7 +1409,7 @@ module.exports = async function handler(req, res) {
   const readOnly = ["list", "list_requests", "inspect", "stock_report"].includes(body.action);
   const allowed = readOnly ? viewTokens.concat([process.env.PEEK_TOKEN].filter(Boolean)) : viewTokens;
   const staff = ["stock_report", "tg_supply"].includes(body.action) && isStaff(token);
-  const skladOk = TG.skladKey() && token === TG.skladKey() && ["list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply"].includes(body.action);
+  const skladOk = TG.skladKey() && token === TG.skladKey() && ["list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply", "stock_report"].includes(body.action);
   const pointOk = TG.pointKey() && token === TG.pointKey() && ["list", "create_request", "list_requests"].includes(body.action);
   if (!staff && !skladOk && !pointOk && !allowed.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
   if (!process.env.BARSY_CEX_USER || !process.env.BARSY_USER) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
@@ -1404,7 +1476,7 @@ module.exports = async function handler(req, res) {
     }
     if (body.action === "stock_report") {
       const rep = await stockReport();
-      if (staff) {   // персоналът не вижда пари
+      if (staff || skladOk) {   // персоналът не вижда пари
         const strip = a => (a || []).map(({ val, ...r }) => r);
         res.status(200).json({ ok: true, ...rep, raw: strip(rep.raw), made: strip(rep.made), toPoint: [], rest: [] });
         return;
