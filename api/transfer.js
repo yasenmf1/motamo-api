@@ -1223,7 +1223,7 @@ return '<tr class="'+(low?'low':'')+'"><td class="n"><b>'+esc(r.n)+'</b><i>им�
 function lines(){var out=[];document.querySelectorAll('#tb input').forEach(function(i){var v=parseFloat(String(i.value).replace(',','.'))||0;if(v<=0)return;var r=RAW.filter(function(x){return String(x.id)===i.dataset.id})[0];var p=PK[r.id];
 out.push('• '+r.n+' — '+(p?f(v)+' × '+p.name+' (общо '+f(v*p.size)+' '+r.u+')':f(v)+' '+r.u))});return out}
 function txt(){var l=lines();if(!l.length){$('tx').style.display='none';$('acts').style.display='none';return}
-var d=new Date();var t='Здравейте! Поръчка от MOTAMO (цех, Стара Загора):'+String.fromCharCode(10)+l.join(String.fromCharCode(10))+String.fromCharCode(10)+'Благодаря!';
+var d=new Date();var t='Здравейте! Поръчка от Човек и Бъдеще Ст.Загора, Хрищенско 30:'+String.fromCharCode(10)+l.join(String.fromCharCode(10))+String.fromCharCode(10)+'Благодаря!';
 $('tx').textContent=t;$('tx').style.display='';$('acts').style.display='';$('vb').href='viber://forward?text='+encodeURIComponent(t)}
 function cp(){var t=$('tx').textContent;(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){msg('✓ Копирано','ok')},function(){prompt('Копирай:',t)})}
 function toOwner(){var t='Поръчка към '+SEL+':'+String.fromCharCode(10)+lines().join(String.fromCharCode(10));if(!confirm('Да пратя на Ясен в Telegram?'))return;
