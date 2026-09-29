@@ -1295,12 +1295,12 @@ module.exports = async function handler(req, res) {
     const base = "https://" + ((req.headers && req.headers.host) || "motamo-api.vercel.app") + "/api/transfer";
     const formBtn = () => ({ inline_keyboard: [[{ text: "📝 Отвори формата за заявка", url: `${base}?view=shop&k=${TG.pointKey()}` }]] });
     const skladBtn = () => ({ inline_keyboard: [[{ text: "📦 Отвори заявките", url: `${base}?view=cex&k=${TG.skladKey()}` }], [{ text: "🛒 Поръчка към доставчик", url: `${base}?view=order&k=${TG.skladKey()}` }], [{ text: "🧾 Склад", url: `${base}?view=stock&k=${staffKey()}` }]] });
-    const ROLE_BG = { tochka: "Точка", sklad: "Склад (цех)", owner: "Собственик", none: "без роля" };
+    const ROLE_BG = { tochka: "Точка", sklad: "Склад (цех)", shofior: "Шофьор", owner: "Собственик", none: "без роля" };
     try {
       // собственикът натиска бутон за роля
       if (up.callback_query) {
         const cq = up.callback_query, from = cq.from || {};
-        const m = /^role:(\d+):(tochka|sklad|none)$/.exec(String(cq.data || ""));
+        const m = /^role:(\d+):(tochka|sklad|shofior|none)$/.exec(String(cq.data || ""));
         if (String(from.id) !== TG.OWNER_CHAT_ID || !m) { await TG.tgApi("answerCallbackQuery", { callback_query_id: cq.id, text: "Само собственикът задава роли." }); res.status(200).json({ ok: true }); return; }
         const uid = Number(m[1]), role = m[2];
         const u = await TG.userGet(uid);
@@ -1309,6 +1309,7 @@ module.exports = async function handler(req, res) {
         if (cq.message) await TG.tgApi("editMessageText", { chat_id: cq.message.chat.id, message_id: cq.message.message_id, parse_mode: "HTML",
           text: `✓ <b>${TG.escHtml((u && u.name) || uid)}</b> е <b>${ROLE_BG[role]}</b>` });
         if (role === "tochka") await TG.tgSend("✅ Одобрен си като <b>Точка</b>.\nЗа заявка към цеха напиши <b>заявка</b> (до 10:00 всеки ден).", String(uid), null, formBtn());
+        else if (role === "shofior") await TG.tgSend("✅ Одобрен си като <b>Шофьор</b>. Скоро тук ще е маршрутът за разноса.", String(uid));
         else if (role === "sklad") await TG.tgSend("✅ Одобрена си като <b>Склад (цех)</b>.\nТук ще идват заявките от точката. Напиши <b>заявка</b>, за да ги отвориш.", String(uid), null, skladBtn());
         res.status(200).json({ ok: true }); return;
       }
@@ -1321,7 +1322,7 @@ module.exports = async function handler(req, res) {
         if (!u) {
           await TG.userUpsert({ user_id: uid, name, username: from.username || null, role: null });
           await TG.tgSend(`👤 Нов човек при бота: <b>${TG.escHtml(name)}</b>${from.username ? " (@" + TG.escHtml(from.username) + ")" : ""}\nКаква роля да има?`, TG.OWNER_CHAT_ID, null,
-            { inline_keyboard: [[{ text: "🏪 Точка", callback_data: `role:${uid}:tochka` }, { text: "📦 Склад (цех)", callback_data: `role:${uid}:sklad` }, { text: "✖ Нищо", callback_data: `role:${uid}:none` }]] });
+            { inline_keyboard: [[{ text: "🏪 Точка", callback_data: `role:${uid}:tochka` }, { text: "📦 Склад (цех)", callback_data: `role:${uid}:sklad` }], [{ text: "🚚 Шофьор", callback_data: `role:${uid}:shofior` }, { text: "✖ Нищо", callback_data: `role:${uid}:none` }]] });
           await TG.tgSend("Здравей! 👋 Аз съм ботът на MOTAMO. Изчакай собственикът да те одобри.", String(uid));
           res.status(200).json({ ok: true }); return;
         }
