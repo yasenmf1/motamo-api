@@ -358,6 +358,10 @@ async function reportMarginByClient(from, to, clientIds, user, pass) {
   return out;
 }
 const VAT_CONST = 1.2;
+// Пробни клиенти, които не тръгнаха (собственикът, 29.09) — вън от ВСИЧКИ справки.
+const TRIAL_CLIENTS = /^\s*(анонимен|саси трейд|симеонови 2026|падел клуб)/i;
+const isTrialClient = a => TRIAL_CLIENTS.test(String((a && a.client_name) || ""));
+
 
 // ── ДАШБОРД агрегатор (Фаза 1): оборот по ден + по клиент, издадени фактури, разлика.
 // Оборот = сумата на ЗАТВОРЕНИТЕ сметки (`total_sum` е с ДДС → нето = /1.2), групиран по
@@ -381,7 +385,7 @@ async function dashData(from, to, expenses, user, pass) {
   const byClient = {};     // client_id → { name, neto, n }
   let totalNeto = 0, accountsN = 0;
   for (const a of all) {
-    if (String(a.account_alias || "").includes("CLTEST")) continue;
+    if (String(a.account_alias || "").includes("CLTEST") || isTrialClient(a)) continue;
     const day = String(a.close_date || "").slice(0, 10);
     if (!inRange(day)) continue;                       // само затворени в периода
     const gross = Number(a.total_sum) || 0;
@@ -400,6 +404,7 @@ async function dashData(from, to, expenses, user, pass) {
   for (const x of arrOf(invR)) {
     if (String(x.type_id) !== "1" || String(x.is_anulate) === "1") continue;
     if (!inRange(String(x.create_date || "").slice(0, 10))) continue;
+    if (isTrialClient(x)) continue;
     const cid = x.client_id != null ? x.client_id : 0;
     const neto = Number(x.total_neto) || 0;
     invByClient[cid] = Math.round(((invByClient[cid] || 0) + neto) * 100) / 100;
@@ -586,7 +591,7 @@ async function scheduleSeed(dateIso, user, pass) {
   // Показваме САМО обекти от регистъра (по id) — непознати/клиентски редове отпадат.
   const seen = {};
   for (const a of all) {
-    if (String(a.account_alias || "").includes("CLTEST")) continue;
+    if (String(a.account_alias || "").includes("CLTEST") || isTrialClient(a)) continue;
     const key = cexKey(a);
     if (!CEX_OBJECTS[key]) continue;
     if (!seen[key] || closedOf(a) > closedOf(seen[key])) seen[key] = a;
@@ -1682,7 +1687,7 @@ module.exports = async function handler(req, res) {
     let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
     const byKey = {};
     for (const a of all) {
-      if (String(a.account_alias || "").includes("CLTEST")) continue;
+      if (String(a.account_alias || "").includes("CLTEST") || isTrialClient(a)) continue;
       const key = cexKey(a);
       if (!CEX_OBJECTS[key] || byKey[key]) continue; // подредено по account_id desc → първата е най-скорошната
       byKey[key] = { key, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null,
