@@ -56,6 +56,29 @@ const PACK = {
   51: { name: "тарелка", plural: "тарелки", size: 0.18 } // Бланширани скариди Маки Еби
 };
 
+
+// ★ S25 — ШАБЛОН на точката (собственикът, 29.09): при тези продукти вместо свободно поле
+// има МЕНЮ с разрешените количества, в опаковките, в които идват. size = колко базови
+// единици (кг/л/бр в Barsy) е една опаковка; choices = разрешените бройки опаковки
+// (последната = максимумът). Сървърът също не пуска повече от максимума.
+const TEMPLATE = {
+  59:  { name: "поша", plural: "поши", size: 1, choices: [1, 2, 3] },          // заг. рулца раци (поша ≈ 1 кг)
+  68:  { name: "поша", plural: "поши", size: 1, choices: [1, 2, 3] },          // заг. соево-чеснова майонеза
+  131: { name: "кг", plural: "кг", size: 1, choices: [1, 2, 3, 4, 5] },        // зеле овкусено
+  65:  { name: "кг", plural: "кг", size: 0.5, choices: [1, 2] },              // сос манго с мед: 0,5 / 1
+  127: { name: "плик", plural: "плика", size: 0.5, choices: [3, 4, 5, 6, 7, 8, 9, 10] }, // пиле панирано
+  36:  { name: "кофа", plural: "кофи", size: 5, choices: [1, 2] },             // крема сирене
+  52:  { name: "торба", plural: "торби", size: 1, choices: [1, 2, 3] },        // авокадо половинки
+  87:  { name: "торба", plural: "торби", size: 1, choices: [1, 2] },           // уакаме
+  44:  { name: "кг", plural: "кг", size: 1, choices: [1, 2, 3] },              // пушена сьомга
+  51:  { name: "тарелка", plural: "тарелки", size: 0.18, choices: [1, 2, 3, 4, 5, 6, 7] }, // Маки Еби
+  64:  { name: "кутия", plural: "кутии", size: 40, choices: [1, 2] },          // Торпедо: 1 кутия = 1 кг = 40 бр
+  123: { name: "плик", plural: "плика", size: 1, choices: [1, 2, 3] },         // царевица
+  60:  { name: "плик", plural: "плика", size: 0.5, choices: [1, 2, 3] },       // сурими/рулца от раци
+  86:  { name: "плик", plural: "плика", size: 0.5, choices: [1, 2, 3, 4, 5] }, // едамаме зърна
+  56:  { name: "кг", plural: "кг", size: 1, choices: [1, 2, 3, 4] }            // краставици
+};
+
 // Кратка бележка до името — само за да знаят момичетата в какво идва продуктът.
 // За разлика от PACK тук НЕ се променя единицата за въвеждане: полето си остава
 // в кг/л, а текстът само подсказва (собственикът: „сложи го като описание").
@@ -585,7 +608,10 @@ button:disabled{opacity:.45;cursor:default}
 function shopPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Заявка към цеха</title>
-${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
+${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}
+select.q.tpl{width:100%;min-width:120px;max-width:170px;padding:10px 8px;font:inherit;font-size:15px;border-radius:10px;border:1px solid var(--line);background:var(--card,#1c1f24);color:inherit}
+select.q.tpl:not([value=""]){border-color:var(--sun)}
+</style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Заявка към цеха<small>точка Каравелов · какво да донесат</small></h1>
 <span class="tabs"><button id="t1" class="on" onclick="tab(1)">Нова заявка</button><button id="t2" onclick="tab(2)">История</button></span></header>
@@ -608,31 +634,35 @@ function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
 function draft(){try{return JSON.parse(localStorage.getItem(DRAFT)||'{}')}catch(e){return{}}}
-function saveDraft(){var d={};document.querySelectorAll('input.q').forEach(function(i){if(i.value)d[i.dataset.id]=i.value});try{localStorage.setItem(DRAFT,JSON.stringify(d))}catch(e){}conv();count()}
-function count(){var n=0;document.querySelectorAll('input.q').forEach(function(i){if(Number(i.value)>0)n++});$('cnt').textContent=n?(n+' продукта в заявката'):'нищо не е въведено';$('send').disabled=!n}
+function saveDraft(){var d={};document.querySelectorAll('.q').forEach(function(i){if(i.value)d[i.dataset.id]=i.value});try{localStorage.setItem(DRAFT,JSON.stringify(d))}catch(e){}conv();count()}
+function count(){var n=0;document.querySelectorAll('.q').forEach(function(i){if(Number(i.value)>0)n++});$('cnt').textContent=n?(n+' продукта в заявката'):'нищо не е въведено';$('send').disabled=!n}
 function render(){var d=draft(),h='<tr><th>Продукт</th><th class="num">Имам</th><th class="num">Искам</th></tr>',lastZ=null;
 items.forEach(function(it){var z=it.zag?'Заготовки':'Суровини и други';if(z!==lastZ){lastZ=z;h+='<tr><td colspan="3" class="grp"><span>'+z+'</span></td></tr>'}
-var st=it.shop_stock,cls=st<0?'neg':(st===0?'zero':''),p=it.pack;
+var st=it.shop_stock,cls=st<0?'neg':(st===0?'zero':''),p=it.pack||(it.tpl&&it.tpl.name!=='кг'?it.tpl:null);
 var have=p?(Math.round(st/p.size*10)/10+' '+p.plural):(Math.round(st*1000)/1000+' '+esc(it.unit));
-h+='<tr><td>'+esc(it.name)+(p?' <span class="pk">по '+esc(p.name)+' '+(p.size*1000)+' г</span>':'')+(it.hint?' <span class="pk">'+esc(it.hint)+'</span>':'')+(it.missing?' <span class="pk" style="color:var(--sun)">липсва в '+esc(it.missing)+'</span>':'')+'</td>'+
+h+='<tr><td>'+esc(it.name)+(p&&!it.tpl?' <span class="pk">по '+esc(p.name)+' '+(p.size*1000)+' г</span>':'')+(it.hint?' <span class="pk">'+esc(it.hint)+'</span>':'')+(it.missing?' <span class="pk" style="color:var(--sun)">липсва в '+esc(it.missing)+'</span>':'')+'</td>'+
 '<td class="num '+cls+'">'+have+'</td>'+
-'<td class="num"><input class="q" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-size="'+(p?p.size:'')+'" value="'+(d[it.cex_id]||'')+'" oninput="saveDraft()">'+
-(p?'<div class="conv" id="cv'+it.cex_id+'"></div>':'')+'</td></tr>'});
+'<td class="num">'+(it.tpl?tplSel(it,d[it.cex_id]):'<input class="q" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-size="'+(p?p.size:'')+'" value="'+(d[it.cex_id]||'')+'" oninput="saveDraft()">'+
+(p?'<div class="conv" id="cv'+it.cex_id+'"></div>':''))+'</td></tr>'});
 $('tbl').innerHTML=h;conv();count()}
+/* Шаблон: меню с разрешените бройки опаковки; до всяка — колко прави в кг/л/бр. */
+function tplSel(it,cur){var t=it.tpl,h='<select class="q tpl" data-id="'+it.cex_id+'" data-size="'+t.size+'" onchange="saveDraft()"><option value="">—</option>';
+t.choices.forEach(function(c){var base=Math.round(c*t.size*1000)/1000;var lbl=(t.name==='кг'?(String(base).replace('.',',')+' '+esc(it.unit)):(c+' '+esc(c===1?t.name:t.plural)+' · '+String(base).replace('.',',')+' '+esc(it.unit)));h+='<option value="'+c+'"'+(String(cur)===String(c)?' selected':'')+'>'+lbl+'</option>'});
+return h+'</select>'}
 /* Полето е в опаковки — под него се изписва колко прави в кг, за да няма съмнение. */
-function conv(){items.forEach(function(it){if(!it.pack)return;var i=document.querySelector('input.q[data-id="'+it.cex_id+'"]'),e=$('cv'+it.cex_id);if(!i||!e)return;
+function conv(){items.forEach(function(it){if(!it.pack||it.tpl)return;var i=document.querySelector('.q[data-id="'+it.cex_id+'"]'),e=$('cv'+it.cex_id);if(!i||!e)return;
 var n=Number(i.value);e.textContent=n>0?('= '+(Math.round(n*it.pack.size*1000)/1000)+' '+it.unit):''})}
 function reload(){msg('Зареждам наличностите…','info');api({action:'list'}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}items=j.items||[];render();msg('Наличности от точката \\u00b7 '+j.for_date+'. Червено = на минус. Въведи колко искаш и натисни „Изпрати".','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 /* Полето може да е в опаковки — тук се превръща в базовата единица, защото
    заявката и документите работят само с нея. */
-function send(){var rows=[];document.querySelectorAll('input.q').forEach(function(i){var v=Number(i.value);if(!(v>0))return;
+function send(){var rows=[];document.querySelectorAll('.q').forEach(function(i){var v=Number(i.value);if(!(v>0))return;
 var sz=Number(i.dataset.size);rows.push({cex_id:Number(i.dataset.id),qty:sz>0?Math.round(v*sz*1000)/1000:v})});
 if(!rows.length){msg('Нищо не е въведено.','err');return}
 if(!confirm('Изпращам заявка с '+rows.length+' продукта към цеха. Продължавам?'))return;
 busy('Изпраща се…','Заявката тръгва към цеха. Не натискай пак.');
 api({action:'create_request',items:rows,note:null}).then(function(j){free();if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}
 try{localStorage.removeItem(DRAFT)}catch(e){}
-document.querySelectorAll('input.q').forEach(function(i){i.value=''});count();
+document.querySelectorAll('.q').forEach(function(i){i.value=''});count();
 msg('\\u2713 Заявката е изпратена ('+(j.items_count||rows.length)+' продукта). Цехът я вижда.','ok')}).catch(function(e){free();msg('Мрежова грешка: '+e,'err')})}
 function busy(t,s){var b=$('busy');b.querySelector('.tx').textContent=t;$('busysub').textContent=s||'';b.className='on';
 document.querySelectorAll('button').forEach(function(x){x.disabled=true})}
@@ -1050,6 +1080,8 @@ async function createRequest(raw, note, tag, silent) {
     const id = Number(r && r.cex_id), qty = Number(r && r.qty);
     if (!MAP[id] || !(qty > 0)) continue;
     want.set(id, (want.get(id) || 0) + qty); // един ред на артикул
+    const tp = TEMPLATE[id];
+    if (tp) want.set(id, Math.min(want.get(id), Math.round(tp.size * Math.max(...tp.choices) * 1000) / 1000)); // не над максимума
   }
   if (!want.size) return { ok: false, error: "празна заявка — няма нито едно количество > 0" };
   const list = await buildList();
@@ -1058,7 +1090,7 @@ async function createRequest(raw, note, tag, silent) {
   // не се разминават. При артикул с опаковка пазим и колко опаковки е поискала
   // точката, за да се покаже пак като „2 тарелки".
   const items = [...want.entries()].map(([id, qty]) => {
-    const p = PACK[id];
+    const p = PACK[id] || (TEMPLATE[id] && TEMPLATE[id].name !== "кг" ? TEMPLATE[id] : null);
     return {
       cex_id: id, shop_id: MAP[id], name: (byId[id] || {}).name || ("#" + id),
       unit: (byId[id] || {}).unit || "бр", qty,
@@ -1386,7 +1418,8 @@ module.exports = async function handler(req, res) {
       const items = await buildList();
       // Постоянните (дневния ориз) не се заявяват — идват сами всеки работен ден.
       const standingIds = new Set(STANDING_REQUEST.map(x => x.cex_id));
-      res.status(200).json({ ok: true, for_date: sofiaToday(), items: items.filter(x => !standingIds.has(x.cex_id)).map(x => ({ ...x, zag: ZAG.includes(x.cex_id) })) });
+      res.status(200).json({ ok: true, for_date: sofiaToday(), items: items.filter(x => !standingIds.has(x.cex_id)).map(x => ({ ...x, zag: ZAG.includes(x.cex_id), tpl: TEMPLATE[x.cex_id] || null }))
+        .sort((a, b) => (b.zag - a.zag) || ((b.tpl ? 1 : 0) - (a.tpl ? 1 : 0))) });
       return;
     }
 
