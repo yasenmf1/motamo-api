@@ -92,6 +92,10 @@ async function syncDocCache(user, pass, budgetMs) {
       await sbReq(`cex_docs?inv_id=eq.${x.inv_id}`, { method: "PATCH", body: JSON.stringify({ is_anulate: an }) });
   }
   const todo = L.filter(x => have[x.inv_id] == null);
+  // Редове от преди колоната line_total (29.09) → прочитат се пак и се допълват (upsert).
+  const stale = await sbReq(`cex_doc_rows?select=inv_id&line_total=is.null&limit=1000`).catch(() => []);
+  const staleIds = new Set((stale || []).map(r => Number(r.inv_id)));
+  for (const x of L) if (staleIds.has(Number(x.inv_id)) && have[x.inv_id] != null) todo.push(x);
   let accMap = null, done = 0, failed = 0;
   const getAccMap = async () => {
     if (accMap) return accMap;
