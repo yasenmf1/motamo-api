@@ -1035,7 +1035,28 @@ load();
 // Постоянна дневна заявка: всеки работен ден 4 кг заг. Сварен суши ориз (собственикът, 29.09 —
 // „към момента им стига"; при увеличение се сменя тук).
 const STANDING_REQUEST = [{ cex_id: 67, qty: 4 }];
-async function createRequest(raw, note, tag) {
+// Автоматичното изпълнение е ИЗКЛЮЧЕНО, докато собственикът не каже в колко часа тръгва оризът
+// (трябва да е СЛЕД ① Заготовки, иначе в цеха няма 4 кг „на хартия"). Оризът вече не е във формата.
+const STANDING_ENABLED = false;
+// Постоянното прехвърляне се ИЗПЪЛНЯВА само (двата документа в Barsy), без никой да натиска:
+// вика собствения обработчик с process_request, dry:false — същият път като бутона на цеха.
+async function runStanding(handler) {
+  const cr = await createRequest(STANDING_REQUEST, "постоянно дневно прехвърляне", "", true);
+  if (!cr.ok) return cr;
+  const tok = [process.env.OWNER_TOKEN, process.env.TRANSFER_TOKEN, process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].find(Boolean);
+  const out = await new Promise((resolve) => {
+    const res = { statusCode: 200, setHeader() {}, status(c) { this.statusCode = c; return this; }, json(o) { resolve(o); }, send(b) { resolve({ ok: false, error: String(b).slice(0, 200) }); } };
+    Promise.resolve(handler({ method: "POST", query: {}, headers: {}, body: { token: tok, action: "process_request", id: cr.id, dry: false } }, res))
+      .catch(e => resolve({ ok: false, error: String(e && e.message) }));
+  });
+  const it = STANDING_REQUEST.map(x => x.qty + " кг").join(", ");
+  const text = out.ok
+    ? `✅ <b>Дневно прехвърляне в точката</b> — заг. Сварен суши ориз ${it}` + "\n" + `цех №${out.cex_doc_id || "?"} → точка №${out.shop_doc_id || "?"}` + (out.short && out.short.length ? "\n⚠ " + TG.escHtml(out.short.join(" · ")) : "")
+    : `⚠️ <b>Дневното прехвърляне на ориз НЕ мина</b>` + "\n" + TG.escHtml(String(out.error || "").slice(0, 300)) + "\nПусни го ръчно от екрана на цеха (заявките).";
+  await TG.tgSend(text, null, TG.sofiaDate()).catch(() => {});
+  return { ok: !!out.ok, request_id: cr.id, cex_doc_id: out.cex_doc_id, shop_doc_id: out.shop_doc_id, error: out.error };
+}
+async function createRequest(raw, note, tag, silent) {
   const want = new Map();
   for (const r of raw) {
     const id = Number(r && r.cex_id), qty = Number(r && r.qty);
@@ -1059,7 +1080,7 @@ async function createRequest(raw, note, tag) {
   });
   const ins = await sbInsert({ for_date: sofiaToday(), status: "pending", items, note: note || null });
   if (!ins.ok) return { ok: false, error: "не се записа: " + ins.raw };
-  try {
+  if (!silent) try {
     const NL = "\n", fq = x => String(Math.round(Number(x) * 1000) / 1000).replace(".", ",");
     const lines = items.map(it => `• ${TG.escHtml(it.name)} — <b>${it.pack ? fq(it.pack.count) + " " + TG.escHtml(it.pack.count === 1 ? it.pack.name : it.pack.plural) : fq(it.qty) + " " + TG.escHtml(it.unit)}</b>`
       + (it.cex_stock != null ? ` <i>(в цеха: ${fq(it.cex_stock)})</i>` : ""));
@@ -1104,9 +1125,11 @@ module.exports = async function handler(req, res) {
     let standing = null;
     if (isCron) {
       const dow = new Date(today + "T12:00:00Z").getUTCDay();
-      if (dow >= 1 && dow <= 5 && !(await TG.sentGet("standing", today).catch(() => null))) {
-        standing = await createRequest(STANDING_REQUEST, "постоянна дневна заявка", "Дневна заявка за точката (автоматична)").catch(e => ({ ok: false, error: String(e && e.message) }));
-        if (standing && standing.ok) await TG.sentSave("standing", today, { id: standing.id }).catch(() => {});
+      if (STANDING_ENABLED && dow >= 1 && dow <= 5 && !(await TG.sentGet("standing", today).catch(() => null))) {
+        // записваме ПРЕДИ изпълнението — при таймаут/повторен cron да няма двойно прехвърляне
+        await TG.sentSave("standing", today, { started: new Date().toISOString() }).catch(() => {});
+        standing = await runStanding(module.exports).catch(e => ({ ok: false, error: String(e && e.message) }));
+        await TG.sentSave("standing", today, standing || {}).catch(() => {});
       }
     }
     if (!b.force && !b.dry) { const was = await TG.sentGet("stock", today).catch(() => null); if (was) { res.status(200).json({ ok: true, skipped: "already_sent_today", standing }); return; } }
@@ -1227,7 +1250,9 @@ module.exports = async function handler(req, res) {
     // ── списъкът с 35-те продукта + наличности (за формата на точката) ──
     if (body.action === "list") {
       const items = await buildList();
-      res.status(200).json({ ok: true, for_date: sofiaToday(), items: items.map(x => ({ ...x, zag: ZAG.includes(x.cex_id) })) });
+      // Постоянните (дневния ориз) не се заявяват — идват сами всеки работен ден.
+      const standingIds = new Set(STANDING_REQUEST.map(x => x.cex_id));
+      res.status(200).json({ ok: true, for_date: sofiaToday(), items: items.filter(x => !standingIds.has(x.cex_id)).map(x => ({ ...x, zag: ZAG.includes(x.cex_id) })) });
       return;
     }
 
