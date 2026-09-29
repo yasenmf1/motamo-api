@@ -2222,9 +2222,12 @@ module.exports = async function handler(req, res) {
   // Партида→сметка през справка Reports_lot_list_details (движения „AC", ref_id=сметка).
   // Предложение за поръчка: досинхронизира кеша (бюджет ~35 s) и смята за деня.
   // pending > 0 → първото пълнене не е свършило, клиентът вика пак. Не пише в Barsy.
-  // ★ S25 — „📤 Прати на цеха": планът от последното „Изчисли" за деня отива в Telegram
-  // групата. Първо натискане = целият план; следващо (добавен магазин) = само разликата
-  // („ДОПЪЛНЕНИЕ"). Помни пратеното в Supabase `cex_tg_sent` (kind "plan").
+  // ★ S25 — „📤 Прати на цеха": планът за деня отива в Telegram групата. Ботът помни
+  // ВСЕКИ МАГАЗИН поотделно (Supabase `cex_tg_sent`, kind "plan", payload.shops =
+  // {client:person → поръчка}). Всяко „Прати" слива магазините от последното „Изчисли"
+  // в пратените (нов магазин се добавя, вече пратен — заменя поръчката си) и смята
+  // общото наново (compute е линеен). Първо = целият план; после = ДОПЪЛНЕНИЕ (+N → общо)
+  // и ОБЩО. Така работи и когато собственикът смята само новите магазини.
   if (body.action === "tg_send_plan") {
     const NL = "\n";
     const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
@@ -2232,48 +2235,53 @@ module.exports = async function handler(req, res) {
     if (!snap || String(snap.for_date).slice(0, 10) !== date) {
       res.status(200).json({ ok: false, error: "no_plan", message: "Няма изчислен план за " + date + " — натисни «Изчисли» с тази дата в «Партида»." }); return;
     }
-    const p = snap.produce || {};
-    const groups = [["🍱 Сетове", p.sets || {}], ["🍣 Ролки / поке", p.rolls || {}], ["🥣 Заготовки", p.zagotovki || {}]];
-    const cur = {};
-    for (const [g, o] of groups) for (const [n, q] of Object.entries(o)) if (Number(q)) cur[g + "|" + n] = Number(q);
+    const keyOf = s => (s.client_id != null ? s.client_id : "") + ":" + (s.person_id != null ? s.person_id : "") + (s.client_id == null ? "|" + (s.client || "") + "|" + (s.rep || "") : "");
+    const flat = shopMap => {
+      const list = Object.values(shopMap);
+      const { agg, rolls, zag } = compute(list);
+      const sets = {}; for (const [n, q] of Object.entries(agg)) { const a = resolve(n); if (a && a.is_set) sets[n] = q; }
+      const groups = [["🍱 Сетове", sortObj(sets, 2)], ["🍣 Ролки / поке", sortObj(rolls, 2)], ["🥣 Заготовки", sortObj(zag, 3)]];
+      const cur = {}; for (const [g, o] of groups) for (const [n, q] of Object.entries(o)) if (Number(q)) cur[g + "|" + n] = Number(q);
+      return { groups, cur };
+    };
     const prev = body.full ? null : await TG.sentGet("plan", date).catch(() => null);
-    const old = (prev && prev.payload) || null;
+    const pay = (prev && prev.payload) || null;
+    const oldShops = (pay && pay.shops) || {};
+    const merged = { ...oldShops };
+    for (const s of (Array.isArray(snap.shops) ? snap.shops : [])) merged[keyOf(s)] = { client: s.client, rep: s.rep, client_id: s.client_id, person_id: s.person_id, order: s.order || {} };
+    const now = flat(merged);
+    // стар формат (без shops) → предишното общо е самият payload
+    const oldCur = !pay ? null : (pay.shops ? flat(oldShops).cur : pay);
     const dd = date.split("-").reverse().slice(0, 2).join(".");
     const fmtQ = q => String(Math.round(q * 1000) / 1000).replace(".", ",");
-    const shopsN = Array.isArray(snap.shops) ? snap.shops.length : 0;
+    const shopsN = Object.keys(merged).length;
+    const listing = () => now.groups.map(([g, o]) => {
+      const rows = Object.entries(o).filter(([, q]) => Number(q));
+      return rows.length ? `<b>${g}</b>` + NL + rows.map(([n, q]) => `• ${TG.escHtml(n)} — <b>${fmtQ(Number(q))}</b>`).join(NL) : "";
+    }).filter(Boolean).join(NL + NL);
     let text;
-    if (!old) {
-      const parts = [`📋 <b>План за ${dd}</b> (${shopsN} магазина)`];
-      for (const [g, o] of groups) {
-        const rows = Object.entries(o).filter(([, q]) => Number(q));
-        if (rows.length) parts.push(NL + `<b>${g}</b>` + NL + rows.map(([n, q]) => `• ${TG.escHtml(n)} — <b>${fmtQ(Number(q))}</b>`).join(NL));
-      }
-      text = parts.join(NL);
+    if (!oldCur) {
+      text = (body.full ? "🔄 <b>ПОПРАВЕН план</b> — важи този" + NL : "") + `📋 <b>План за ${dd}</b> (${shopsN} магазина)` + NL + NL + listing();
     } else {
       const add = [], less = [];
-      for (const k of new Set([...Object.keys(cur), ...Object.keys(old)])) {
-        const d = (cur[k] || 0) - (old[k] || 0);
+      for (const k of new Set([...Object.keys(now.cur), ...Object.keys(oldCur)])) {
+        const d = (now.cur[k] || 0) - (oldCur[k] || 0);
         if (Math.abs(d) < 1e-9) continue;
-        const [g, n] = k.split("|");
-        (d > 0 ? add : less).push(`• ${TG.escHtml(n)} — <b>${d > 0 ? "+" : "−"}${fmtQ(Math.abs(d))}</b> <i>(${g.split(" ").slice(1).join(" ").toLowerCase()})</i>`);
+        const n = k.split("|")[1];
+        (d > 0 ? add : less).push(`• ${TG.escHtml(n)} — <b>${d > 0 ? "+" : "−"}${fmtQ(Math.abs(d))}</b> → общо ${fmtQ(now.cur[k] || 0)}`);
       }
       if (!add.length && !less.length) { res.status(200).json({ ok: true, unchanged: true, message: "Няма промяна спрямо пратеното — нищо не е изпратено." }); return; }
-      text = `➕ <b>ДОПЪЛНЕНИЕ към плана за ${dd}</b> (вече ${shopsN} магазина)`
+      const newShops = Object.keys(merged).filter(k => !oldShops[k]).map(k => merged[k].rep || merged[k].client).filter(Boolean);
+      text = `➕ <b>ДОПЪЛНЕНИЕ към плана за ${dd}</b>` + (newShops.length ? ` — ${TG.escHtml(newShops.join(", "))}` : "")
         + (add.length ? NL + NL + "<b>Направете още:</b>" + NL + add.join(NL) : "")
-        + (less.length ? NL + NL + "<b>По-малко от пратеното:</b>" + NL + less.join(NL) : "");
-      // Собственикът (29.09): при допълнение — и ОБЩОТО за деня, за да не събират на ръка.
-      const tot = [];
-      for (const [g, o] of groups) {
-        const rows = Object.entries(o).filter(([, q]) => Number(q));
-        if (rows.length) tot.push(`<b>${g}</b>` + NL + rows.map(([n, q]) => `• ${TG.escHtml(n)} — <b>${fmtQ(Number(q))}</b>`).join(NL));
-      }
-      if (tot.length) text += NL + NL + "━━━━━━━━━━" + NL + `📋 <b>ОБЩО за ${dd}</b>` + NL + NL + tot.join(NL + NL);
+        + (less.length ? NL + NL + "<b>По-малко:</b>" + NL + less.join(NL) : "")
+        + NL + NL + "━━━━━━━━━━" + NL + `📋 <b>ОБЩО за ${dd}</b> (${shopsN} магазина)` + NL + NL + listing();
     }
-    if (body.dry) { res.status(200).json({ ok: true, dry: true, kind: old ? "addition" : "full", text }); return; }
+    if (body.dry) { res.status(200).json({ ok: true, dry: true, kind: oldCur ? "addition" : "full", text }); return; }
     const r = await TG.tgSend(text);
     if (!r.ok) { res.status(502).json({ ok: false, error: "telegram", message: r.error }); return; }
-    await TG.sentSave("plan", date, cur).catch(() => {});
-    res.status(200).json({ ok: true, kind: old ? "addition" : "full", items: Object.keys(cur).length });
+    await TG.sentSave("plan", date, { shops: merged }).catch(() => {});
+    res.status(200).json({ ok: true, kind: oldCur ? "addition" : "full", shops: shopsN });
     return;
   }
   if (body.action === "suggest") {
