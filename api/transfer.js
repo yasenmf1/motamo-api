@@ -609,7 +609,7 @@ function shopPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Заявка към цеха</title>
 ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}
-select.q.tpl{width:100%;min-width:120px;max-width:170px;padding:10px 8px;font:inherit;font-size:15px;border-radius:10px;border:1px solid var(--line);background:var(--card,#1c1f24);color:inherit}
+select.q.tpl{width:100%;min-width:0;max-width:150px;padding:10px 6px;font:inherit;font-size:15px;border-radius:10px;border:1px solid var(--line);background:var(--card,#1c1f24);color:inherit}
 select.q.tpl:not([value=""]){border-color:var(--sun)}
 </style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
