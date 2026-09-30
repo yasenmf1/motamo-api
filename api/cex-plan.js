@@ -1055,7 +1055,13 @@ async function computeDayPlan(shopsIn, prodDate, lot, razosDate, withOthers, use
     // по разнос-дата — само ОТВОРЕНИТЕ (затворените там може да са от друга партида).
     const add = (list, openOnly) => { for (const x of (list || [])) { if (!x || seen.has(x.account_id) || (openOnly && x.close_date)) continue; seen.add(x.account_id); (ticked.has(keyOf(x)) ? tickedAccts : others).push(x); } };
     try { add((await seedByLot(prodDate, user, pass)).shops, false); } catch (e) {}
-    if (/^\d{4}-\d{2}-\d{2}$/.test(razosDate || "")) { try { add((await seedRazos(razosDate, user, pass, true)).shops, true); } catch (e) {} }
+    // ★ 30.09 — разнос-сметките се броят САМО когато разнос-датата = деня на производство.
+    // Иначе (правиш УТРЕШНА партида L.<утре>, а полето „Зареди" сочи ДНЕШНИЯ разнос) тук
+    // влизаха всички ДНЕШНИ отворени сметки → те са от ДРУГА партида, underLot(утре) не ги
+    // нетира → ② произвеждаше целия ден под утрешната партида (свръхпроизводство 6×) и ①
+    // подценяваше заготовките. Същодневното „добавяне на магазин" пак работи (razos=prod),
+    // а и seedByLot(prodDate) вече хваща сметките под същата партида.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(razosDate || "") && razosDate === prodDate) { try { add((await seedRazos(razosDate, user, pass, true)).shops, true); } catch (e) {} }
   }
   const { agg } = compute(shopsIn.concat(others));   // нуждата по партида: тикнатите + сметките на другите
   const aggTicked = compute(shopsIn).agg;              // физическата нужда: само тикнатите
