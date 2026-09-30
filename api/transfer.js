@@ -67,7 +67,7 @@ const TEMPLATE = {
   131: { name: "кг", plural: "кг", size: 1, choices: [1, 2, 3, 4, 5] },        // зеле овкусено
   65:  { name: "кг", plural: "кг", size: 0.5, choices: [1, 2] },              // сос манго с мед: 0,5 / 1
   127: { name: "плик", plural: "плика", size: 0.5, choices: [3, 4, 5, 6, 7, 8, 9, 10] }, // пиле панирано
-  36:  { name: "кофа", plural: "кофи", size: 5, choices: [1, 2] },             // крема сирене
+  36:  { name: "кофа", plural: "кофи", size: 3, choices: [1, 2] },             // крема сирене (кофа 3 кг)
   52:  { name: "торба", plural: "торби", size: 1, choices: [1, 2, 3] },        // авокадо половинки
   87:  { name: "торба", plural: "торби", size: 1, choices: [1, 2] },           // уакаме
   44:  { name: "кг", plural: "кг", size: 1, choices: [1, 2, 3] },              // пушена сьомга
