@@ -1015,9 +1015,9 @@ items.forEach(function(it){var z=it.zag?'Заготовки':'Суровини �
 var st=Number(it.cex_stock),cls=st<0?'neg':(st===0?'zero':''),p=it.pack;
 h+='<tr><td>'+esc(it.name)+(p?' <span class="pk">по '+esc(p.name)+' '+(p.size*1000)+' г</span>':'')+(it.hint?' <span class="pk" style="color:var(--sun)">'+esc(it.hint)+'</span>':'')+'</td>'+
 '<td class="num '+cls+'">'+n3(st)+' '+esc(it.unit||'')+'</td>'+
-'<td class="num"><input class="q" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-max="'+(isNaN(st)?'':Math.max(0,st))+'" value="" oninput="chk(this)"></td></tr>'});
+'<td class="num"><input class="q" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-max="'+(it.zag?'':(isNaN(st)?'':Math.max(0,st)))+'" value="" oninput="chk(this)"></td></tr>'});
 $('tbl').innerHTML=h;count()}
-function reload(){msg('Зареждам наличностите…','info');api({action:'list'}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}items=j.items||[];render();msg('Наличности в цеха. Въведи колко да пратиш и натисни „Изпрати". Не повече от наличното.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function reload(){msg('Зареждам наличностите…','info');api({action:'list'}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}items=j.items||[];render();msg('Наличности в цеха. Въведи колко да пратиш. Заготовки (ориз, сосове) — може повече от наличното, цехът ги произвежда. Суровини — само наличното.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function send(){var rows=[];document.querySelectorAll('.q').forEach(function(i){var v=Number(i.value);if(v>0)rows.push({cex_id:Number(i.dataset.id),qty:v})});
 if(!rows.length){msg('Нищо не е въведено.','err');return}
 if(!confirm('Изпращам '+rows.length+' продукта към точката ВЕДНАГА (правя двата документа: цех прехвърляне → точка зареждане). Продължавам?'))return;
