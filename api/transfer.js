@@ -1327,7 +1327,7 @@ function pick(s){SEL=s;sups();draw()}
 function draw(){var rs=RAW.filter(function(r){return r.sup===SEL}).sort(function(a,b){return (a.c===null?999:a.c-a.lead)-(b.c===null?999:b.c-b.lead)});
 if(!rs.length){$('tb').innerHTML='<tr><td>Няма артикули от този доставчик.</td></tr>';txt();return}
 var lead=rs[0].lead;
-$('tb').innerHTML='<tr><td colspan="3" style="color:var(--dim);font-size:13px">Следваща доставка след '+lead+' дни. Числата са в опаковки на доставчика.</td></tr>'+rs.map(function(r){var low=r.c!==null&&r.c-r.lead<2,v=sug(r);
+$('tb').innerHTML='<tr><td colspan="3" style="color:var(--dim);font-size:13px">Следваща доставка след '+lead+' дни. Числата са в опаковки на доставчика.'+(PH[SEL]?' · 📞 Viber '+esc(SEL)+': '+esc(PH[SEL]):' · <span style="color:var(--sun)">няма Viber номер</span>')+'</td></tr>'+rs.map(function(r){var low=r.c!==null&&r.c-r.lead<2,v=sug(r);
 return '<tr class="'+(low?'low':'')+'"><td class="n"><b>'+esc(r.n)+'</b><i>имаме '+f(r.s)+' '+esc(r.u)+' · стига '+(r.c===null?'—':f(r.c)+' дни')+'</i></td>'+
 '<td class="num"><input inputmode="decimal" data-id="'+r.id+'" value="'+(v||'')+'" placeholder="0" oninput="txt()"></td><td style="font-size:12.5px;color:var(--dim)">'+esc(unit(r))+'</td></tr>'}).join('');txt()}
 function lines(){var out=[];document.querySelectorAll('#tb input').forEach(function(i){var v=parseFloat(String(i.value).replace(',','.'))||0;if(v<=0)return;var r=RAW.filter(function(x){return String(x.id)===i.dataset.id})[0];var p=PK[r.id];
