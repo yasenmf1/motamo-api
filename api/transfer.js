@@ -484,13 +484,24 @@ const PWA = (k) => `<link rel="manifest" href="?view=manifest&k=${encodeURICompo
 <meta name="theme-color" content="#FF0000">`;
 
 function manifest(k, owner) {
+  const enc = encodeURIComponent(k);
+  const isPoint = TG.pointKey() && k === TG.pointKey();
+  const isSklad = (TG.skladKey() && k === TG.skladKey()) || isStaff(k);
+  // Инсталираното приложение тръгва към ЕКРАНА НА РОЛЯТА: собственик → хъб; точка → формата;
+  // склад/персонал → началната на склада. (Преди всички не-собственици отиваха към view=shop,
+  // затова складът се инсталираше на грешен екран и „искаше токен".)
+  const start = owner ? "/api/transfer?k=" + enc
+    : isPoint ? "/api/transfer?view=shop&k=" + enc
+    : isSklad ? "/api/transfer?view=home&k=" + enc
+    : "/api/transfer?k=" + enc;
   return {
-    name: owner ? "MOTAMO Цех" : "Заявка към цеха",
-    short_name: owner ? "Цех" : "Заявка",
+    name: owner ? "MOTAMO Цех" : isSklad ? "MOTAMO Склад" : "Заявка към цеха",
+    short_name: owner ? "Цех" : isSklad ? "Склад" : "Заявка",
     description: owner
       ? "Заявки от точката, складът на цеха, производство и стокови."
+      : isSklad ? "Заявки от точката, изпращане към точката, поръчки към доставчик, склад."
       : "Заявка към цеха — какво да донесат в точката.",
-    start_url: "/api/transfer?k=" + encodeURIComponent(k) + (owner ? "" : "&view=shop"),
+    start_url: start,
     scope: "/api/",
     display: "standalone",
     orientation: "portrait",
