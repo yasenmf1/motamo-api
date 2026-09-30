@@ -618,7 +618,7 @@ select.q.tpl:not([value=""]){border-color:var(--sun)}
 </style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Заявка към цеха<small>точка Каравелов · какво да донесат</small></h1>
-<span class="tabs"><button id="t1" class="on" onclick="tab(1)">Нова заявка</button><button id="t2" onclick="tab(2)">История</button></span></header>
+${homeBtn(k)}<span class="tabs"><button id="t1" class="on" onclick="tab(1)">Нова заявка</button><button id="t2" onclick="tab(2)">История</button></span></header>
 <div class="wrap">
   ${navBar(k, "shop")}
   <div id="msg" class="msg info">Зареждам наличностите…</div>
@@ -714,7 +714,7 @@ function cexPage(k) {
 ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Заявки от точката<small>цех · прехвърляне към Каравелов</small></h1>
-<button class="ghost" id="bell" onclick="bell()">🔔<span class="hidesm"> Известия</span></button>
+${homeBtn(k)}<button class="ghost" id="bell" onclick="bell()">🔔<span class="hidesm"> Известия</span></button>
 <button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
 <div class="wrap">${navBar(k, "cex")}<div id="days" class="days"></div><div id="msg" class="msg info">Зареждам…</div><div id="list"></div></div>
 <div id="busy"><div class="sp"></div><div class="tx">Обработва се…</div><div class="sub" id="busysub">Не натискай пак — Barsy записва документите.</div></div>
@@ -871,6 +871,18 @@ function navBar(k, cur) {
       : `<a href="?view=${x.v}&k=${encodeURIComponent(k)}">${x.t}</a>`);
   if (own && cexToolKey()) items.push(`<a href="/api/cex-plan?view=tool&k=${encodeURIComponent(cexToolKey())}">Производство</a>`);
   return items.length > 1 ? `<nav class="nav">${items.join("")}</nav>` : "";
+}
+
+// Заглавната страница за даден ключ: собственикът → неговия хъб; точката → нейната
+// форма; складът/персоналът → началната на склада (винаги със skladKey, за да работят
+// плочките ѝ). Бутонът „🏠 Начало" на всеки екран води тук.
+function homeLink(k) {
+  if (isOwner(k)) return "?view=hub&k=" + encodeURIComponent(k);
+  if (TG.pointKey() && k === TG.pointKey()) return "?view=shop&k=" + encodeURIComponent(k);
+  return "?view=home&k=" + encodeURIComponent(TG.skladKey() || k);
+}
+function homeBtn(k) {
+  return `<a class="ghost" href="${homeLink(k)}" style="text-decoration:none">🏠<span class="hidesm"> Начало</span></a>`;
 }
 
 const HUB_CSS = `
@@ -1074,7 +1086,7 @@ function stockPage(k, staff) {
 ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}${STOCK_CSS}</style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Складът на цеха<small>какво няма да стигне до следващата доставка</small></h1>
-<button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
+${homeBtn(k)}<button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
 <div class="wrap">
   ${staff ? "" : navBar(k, "stock")}
   <div id="msg" class="msg info">Чета от Barsy…</div>
@@ -1294,7 +1306,7 @@ pre.tx{white-space:pre-wrap;font:inherit;font-size:14px;border:1px solid var(--l
 </style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Поръчка към доставчик<small>цех · какво да поръчаме</small></h1>
-<button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
+${homeBtn(k)}<button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
 <div class="wrap">
 <div class="sups" id="sups"></div>
 <div id="msg" class="msg info">Чета склада…</div>
