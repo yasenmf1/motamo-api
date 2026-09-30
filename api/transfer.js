@@ -924,6 +924,101 @@ m.textContent=bits.length?bits.join(' · '):'Няма чакащи заявки,
 </script></body></html>`;
 }
 
+// ── НАЧАЛНА СТРАНИЦА НА СКЛАДА (view=home) ───────────────────────────────────
+// Едно място за колежката с права „склад": заявки от точката, изпращане към
+// точката, поръчки към доставчик и складът. Отваря се с нейния ключ (skladKey);
+// плочката „Склад" води със staffKey (другият ѝ ключ, без цени).
+function homePage(k) {
+  const sk = encodeURIComponent(k);
+  const stk = staffKey() ? encodeURIComponent(staffKey()) : sk;
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Склад — начало</title>
+${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
+<header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
+<h1>Склад<small>всичко на едно място</small></h1>
+<button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
+<div class="wrap">
+  <div class="hub">
+    <a href="?view=cex&k=${sk}"><span><b>📥 Заявки от точката</b><span>виж какво искат и издай документите</span></span><span id="pend" class="go">→</span></a>
+    <a href="?view=push&k=${sk}"><span><b>📤 Изпрати към точката</b><span>избери стока и я прати веднага</span></span><span class="go">→</span></a>
+    <a href="?view=order&k=${sk}"><span><b>🛒 Поръчка към доставчик</b><span>избери доставчик и прати заявка</span></span><span class="go">→</span></a>
+    <a href="?view=stock&k=${stk}"><span><b>🧾 Склад</b><span>наличности и какво да поръчаш</span></span><span class="go">→</span></a>
+  </div>
+  <h2 style="font-family:var(--font-d);font-size:16px;margin:22px 0 8px">🕓 Последни изпратени към точката</h2>
+  <div id="sent" class="msg info">Зареждам…</div>
+</div>
+<script>
+var K=${JSON.stringify(k)};
+function $(i){return document.getElementById(i)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
+function n3(v){return Math.round(Number(v)*1000)/1000}
+function dt(s){var d=new Date(s);return isNaN(d)?'':('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
+function load(){api({action:'list_requests',days:14}).then(function(j){
+if(!j.ok){$('sent').className='msg err';$('sent').textContent='Грешка: '+(j.error||'');return}
+var all=j.requests||[];
+var p=all.filter(function(r){return r.status==='pending'}).length;
+if(p){$('pend').className='badge';$('pend').textContent=p}else{$('pend').className='go';$('pend').textContent='→'}
+var done=all.filter(function(r){return r.status==='done'}).slice(0,6);
+if(!done.length){$('sent').className='msg info';$('sent').textContent='Още няма изпратени.';return}
+var h='';done.forEach(function(r){var it=r.items||[];var names=it.slice(0,4).map(function(x){return esc(x.name)+' '+n3(x.sent!=null?x.sent:x.qty)}).join(', ');
+h+='<div class="card" style="padding:12px 14px;margin-bottom:8px"><div style="font-size:13px;color:var(--dim)">'+dt(r.created_at)+' · точка зареждане №'+esc(r.shop_doc_id||'?')+'</div><div style="font-size:14px;margin-top:2px">'+names+(it.length>4?' …':'')+'</div></div>'});
+$('sent').className='';$('sent').innerHTML=h;
+}).catch(function(){$('sent').className='msg err';$('sent').textContent='Мрежова грешка'})}
+load();
+</script></body></html>`;
+}
+
+// ── ИЗПРАТИ КЪМ ТОЧКАТА (view=push) ──────────────────────────────────────────
+// Складът избира стока + количество и я праща ВЕДНАГА към точката (двата
+// документа), без точката да е искала. Реже се до наличното в цеха.
+function pushPage(k) {
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Изпрати към точката</title>
+${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
+<header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
+<h1>Изпрати към точката<small>цех · прати стока към Каравелов</small></h1>
+<a class="ghost" href="?view=home&k=${encodeURIComponent(k)}" style="text-decoration:none">← Начало</a></header>
+<div class="wrap">
+  <div id="msg" class="msg info">Зареждам наличностите…</div>
+  <table id="tbl"></table>
+</div>
+<div class="bar" id="bar">
+  <span id="cnt" style="color:var(--dim);font-size:14px">—</span>
+  <span style="display:flex;gap:8px;align-items:center"><button class="ghost" onclick="reload()">↻<span class="hidesm"> Наличности</span></button>
+  <button id="send" onclick="send()" disabled>Изпрати</button></span>
+</div>
+<div id="busy"><div class="sp"></div><div class="tx">Изпраща се…</div><div class="sub" id="busysub">Не натискай пак — Barsy записва документите.</div></div>
+<script>
+var K=${JSON.stringify(k)},items=[];
+function $(i){return document.getElementById(i)}
+function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
+function n3(v){return Math.round(Number(v)*1000)/1000}
+function count(){var n=0;document.querySelectorAll('.q').forEach(function(i){if(Number(i.value)>0)n++});$('cnt').textContent=n?(n+' продукта за изпращане'):'нищо не е въведено';$('send').disabled=!n}
+function chk(i){var mx=i.dataset.max;if(mx!==''&&Number(i.value)>Number(mx)){i.value=n3(mx);i.style.borderColor='#d97706'}else{i.style.borderColor=''}count()}
+function render(){var h='<tr><th>Продукт</th><th class="num">В цеха</th><th class="num">Пращам</th></tr>',lastZ=null;
+items.forEach(function(it){var z=it.zag?'Заготовки':'Суровини и други';if(z!==lastZ){lastZ=z;h+='<tr><td colspan="3" class="grp"><span>'+z+'</span></td></tr>'}
+var st=Number(it.cex_stock),cls=st<0?'neg':(st===0?'zero':''),p=it.pack;
+h+='<tr><td>'+esc(it.name)+(p?' <span class="pk">по '+esc(p.name)+' '+(p.size*1000)+' г</span>':'')+'</td>'+
+'<td class="num '+cls+'">'+n3(st)+' '+esc(it.unit||'')+'</td>'+
+'<td class="num"><input class="q" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-max="'+(isNaN(st)?'':Math.max(0,st))+'" value="" oninput="chk(this)"></td></tr>'});
+$('tbl').innerHTML=h;count()}
+function reload(){msg('Зареждам наличностите…','info');api({action:'list'}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}items=j.items||[];render();msg('Наличности в цеха. Въведи колко да пратиш и натисни „Изпрати". Не повече от наличното.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function send(){var rows=[];document.querySelectorAll('.q').forEach(function(i){var v=Number(i.value);if(v>0)rows.push({cex_id:Number(i.dataset.id),qty:v})});
+if(!rows.length){msg('Нищо не е въведено.','err');return}
+if(!confirm('Изпращам '+rows.length+' продукта към точката ВЕДНАГА (правя двата документа: цех прехвърляне → точка зареждане). Продължавам?'))return;
+busy('Изпраща се…','Правя двата документа. Не натискай пак.');
+api({action:'push_to_shop',items:rows}).then(function(j){free();if(!j.ok){msg('НЕ мина: '+(j.error||''),'err');return}
+document.querySelectorAll('.q').forEach(function(i){i.value=''});count();
+msg('\\u2713 Изпратено към точката. цех прехвърляне №'+(j.cex_doc_id||'?')+' · точка зареждане №'+(j.shop_doc_id||'?'),'ok');reload()}).catch(function(e){free();msg('Мрежова грешка: '+e,'err')})}
+function busy(t,s){var b=$('busy');b.querySelector('.tx').textContent=t;$('busysub').textContent=s||'';b.className='on';document.querySelectorAll('button').forEach(function(x){x.disabled=true})}
+function free(){$('busy').className='';document.querySelectorAll('button').forEach(function(x){x.disabled=false});count()}
+reload();
+</script></body></html>`;
+}
+
 // ── СКЛАДОВОТО ТАБЛО (жив екран) ─────────────────────────────────────────────
 // Същият разрез като еднократния отчет, но данните се четат от Barsy при всяко
 // отваряне: наличности, себестойности и производствата за последните 28 дни.
@@ -1313,7 +1408,7 @@ module.exports = async function handler(req, res) {
     const up = (typeof req.body === "object" && req.body) ? req.body : (() => { try { return JSON.parse(req.body || "{}"); } catch (e) { return {}; } })();
     const base = "https://" + ((req.headers && req.headers.host) || "motamo-api.vercel.app") + "/api/transfer";
     const formBtn = () => ({ inline_keyboard: [[{ text: "📝 Отвори формата за заявка", url: `${base}?view=shop&k=${TG.pointKey()}` }]] });
-    const skladBtn = () => ({ inline_keyboard: [[{ text: "📦 Отвори заявките", url: `${base}?view=cex&k=${TG.skladKey()}` }], [{ text: "🛒 Поръчка към доставчик", url: `${base}?view=order&k=${TG.skladKey()}` }], [{ text: "🧾 Склад", url: `${base}?view=stock&k=${staffKey()}` }]] });
+    const skladBtn = () => ({ inline_keyboard: [[{ text: "🏠 Начало (склад)", url: `${base}?view=home&k=${TG.skladKey()}` }], [{ text: "📥 Заявки от точката", url: `${base}?view=cex&k=${TG.skladKey()}` }, { text: "📤 Изпрати към точката", url: `${base}?view=push&k=${TG.skladKey()}` }], [{ text: "🛒 Поръчка", url: `${base}?view=order&k=${TG.skladKey()}` }, { text: "🧾 Склад", url: `${base}?view=stock&k=${staffKey()}` }]] });
     const ROLE_BG = { tochka: "Точка", sklad: "Склад (цех)", shofior: "Шофьор", owner: "Собственик", none: "без роля" };
     try {
       // собственикът натиска бутон за роля
@@ -1413,10 +1508,11 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const VIEWS = ["shop", "cex", "stock", "hub", "order"];
+  const VIEWS = ["shop", "cex", "stock", "hub", "order", "home", "push"];
   if (req.method === "GET" && (VIEWS.includes(q.view) || (!q.view && q.k))) {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    const okTok = viewTokens.some(t => q.k === t) || (q.view === "stock" && ((process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN) || isStaff(q.k)))
+    const homeKey = (q.view === "home" || q.view === "push") && ((TG.skladKey() && q.k === TG.skladKey()) || isStaff(q.k) || isOwner(q.k));
+    const okTok = homeKey || viewTokens.some(t => q.k === t) || (q.view === "stock" && ((process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN) || isStaff(q.k)))
       || (q.view === "cex" && TG.skladKey() && q.k === TG.skladKey()) || (q.view === "shop" && TG.pointKey() && q.k === TG.pointKey())
       || (q.view === "order" && ((TG.skladKey() && q.k === TG.skladKey()) || isStaff(q.k)));
     if (!okTok) {
@@ -1439,6 +1535,8 @@ module.exports = async function handler(req, res) {
       : view === "stock" ? stockPage(q.k, isStaff(q.k))
       : view === "cex" ? cexPage(q.k)
       : view === "order" ? orderPage(q.k)
+      : view === "home" ? homePage(q.k)
+      : view === "push" ? pushPage(q.k)
       : hubPage(q.k));
     return;
   }
@@ -1452,7 +1550,7 @@ module.exports = async function handler(req, res) {
   const readOnly = ["list", "list_requests", "inspect", "stock_report"].includes(body.action);
   const allowed = readOnly ? viewTokens.concat([process.env.PEEK_TOKEN].filter(Boolean)) : viewTokens;
   const staff = ["stock_report", "tg_supply"].includes(body.action) && isStaff(token);
-  const skladOk = TG.skladKey() && token === TG.skladKey() && ["list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply", "stock_report"].includes(body.action);
+  const skladOk = TG.skladKey() && token === TG.skladKey() && ["list", "list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply", "stock_report", "push_to_shop"].includes(body.action);
   const pointOk = TG.pointKey() && token === TG.pointKey() && ["list", "create_request", "list_requests"].includes(body.action);
   if (!staff && !skladOk && !pointOk && !allowed.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
   if (!process.env.BARSY_CEX_USER || !process.env.BARSY_USER) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
@@ -1569,6 +1667,26 @@ module.exports = async function handler(req, res) {
     if (body.action === "create_request") {
       const out = await createRequest(Array.isArray(body.items) ? body.items : [], body.note || null, "");
       res.status(200).json(out);
+      return;
+    }
+
+    // ── складът праща стока към точката ВЕДНАГА (create + process в едно) ──
+    // Създава заявка (тихо) и я изпълнява като реална (двата документа). Същият
+    // проверен път като дневния ориз: createRequest → process_request(dry:false).
+    if (body.action === "push_to_shop") {
+      const items = (Array.isArray(body.items) ? body.items : [])
+        .map(x => ({ cex_id: Number(x && x.cex_id), qty: Number(x && x.qty) }))
+        .filter(x => MAP[x.cex_id] && x.qty > 0);
+      if (!items.length) { res.status(400).json({ ok: false, error: "празна заявка — нищо за изпращане" }); return; }
+      const cr = await createRequest(items, body.note || "изпратено от склада", "", true);
+      if (!cr.ok) { res.status(200).json(cr); return; }
+      const host = (req.headers && req.headers.host) || "motamo-api.vercel.app";
+      const out = await new Promise((resolve) => {
+        const r2 = { statusCode: 200, setHeader() {}, status(c) { this.statusCode = c; return this; }, json(o) { resolve(o); }, send(b) { resolve(b && typeof b === "object" ? b : { ok: false, error: String(b).slice(0, 200) }); } };
+        Promise.resolve(module.exports({ method: "POST", query: {}, headers: { host }, body: { token, action: "process_request", id: cr.id, dry: false, send: body.send || null } }, r2))
+          .catch(e => resolve({ ok: false, error: String(e && e.message) }));
+      });
+      res.status(200).json(Object.assign({ request_id: cr.id }, out));
       return;
     }
 
