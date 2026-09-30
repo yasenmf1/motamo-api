@@ -1013,7 +1013,7 @@ function chk(i){var mx=i.dataset.max;if(mx!==''&&Number(i.value)>Number(mx)){i.v
 function render(){var h='<tr><th>Продукт</th><th class="num">В цеха</th><th class="num">Пращам</th></tr>',lastZ=null;
 items.forEach(function(it){var z=it.zag?'Заготовки':'Суровини и други';if(z!==lastZ){lastZ=z;h+='<tr><td colspan="3" class="grp"><span>'+z+'</span></td></tr>'}
 var st=Number(it.cex_stock),cls=st<0?'neg':(st===0?'zero':''),p=it.pack;
-h+='<tr><td>'+esc(it.name)+(p?' <span class="pk">по '+esc(p.name)+' '+(p.size*1000)+' г</span>':'')+'</td>'+
+h+='<tr><td>'+esc(it.name)+(p?' <span class="pk">по '+esc(p.name)+' '+(p.size*1000)+' г</span>':'')+(it.hint?' <span class="pk" style="color:var(--sun)">'+esc(it.hint)+'</span>':'')+'</td>'+
 '<td class="num '+cls+'">'+n3(st)+' '+esc(it.unit||'')+'</td>'+
 '<td class="num"><input class="q" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-max="'+(isNaN(st)?'':Math.max(0,st))+'" value="" oninput="chk(this)"></td></tr>'});
 $('tbl').innerHTML=h;count()}
@@ -1024,7 +1024,7 @@ if(!confirm('Изпращам '+rows.length+' продукта към точка
 busy('Изпраща се…','Правя двата документа. Не натискай пак.');
 api({action:'push_to_shop',items:rows}).then(function(j){free();if(!j.ok){msg('НЕ мина: '+(j.error||''),'err');return}
 document.querySelectorAll('.q').forEach(function(i){i.value=''});count();
-msg('\\u2713 Изпратено към точката. цех прехвърляне №'+(j.cex_doc_id||'?')+' · точка зареждане №'+(j.shop_doc_id||'?'),'ok');reload()}).catch(function(e){free();msg('Мрежова грешка: '+e,'err')})}
+msg('\\u2713 Изпратено към точката'+(j.produced&&j.produced.length?' (произведено доп.)':'')+'. цех прехвърляне №'+(j.cex_doc_id||'?')+' · точка зареждане №'+(j.shop_doc_id||'?'),'ok');reload()}).catch(function(e){free();msg('Мрежова грешка: '+e,'err')})}
 function busy(t,s){var b=$('busy');b.querySelector('.tx').textContent=t;$('busysub').textContent=s||'';b.className='on';document.querySelectorAll('button').forEach(function(x){x.disabled=true})}
 function free(){$('busy').className='';document.querySelectorAll('button').forEach(function(x){x.disabled=false});count()}
 reload();
@@ -1654,9 +1654,11 @@ module.exports = async function handler(req, res) {
     // ── списъкът с 35-те продукта + наличности (за формата на точката) ──
     if (body.action === "list") {
       const items = await buildList();
-      // Постоянните (дневния ориз) не се заявяват — идват сами всеки работен ден.
+      // Постоянните (дневния ориз, 8 кг сутрин) СЕ показват — но с бележка, че тук се
+      // поръчва/праща ДОПЪЛНИТЕЛНО (напр. точката е свършила ориза преди обяд).
       const standingIds = new Set(STANDING_REQUEST.map(x => x.cex_id));
-      res.status(200).json({ ok: true, for_date: sofiaToday(), items: items.filter(x => !standingIds.has(x.cex_id)).map(x => ({ ...x, zag: ZAG.includes(x.cex_id), tpl: TEMPLATE[x.cex_id] || null }))
+      res.status(200).json({ ok: true, for_date: sofiaToday(), items: items.map(x => ({ ...x, zag: ZAG.includes(x.cex_id), tpl: TEMPLATE[x.cex_id] || null,
+        hint: standingIds.has(x.cex_id) ? "8 кг идват сутрин · тук поръчай ДОПЪЛНИТЕЛНО" : (x.hint || null) }))
         .sort((a, b) => (b.zag - a.zag) || ((b.tpl ? 1 : 0) - (a.tpl ? 1 : 0))) });
       return;
     }
@@ -1703,15 +1705,28 @@ module.exports = async function handler(req, res) {
         .map(x => ({ cex_id: Number(x && x.cex_id), qty: Number(x && x.qty) }))
         .filter(x => MAP[x.cex_id] && x.qty > 0);
       if (!items.length) { res.status(400).json({ ok: false, error: "празна заявка — нищо за изпращане" }); return; }
+      const host = (req.headers && req.headers.host) || "motamo-api.vercel.app";
+      // Произведи липсващите ЗАГОТОВКИ (напр. доп. ориз), ако цехът е на минус/недостиг —
+      // после прехвърли. Същият механизъм като дневния ориз (produceZag). Суровини не се
+      // произвеждат (не са в ZAG) → тогава се праща само наличното.
+      const produced = [];
+      try {
+        const list0 = await buildList();
+        const have0 = {}; for (const x of list0) have0[x.cex_id] = Number(x.cex_stock) || 0;
+        for (const it of items) {
+          if (!ZAG.includes(it.cex_id)) continue;
+          const miss = Math.round((it.qty - (have0[it.cex_id] || 0)) * 1000) / 1000;
+          if (miss > 0) { const p = await produceZag(it.cex_id, miss, host); if (p && p.ok) produced.push({ cex_id: it.cex_id, amount: miss }); }
+        }
+      } catch (e) {}
       const cr = await createRequest(items, body.note || "изпратено от склада", "", true);
       if (!cr.ok) { res.status(200).json(cr); return; }
-      const host = (req.headers && req.headers.host) || "motamo-api.vercel.app";
       const out = await new Promise((resolve) => {
         const r2 = { statusCode: 200, setHeader() {}, status(c) { this.statusCode = c; return this; }, json(o) { resolve(o); }, send(b) { resolve(b && typeof b === "object" ? b : { ok: false, error: String(b).slice(0, 200) }); } };
         Promise.resolve(module.exports({ method: "POST", query: {}, headers: { host }, body: { token, action: "process_request", id: cr.id, dry: false, send: body.send || null } }, r2))
           .catch(e => resolve({ ok: false, error: String(e && e.message) }));
       });
-      res.status(200).json(Object.assign({ request_id: cr.id }, out));
+      res.status(200).json(Object.assign({ request_id: cr.id, produced }, out));
       return;
     }
 
