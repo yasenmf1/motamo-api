@@ -1094,8 +1094,17 @@ async function computeDayPlan(shopsIn, prodDate, lot, razosDate, withOthers, use
   // собствените сметки на тикнатите (иначе повторно тикнат магазин със сметка би се удвоил).
   // Произвеждаме ПО-СТРОГОТО от двете → идемпотентно (и двете мерки растат след производство).
   const physBase = Object.assign({}, freeStock);
-  for (const x of tickedAccts) for (const [n, q] of Object.entries(x.order || {})) { const a = resolve(n); if (a) physBase[String(a.id)] = (Number(physBase[String(a.id)]) || 0) + (Number(q) || 0); }
-  const planPhys = dayPlan(aggTicked, physBase, physBase);
+  const ownRes = {};
+  for (const x of tickedAccts) for (const [n, q] of Object.entries(x.order || {})) { const a = resolve(n); if (a) { physBase[String(a.id)] = (Number(physBase[String(a.id)]) || 0) + (Number(q) || 0); ownRes[String(a.id)] = (Number(ownRes[String(a.id)]) || 0) + (Number(q) || 0); } }
+  // ★ S26 — КОРЕН на „последният магазин пада". Сметките теглят СОЛД артикулите (ролки/сетове)
+  // ТОЧНО от партида L, не от общото/без-партида. Затова физическата проверка нетира продаваните
+  // спрямо СВОБОДНОТО ПОД ПАРТИДАТА = произведено под L − запазено от ЧУЖДИ отворени сметки (те
+  // пак теглят от L) + върнато запазеното от СОБСТВЕНИТЕ (иначе повторно ② удвоява). Преди
+  // ползвахме общото свободно (physBase) → без-партида/чужда наличност заблуждаваше ② да прави 0
+  // за последния магазин, а 30-те под L бяха вече запазени → сметката падаше „няма в партида L".
+  const freeUnderLot = {};
+  if (underRel) { const ks = new Set([...Object.keys(underLot || {}), ...Object.keys(reserved || {})]); for (const k of ks) { if (k === "_ok") continue; freeUnderLot[k] = Math.max(0, (Number(underLot[k]) || 0) - (Number(reserved[k]) || 0) + (Number(ownRes[k]) || 0)); } }
+  const planPhys = dayPlan(aggTicked, physBase, underRel ? freeUnderLot : physBase);
   const maxMerge = (x, y) => { const o = Object.assign({}, x); for (const k in y) o[k] = Math.max(o[k] || 0, y[k] || 0); return o; };
   const plan = { produce: maxMerge(planLot.produce, planPhys.produce), loadRaw: maxMerge(planLot.loadRaw, planPhys.loadRaw) };
   return { plan, sm, underLot, underRel, freeStock, others };
