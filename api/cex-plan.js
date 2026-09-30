@@ -2276,7 +2276,7 @@ module.exports = async function handler(req, res) {
     }).filter(Boolean).join(NL + NL);
     let text;
     if (!oldCur) {
-      text = (body.full ? "🔄 <b>ПОПРАВЕН план</b> — важи този" + NL : "") + `📋 <b>План за ${dd}</b> (${shopsN} магазина)` + NL + NL + listing();
+      text = (body.full ? "🔄 <b>ПОПРАВЕН план</b> — важи този" + NL : "") + `🍳 <b>За кухнята (Йорданка) — ${dd}</b> (${shopsN} магазина)` + NL + `<i>какво да се произведе (пълно, вкл. хачи за сетовете)</i>` + NL + NL + listing();
     } else {
       const add = [], less = [];
       for (const k of new Set([...Object.keys(now.cur), ...Object.keys(oldCur)])) {
@@ -2292,11 +2292,25 @@ module.exports = async function handler(req, res) {
         + (less.length ? NL + NL + "<b>По-малко:</b>" + NL + less.join(NL) : "")
         + NL + NL + "━━━━━━━━━━" + NL + `📋 <b>ОБЩО за ${dd}</b> (${shopsN} магазина)` + NL + NL + listing();
     }
-    if (body.dry) { res.status(200).json({ ok: true, dry: true, kind: oldCur ? "addition" : "full", text }); return; }
+    // ── Съобщение 2: ЕКСПЕДИЦИЯ (Маша) — ОБЩО за товарене: ПОРЪЧАНИТЕ бройки
+    // (сетове като сетове; хачи/поке само ПРОДАДЕНОТО — НЕ произведеното, там влизат
+    //  и хачи за сетовете). Тотал по всички магазини; детайлът е по стоковите.
+    const sold = {};
+    for (const s of Object.values(merged)) for (const [n, q] of Object.entries(s.order || {})) if (Number(q)) sold[n] = (sold[n] || 0) + Number(q);
+    const eSets = {}, eRest = {};
+    for (const [n, q] of Object.entries(sold)) { const a = resolve(n); if (a && a.is_set) eSets[n] = q; else eRest[n] = q; }
+    const eGroups = [["🍱 Сетове", sortObj(eSets, 2)], ["🍣 Ролки / поке", sortObj(eRest, 2)]];
+    const eListing = eGroups.map(([g, o]) => {
+      const rows = Object.entries(o).filter(([, q]) => Number(q));
+      return rows.length ? `<b>${g}</b>` + NL + rows.map(([n, q]) => `• ${TG.escHtml(n)} — <b>${fmtQ(Number(q))}</b>`).join(NL) : "";
+    }).filter(Boolean).join(NL + NL);
+    const expoText = `🚚 <b>Експедиция (Маша) — ОБЩО за ${dd}</b> (${shopsN} магазина)` + NL + `<i>за товарене; детайлът по магазини е в стоковите</i>` + NL + NL + eListing;
+    if (body.dry) { res.status(200).json({ ok: true, dry: true, kind: oldCur ? "addition" : "full", text, expo_text: expoText }); return; }
     const r = await TG.tgSend(text, null, date);
     if (!r.ok) { res.status(502).json({ ok: false, error: "telegram", message: r.error }); return; }
+    const r2 = await TG.tgSend(expoText, null, date).catch(() => ({ ok: false }));
     await TG.sentSave("plan", date, { shops: merged }).catch(() => {});
-    res.status(200).json({ ok: true, kind: oldCur ? "addition" : "full", shops: shopsN });
+    res.status(200).json({ ok: true, kind: oldCur ? "addition" : "full", shops: shopsN, expo_ok: !!(r2 && r2.ok) });
     return;
   }
   // ★ S25 — кои обекти имат СТОКОВА за деня (за маршрута на шофьора). Досинхронизира кеша на
