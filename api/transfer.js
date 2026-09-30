@@ -1551,7 +1551,7 @@ module.exports = async function handler(req, res) {
         if (cq.message) await TG.tgApi("editMessageText", { chat_id: cq.message.chat.id, message_id: cq.message.message_id, parse_mode: "HTML",
           text: `✓ <b>${TG.escHtml((u && u.name) || uid)}</b> е <b>${ROLE_BG[role]}</b>` });
         if (role === "tochka") await TG.tgSend("✅ Одобрен си като <b>Точка</b>.\nЗа заявка към цеха напиши <b>заявка</b> (до 10:00 всеки ден).", String(uid), null, formBtn());
-        else if (role === "shofior") await TG.tgSend("✅ Одобрен си като <b>Шофьор</b>.\nСлед като натовариш, напиши <b>маршрут</b> — ще ти дам спирките за деня с навигация.", String(uid));
+        else if (role === "shofior") await TG.tgSend("✅ Одобрен си като <b>Шофьор</b>.\nКогато си готов, натисни <b>🚚 Тръгвам</b> (или напиши думата тръгвам) — ще ти дам обектите за деня с навигация.", String(uid), null, { keyboard: [[{ text: "🚚 Тръгвам" }]], resize_keyboard: true, is_persistent: true });
         else if (role === "sklad") await TG.tgSend("✅ Одобрена си като <b>Склад (цех)</b>.\nТук ще идват заявките от точката. Напиши <b>заявка</b>, за да ги отвориш.", String(uid), null, skladBtn());
         res.status(200).json({ ok: true }); return;
       }
