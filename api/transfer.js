@@ -1295,11 +1295,19 @@ function orderPage(k) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Поръчка към доставчик</title>
 ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}
-.sups{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 12px}.sups button{flex:1 1 40%}
+.sups{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px}.sups button{flex:1 1 40%}
 .sups button.on{background:var(--sun);color:#fff;border-color:var(--sun)}
-.ol{width:100%;border-collapse:collapse}.ol td{padding:9px 4px;border-bottom:1px solid var(--line);vertical-align:middle}
-.ol .n{font-size:15px}.ol .n i{display:block;font-style:normal;color:var(--dim);font-size:12.5px}
-.ol .num{text-align:right;white-space:nowrap}.ol input{width:64px;padding:8px;font:inherit;text-align:right;border-radius:8px;border:1px solid var(--line);background:transparent;color:inherit}
+.ph{font-size:14px;color:var(--dim);margin:0 0 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.ph b{color:var(--fg)}.ph a{color:var(--sun);text-decoration:none;font-weight:700}
+.ol{width:100%;border-collapse:collapse}.ol td{padding:10px 4px;border-bottom:1px solid var(--line);vertical-align:middle}
+.ol .hd th{font-size:11.5px;color:var(--dim);font-weight:700;text-transform:uppercase;letter-spacing:.02em;padding:4px 4px 8px;border-bottom:1px solid var(--line);text-align:right}
+.ol .hd th:first-child{text-align:left}
+.ol .n{font-size:15px;width:48%}.ol .n b{display:block}.ol .n i{font-style:normal;color:var(--dim);font-size:12px}
+.ol .st{text-align:right;white-space:nowrap;font-weight:800;font-size:15px;width:26%}
+.ol .st i{display:block;font-style:normal;font-weight:600;color:var(--dim);font-size:11.5px}
+.ol .st.lowc{color:var(--sun)}
+.ol .num{text-align:right;white-space:nowrap;width:26%}.ol input{width:62px;padding:9px 8px;font:inherit;font-size:16px;text-align:right;border-radius:8px;border:1px solid var(--line);background:transparent;color:inherit}
+.ol .u{display:block;font-style:normal;color:var(--dim);font-size:11px;margin-top:3px}
 .ol tr.low .n b{color:var(--sun)}
 pre.tx{white-space:pre-wrap;font:inherit;font-size:14px;border:1px solid var(--line);border-radius:10px;padding:12px;margin:12px 0}
 .acts{display:flex;gap:8px;flex-wrap:wrap}.acts>*{flex:1 1 30%;text-align:center;text-decoration:none}
@@ -1309,6 +1317,7 @@ pre.tx{white-space:pre-wrap;font:inherit;font-size:14px;border:1px solid var(--l
 ${homeBtn(k)}<button class="ghost" onclick="load()">↻<span class="hidesm"> Опресни</span></button></header>
 <div class="wrap">
 <div class="sups" id="sups"></div>
+<div id="ph" class="ph" style="display:none"></div>
 <div id="msg" class="msg info">Чета склада…</div>
 <table class="ol" id="tb"></table>
 <pre class="tx" id="tx" style="display:none"></pre>
@@ -1325,11 +1334,15 @@ function unit(r){var p=PK[r.id];return p?p.name:r.u}
 function sups(){$('sups').innerHTML=SUPS.map(function(s){var n=RAW.filter(function(r){return r.sup===s}).length;return '<button class="'+(s===SEL?'on':'ghost')+'" onclick="pick(this.textContent.split(\\' (\\')[0])">'+esc(s)+' ('+n+')</button>'}).join('')}
 function pick(s){SEL=s;sups();draw()}
 function draw(){var rs=RAW.filter(function(r){return r.sup===SEL}).sort(function(a,b){return (a.c===null?999:a.c-a.lead)-(b.c===null?999:b.c-b.lead)});
+var ph=PH[SEL],lead=rs.length?rs[0].lead:null;
+$('ph').style.display='';
+$('ph').innerHTML=(ph?'📞 <b>'+esc(SEL)+'</b> <a href="viber://chat?number='+encodeURIComponent(ph)+'">'+esc(ph)+'</a>':'📞 <b>'+esc(SEL)+'</b> — <span style="color:var(--sun)">няма Viber номер</span>')+(lead!==null?' · доставка след '+lead+' дни':'');
 if(!rs.length){$('tb').innerHTML='<tr><td>Няма артикули от този доставчик.</td></tr>';txt();return}
-var lead=rs[0].lead;
-$('tb').innerHTML='<tr><td colspan="3" style="color:var(--dim);font-size:13px">Следваща доставка след '+lead+' дни. Числата са в опаковки на доставчика.'+(PH[SEL]?' · 📞 Viber '+esc(SEL)+': '+esc(PH[SEL]):' · <span style="color:var(--sun)">няма Viber номер</span>')+'</td></tr>'+rs.map(function(r){var low=r.c!==null&&r.c-r.lead<2,v=sug(r);
-return '<tr class="'+(low?'low':'')+'"><td class="n"><b>'+esc(r.n)+'</b><i>имаме '+f(r.s)+' '+esc(r.u)+' · стига '+(r.c===null?'—':f(r.c)+' дни')+'</i></td>'+
-'<td class="num"><input inputmode="decimal" data-id="'+r.id+'" value="'+(v||'')+'" placeholder="0" oninput="txt()"></td><td style="font-size:12.5px;color:var(--dim)">'+esc(unit(r))+'</td></tr>'}).join('');txt()}
+$('tb').innerHTML='<tr class="hd"><th>Продукт</th><th>Наличност</th><th>Поръчай</th></tr>'+rs.map(function(r){var low=r.c!==null&&r.c-r.lead<2,v=sug(r);
+return '<tr class="'+(low?'low':'')+'">'+
+'<td class="n"><b>'+esc(r.n)+'</b><i>стига '+(r.c===null?'—':f(r.c)+' дни')+'</i></td>'+
+'<td class="st'+(low?' lowc':'')+'">'+f(r.s)+' '+esc(r.u)+'</td>'+
+'<td class="num"><input inputmode="decimal" data-id="'+r.id+'" value="'+(v||'')+'" placeholder="0" oninput="txt()"><i class="u">'+esc(unit(r))+'</i></td></tr>'}).join('');txt()}
 function lines(){var out=[];document.querySelectorAll('#tb input').forEach(function(i){var v=parseFloat(String(i.value).replace(',','.'))||0;if(v<=0)return;var r=RAW.filter(function(x){return String(x.id)===i.dataset.id})[0];var p=PK[r.id];
 out.push('• '+r.n+' — '+(p?f(v)+' × '+p.name+' (общо '+f(v*p.size)+' '+r.u+')':f(v)+' '+r.u))});return out}
 function txt(){var l=lines();if(!l.length){$('tx').style.display='none';$('acts').style.display='none';return}
