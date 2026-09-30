@@ -92,6 +92,12 @@ const HINT = {
 // обикаля хладилникът, а не по азбука или по id. Каквото не е в списъка му, пада
 // накрая — така новият артикул се вижда, вместо да изчезне.
 const ZAG = [59, 67, 68, 65, 131];
+// ★ S26 — производство от склада: срок на годност (дни) на всяка заготовка (собственикът,
+// от колоната „Срок" в Barsy — тя не се чете през публичното API). При производство слагаме
+// партида = датата + този срок. Промяна → тук. Заготовки без срок тук → партида без срок.
+const SHELF_LIFE = { 67: 3, 66: 7, 59: 3, 68: 3, 65: 3, 70: 3, 69: 2, 78: 2, 131: 3, 123: 3 };
+// Заготовките, които Данчето произвежда от екрана „Производство".
+const PRODUCE_ZAG = [67, 66, 59, 68, 65, 70, 69, 78, 131, 123];
 const RAW_ORDER = [
   36,  // Крема сирене
   52,  // Авокадо
@@ -964,6 +970,7 @@ ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
   <div class="hub">
     <a href="?view=cex&k=${sk}"><span><b>📥 Заявки от точката</b><span>виж какво искат и издай документите</span></span><span id="pend" class="go">→</span></a>
     <a href="?view=push&k=${sk}"><span><b>📤 Изпрати към точката</b><span>избери стока и я прати веднага</span></span><span class="go">→</span></a>
+    <a href="?view=produce&k=${sk}"><span><b>🏭 Производство</b><span>колко заготовки си произвела (с партида и срок)</span></span><span class="go">→</span></a>
     <a href="?view=order&k=${sk}"><span><b>🛒 Поръчка към доставчик</b><span>избери доставчик и прати заявка</span></span><span class="go">→</span></a>
     <a href="?view=stock&k=${stk}"><span><b>🧾 Склад</b><span>наличности и какво да поръчаш</span></span><span class="go">→</span></a>
   </div>
@@ -1038,6 +1045,77 @@ document.querySelectorAll('.q').forEach(function(i){i.value=''});count();
 msg('\\u2713 Изпратено към точката'+(j.produced&&j.produced.length?' (произведено доп.)':'')+'. цех прехвърляне №'+(j.cex_doc_id||'?')+' · точка зареждане №'+(j.shop_doc_id||'?'),'ok');reload()}).catch(function(e){free();msg('Мрежова грешка: '+e,'err')})}
 function busy(t,s){var b=$('busy');b.querySelector('.tx').textContent=t;$('busysub').textContent=s||'';b.className='on';document.querySelectorAll('button').forEach(function(x){x.disabled=true})}
 function free(){$('busy').className='';document.querySelectorAll('button').forEach(function(x){x.disabled=false});count()}
+reload();
+</script></body></html>`;
+}
+
+// ── ПРОИЗВОДСТВО (view=produce) ──────────────────────────────────────────────
+// Данчето въвежда какви заготовки е произвела + дата → цехът тегли суровините по
+// рецептата и добавя заготовката с ПАРТИДА = датата + СРОК (SHELF_LIFE). Така
+// автоматичното производство вижда наличността и прави по-малко.
+function produceSkladPage(k) {
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Производство</title>
+${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}
+.drow{display:flex;align-items:center;gap:10px;margin:6px 0 12px;font-size:15px}
+.drow input{padding:10px;font:inherit;font-size:16px;border-radius:10px;border:1px solid var(--line);background:transparent;color:inherit}
+.pl{width:100%;border-collapse:collapse}.pl td{padding:10px 4px;border-bottom:1px solid var(--line);vertical-align:middle}
+.pl .hd th{font-size:11.5px;color:var(--dim);font-weight:700;text-transform:uppercase;padding:4px 4px 8px;border-bottom:1px solid var(--line);text-align:right}
+.pl .hd th:first-child{text-align:left}
+.pl .n{font-size:15px;width:50%}.pl .n b{display:block}.pl .n i{font-style:normal;color:var(--dim);font-size:12px}
+.pl .st{text-align:right;white-space:nowrap;font-weight:700;width:24%}
+.pl .num{text-align:right;width:26%}.pl input{width:64px;padding:9px 8px;font:inherit;font-size:16px;text-align:right;border-radius:8px;border:1px solid var(--line);background:transparent;color:inherit}
+</style></head><body>
+<header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
+<h1>Производство<small>склад · заготовки с партида и срок</small></h1>
+${homeBtn(k)}<button class="ghost" onclick="reload()">↻<span class="hidesm"> Опресни</span></button></header>
+<div class="wrap">
+  <div class="drow"><label for="pdate"><b>Дата на производство:</b></label> <input type="date" id="pdate" lang="bg-BG"></div>
+  <div id="msg" class="msg info">Зареждам заготовките…</div>
+  <table class="pl" id="tbl"></table>
+</div>
+<div class="bar" id="bar">
+  <span id="cnt" style="color:var(--dim);font-size:14px">—</span>
+  <button id="go" onclick="go()" disabled>Произведи</button>
+</div>
+<div id="busy"><div class="sp"></div><div class="tx">Произвеждам…</div><div class="sub" id="busysub">Цехът тегли суровините. Не натискай пак.</div></div>
+<script>
+var K=${JSON.stringify(k)},items=[];
+function $(i){return document.getElementById(i)}
+function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
+function n3(v){return Math.round(Number(v)*1000)/1000}
+function today(){var d=new Date(),z=function(x){return('0'+x).slice(-2)};return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}
+function count(){var n=0;document.querySelectorAll('.q').forEach(function(i){if(Number(i.value)>0)n++});$('cnt').textContent=n?(n+' заготовки за производство'):'нищо не е въведено';$('go').disabled=!n}
+function render(){var h='<tr class="hd"><th>Заготовка</th><th>В цеха</th><th>Произведох</th></tr>';
+items.forEach(function(it){var st=it.cex_stock;
+h+='<tr><td class="n"><b>'+esc(it.name)+'</b><i>'+(it.days?('срок '+it.days+' дни'):'без срок')+'</i></td>'+
+'<td class="st">'+(st==null?'—':n3(st))+'</td>'+
+'<td class="num"><input class="q" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" value="" oninput="count()"></td></tr>'});
+$('tbl').innerHTML=h;count()}
+function reload(){msg('Зареждам заготовките…','info');api({action:'list_zag'}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}items=j.items||[];if(!$('pdate').value)$('pdate').value=j.today||today();render();msg('Въведи колко си произвела и датата, после „Произведи". Цехът тегли суровините и добавя заготовката с партида + срок.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function busy(t){$('busy').className='on';if(t)$('busy').querySelector('.tx').textContent=t;document.querySelectorAll('button,input').forEach(function(x){x.disabled=true})}
+function free(){$('busy').className='';document.querySelectorAll('button,input').forEach(function(x){x.disabled=false});count()}
+function go(){
+var date=$('pdate').value;if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)){msg('Избери дата на производство.','err');return}
+var rows=[];document.querySelectorAll('.q').forEach(function(i){var v=Number(i.value);if(v>0)rows.push({cex_id:Number(i.dataset.id),amount:v,name:(items.filter(function(x){return x.cex_id===Number(i.dataset.id)})[0]||{}).name})});
+if(!rows.length){msg('Нищо не е въведено.','err');return}
+if(!confirm('Произвеждам '+rows.length+' заготовки с дата '+date+'. Цехът тегли суровините и ги добавя в склада (с партида и срок). Продължавам?'))return;
+busy('Произвеждам…');
+var ok=[],bad=[],nolot=[];
+(function next(idx){
+ if(idx>=rows.length){free();
+  var m=ok.length?('\\u2713 Произведено: '+ok.join(', ')):'';
+  if(nolot.length)m+=(m?' · ':'')+'без партида (служебни): '+nolot.join(', ');
+  if(bad.length)m+=(m?' · ':'')+'\\u26a0 НЕ мина: '+bad.join(' | ');
+  msg(m||'Нищо не се произведе.',bad.length?'err':'ok');reload();return}
+ var r=rows[idx];
+ api({action:'produce_zag',cex_id:r.cex_id,amount:r.amount,date:date}).then(function(j){
+  if(j&&j.ok){ok.push(esc(r.name)+' '+n3(r.amount));if(j.no_lot)nolot.push(esc(r.name))}
+  else bad.push(esc(r.name)+' — '+esc((j&&(j.error||j.message))||'грешка'));
+  next(idx+1)}).catch(function(e){bad.push(esc(r.name)+' — мрежа');next(idx+1)})
+})(0)}
 reload();
 </script></body></html>`;
 }
@@ -1238,12 +1316,12 @@ async function createRequest(raw, note, tag, silent) {
 
 // Производство на заготовка през цех калкулатора (create_production, без партида —
 // заготовките не са на партиди). Вика се от сървъра със силния токен от env.
-async function produceZag(cexId, amount, host) {
+async function produceZag(cexId, amount, host, lot, lotExp, description) {
   const tok = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN].find(Boolean);
   if (!tok) return { ok: false, error: "няма силен токен в env" };
   const r = await fetch(`https://${host || "motamo-api.vercel.app"}/api/cex-plan`, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token: tok, action: "create_production", rows: [{ article_id: Number(cexId), amount: Math.round(Number(amount) * 1000) / 1000 }], lot: "",
-      description: "Заготовка за прехвърляне към точката" }) });
+    body: JSON.stringify({ token: tok, action: "create_production", rows: [{ article_id: Number(cexId), amount: Math.round(Number(amount) * 1000) / 1000 }], lot: lot || "", lot_exp: lotExp || null,
+      description: description || "Заготовка за прехвърляне към точката" }) });
   const j = await r.json().catch(() => ({ ok: false, error: "не-JSON отговор " + r.status }));
   return j;
 }
@@ -1447,7 +1525,7 @@ module.exports = async function handler(req, res) {
     const up = (typeof req.body === "object" && req.body) ? req.body : (() => { try { return JSON.parse(req.body || "{}"); } catch (e) { return {}; } })();
     const base = "https://" + ((req.headers && req.headers.host) || "motamo-api.vercel.app") + "/api/transfer";
     const formBtn = () => ({ inline_keyboard: [[{ text: "📝 Отвори формата за заявка", url: `${base}?view=shop&k=${TG.pointKey()}` }]] });
-    const skladBtn = () => ({ inline_keyboard: [[{ text: "🏠 Начало (склад)", url: `${base}?view=home&k=${TG.skladKey()}` }], [{ text: "📥 Заявки от точката", url: `${base}?view=cex&k=${TG.skladKey()}` }, { text: "📤 Изпрати към точката", url: `${base}?view=push&k=${TG.skladKey()}` }], [{ text: "🛒 Поръчка", url: `${base}?view=order&k=${TG.skladKey()}` }, { text: "🧾 Склад", url: `${base}?view=stock&k=${staffKey()}` }]] });
+    const skladBtn = () => ({ inline_keyboard: [[{ text: "🏠 Начало (склад)", url: `${base}?view=home&k=${TG.skladKey()}` }], [{ text: "📥 Заявки от точката", url: `${base}?view=cex&k=${TG.skladKey()}` }, { text: "📤 Изпрати към точката", url: `${base}?view=push&k=${TG.skladKey()}` }], [{ text: "🏭 Производство", url: `${base}?view=produce&k=${TG.skladKey()}` }, { text: "🛒 Поръчка", url: `${base}?view=order&k=${TG.skladKey()}` }], [{ text: "🧾 Склад", url: `${base}?view=stock&k=${staffKey()}` }]] });
     const ROLE_BG = { tochka: "Точка", sklad: "Склад (цех)", shofior: "Шофьор", owner: "Собственик", none: "без роля" };
     try {
       // собственикът натиска бутон за роля
@@ -1547,10 +1625,10 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const VIEWS = ["shop", "cex", "stock", "hub", "order", "home", "push"];
+  const VIEWS = ["shop", "cex", "stock", "hub", "order", "home", "push", "produce"];
   if (req.method === "GET" && (VIEWS.includes(q.view) || (!q.view && q.k))) {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    const homeKey = (q.view === "home" || q.view === "push") && ((TG.skladKey() && q.k === TG.skladKey()) || isStaff(q.k) || isOwner(q.k));
+    const homeKey = (q.view === "home" || q.view === "push" || q.view === "produce") && ((TG.skladKey() && q.k === TG.skladKey()) || isStaff(q.k) || isOwner(q.k));
     const okTok = homeKey || viewTokens.some(t => q.k === t) || (q.view === "stock" && ((process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN) || isStaff(q.k)))
       || (q.view === "cex" && TG.skladKey() && q.k === TG.skladKey()) || (q.view === "shop" && TG.pointKey() && q.k === TG.pointKey())
       || (q.view === "order" && ((TG.skladKey() && q.k === TG.skladKey()) || isStaff(q.k)));
@@ -1576,6 +1654,7 @@ module.exports = async function handler(req, res) {
       : view === "order" ? orderPage(q.k)
       : view === "home" ? homePage(q.k)
       : view === "push" ? pushPage(q.k)
+      : view === "produce" ? produceSkladPage(q.k)
       : hubPage(q.k));
     return;
   }
@@ -1589,7 +1668,7 @@ module.exports = async function handler(req, res) {
   const readOnly = ["list", "list_requests", "inspect", "stock_report"].includes(body.action);
   const allowed = readOnly ? viewTokens.concat([process.env.PEEK_TOKEN].filter(Boolean)) : viewTokens;
   const staff = ["stock_report", "tg_supply"].includes(body.action) && isStaff(token);
-  const skladOk = TG.skladKey() && token === TG.skladKey() && ["list", "list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply", "stock_report", "push_to_shop"].includes(body.action);
+  const skladOk = TG.skladKey() && token === TG.skladKey() && ["list", "list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply", "stock_report", "push_to_shop", "list_zag"].includes(body.action);
   const pointOk = TG.pointKey() && token === TG.pointKey() && ["list", "create_request", "list_requests"].includes(body.action);
   if (!staff && !skladOk && !pointOk && !allowed.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
   if (!process.env.BARSY_CEX_USER || !process.env.BARSY_USER) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
@@ -1640,10 +1719,40 @@ module.exports = async function handler(req, res) {
     // ★ S25 — складът произвежда заготовка, която не стига за заявката (само заготовки).
     if (body.action === "produce_zag") {
       const cid = Number(body.cex_id), amt = Number(body.amount);
-      if (!ZAG.includes(cid)) { res.status(200).json({ ok: false, error: "това не е заготовка — не се произвежда тук (зареди доставка)" }); return; }
-      if (!(amt > 0 && amt <= 60)) { res.status(200).json({ ok: false, error: "невалидно количество" }); return; }
-      const p = await produceZag(cid, amt, (req.headers && req.headers.host) || "motamo-api.vercel.app");
+      if (!(ZAG.includes(cid) || PRODUCE_ZAG.includes(cid))) { res.status(200).json({ ok: false, error: "това не е заготовка — не се произвежда тук (зареди доставка)" }); return; }
+      if (!(amt > 0 && amt <= 500)) { res.status(200).json({ ok: false, error: "невалидно количество" }); return; }
+      const host = (req.headers && req.headers.host) || "motamo-api.vercel.app";
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : null;
+      if (date) {
+        // ★ S26 — производство с ПАРТИДА = датата на производство + СРОК = дата + SHELF_LIFE.
+        const days = SHELF_LIFE[cid];
+        const lot = "L." + date.split("-").reverse().join(".");
+        const lotExp = days ? new Date(Date.parse(date) + days * 864e5).toISOString().slice(0, 10) : null;
+        const desc = "Производство (склад) " + date + (days ? " · срок " + days + " дни" : "");
+        let p = await produceZag(cid, amt, host, lot, lotExp, desc);
+        // Заготовки на „служебни партиди" (lot_type_id 1) отказват ръчна партида → правим без
+        // партида. Резервният вариант се пуска САМО при тази конкретна грешка (не при друга).
+        if (!(p && p.ok) && /не е настроено/i.test(String((p && (p.error || p.message)) || ""))) {
+          p = await produceZag(cid, amt, host, "", null, desc);
+          if (p && p.ok) p.no_lot = true;
+        }
+        res.status(200).json(p && p.ok ? { ok: true, store_production_id: p.store_production_id, lot, lot_exp: lotExp, no_lot: !!p.no_lot } : { ok: false, error: String((p && (p.error || p.message)) || "грешка") });
+        return;
+      }
+      const p = await produceZag(cid, amt, host);
       res.status(200).json(p && p.ok ? { ok: true, store_production_id: p.store_production_id } : { ok: false, error: String((p && (p.error || p.message)) || "грешка") });
+      return;
+    }
+
+    // ── списък на заготовките за екрана „Производство" (име, наличност в цеха, срок) ──
+    if (body.action === "list_zag") {
+      let sm = {}, names = {};
+      try {
+        const cr = await cexCall("Articles_getlistobject", { filters: { depot_id: CEX_DEPOT_FROM }, extra_properties: ["store_amount"] });
+        for (const a of artList(cr)) { const id = Number(a.article_id); sm[id] = Number(a.store_amount); names[id] = a.article_name; }
+      } catch (e) {}
+      const items = PRODUCE_ZAG.map(id => ({ cex_id: id, name: names[id] || ("#" + id), cex_stock: Number.isFinite(sm[id]) ? Math.round(sm[id] * 1000) / 1000 : null, days: SHELF_LIFE[id] || null }));
+      res.status(200).json({ ok: true, today: sofiaToday(), items });
       return;
     }
     // ★ S25 — заявка за зареждане (какво да се купи) от склада → личния чат на собственика.
