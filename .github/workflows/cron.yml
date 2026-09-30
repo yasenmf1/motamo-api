@@ -1,0 +1,25 @@
+name: cron
+on:
+  schedule:
+    - cron: '0 6 * * 1-5'
+    - cron: '30 6 * * 1-5'
+  workflow_dispatch:
+jobs:
+  rice:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * 1-5'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS --retry 3 --retry-delay 20 -X GET \
+            "https://motamo-api.vercel.app/api/transfer?cron=rice" \
+            -H "User-Agent: vercel-cron" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+  remind:
+    if: github.event.schedule == '30 6 * * 1-5'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS --retry 3 --retry-delay 20 -X GET \
+            "https://motamo-api.vercel.app/api/transfer?cron=remind" \
+            -H "User-Agent: vercel-cron" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
