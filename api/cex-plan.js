@@ -2270,27 +2270,40 @@ module.exports = async function handler(req, res) {
     const dd = date.split("-").reverse().slice(0, 2).join(".");
     const fmtQ = q => String(Math.round(q * 1000) / 1000).replace(".", ",");
     const shopsN = Object.keys(merged).length;
-    const listing = () => now.groups.map(([g, o]) => {
+    const fmtG = (groups) => groups.map(([g, o]) => {
       const rows = Object.entries(o).filter(([, q]) => Number(q));
       return rows.length ? `<b>${g}</b>` + NL + rows.map(([n, q]) => `• ${TG.escHtml(n)} — <b>${fmtQ(Number(q))}</b>`).join(NL) : "";
     }).filter(Boolean).join(NL + NL);
+    const listing = () => fmtG(now.groups);
     let text;
     if (!oldCur) {
       text = (body.full ? "🔄 <b>ПОПРАВЕН план</b> — важи този" + NL : "") + `🍳 <b>За кухнята (Йорданка) — ${dd}</b> (${shopsN} магазина)` + NL + `<i>какво да се произведе (пълно, вкл. хачи за сетовете)</i>` + NL + NL + listing();
     } else {
-      const add = [], less = [];
-      for (const k of new Set([...Object.keys(now.cur), ...Object.keys(oldCur)])) {
-        const d = (now.cur[k] || 0) - (oldCur[k] || 0);
-        if (Math.abs(d) < 1e-9) continue;
-        const n = k.split("|")[1];
-        (d > 0 ? add : less).push(`• ${TG.escHtml(n)} — <b>${d > 0 ? "+" : "−"}${fmtQ(Math.abs(d))}</b> → общо ${fmtQ(now.cur[k] || 0)}`);
+      const newKeys = Object.keys(merged).filter(k => !oldShops[k]);
+      if (newKeys.length) {
+        // ★ ВЪЛНИ: кухнята вече е правила ПРАТЕНОТО; показваме ➕ ДОБАВЕТЕ СЕГА (само новите
+        // магазини) + ✅ ВЕЧЕ ПРАТЕНО (за справка) + 📋 ОБЩО (пратени + добавени = тотал).
+        const newMap = {}; for (const k of newKeys) newMap[k] = merged[k];
+        const newNames = newKeys.map(k => merged[k].rep || merged[k].client).filter(Boolean);
+        text = `🍳 <b>За кухнята (Йорданка) — ${dd}</b>` + (newNames.length ? ` · ➕ ${TG.escHtml(newNames.join(", "))}` : "")
+          + NL + NL + `<b>➕ ДОБАВЕТЕ СЕГА</b> <i>(новите магазини)</i>:` + NL + fmtG(flat(newMap).groups)
+          + NL + NL + `<b>✅ ВЕЧЕ ПРАТЕНО</b> <i>(правено):</i>` + NL + fmtG(flat(oldShops).groups)
+          + NL + NL + "━━━━━━━━━━" + NL + `📋 <b>ОБЩО за ${dd}</b> (${shopsN} магазина)` + NL + NL + listing();
+      } else {
+        // Само количествена промяна по същите магазини → разлика +/−.
+        const add = [], less = [];
+        for (const k of new Set([...Object.keys(now.cur), ...Object.keys(oldCur)])) {
+          const d = (now.cur[k] || 0) - (oldCur[k] || 0);
+          if (Math.abs(d) < 1e-9) continue;
+          const n = k.split("|")[1];
+          (d > 0 ? add : less).push(`• ${TG.escHtml(n)} — <b>${d > 0 ? "+" : "−"}${fmtQ(Math.abs(d))}</b> → общо ${fmtQ(now.cur[k] || 0)}`);
+        }
+        if (!add.length && !less.length) { res.status(200).json({ ok: true, unchanged: true, message: "Няма промяна спрямо пратеното — нищо не е изпратено." }); return; }
+        text = `🍳 <b>За кухнята (Йорданка) — ПРОМЯНА за ${dd}</b>`
+          + (add.length ? NL + NL + "<b>➕ Направете още:</b>" + NL + add.join(NL) : "")
+          + (less.length ? NL + NL + "<b>➖ По-малко:</b>" + NL + less.join(NL) : "")
+          + NL + NL + "━━━━━━━━━━" + NL + `📋 <b>ОБЩО за ${dd}</b> (${shopsN} магазина)` + NL + NL + listing();
       }
-      if (!add.length && !less.length) { res.status(200).json({ ok: true, unchanged: true, message: "Няма промяна спрямо пратеното — нищо не е изпратено." }); return; }
-      const newShops = Object.keys(merged).filter(k => !oldShops[k]).map(k => merged[k].rep || merged[k].client).filter(Boolean);
-      text = `➕ <b>ДОПЪЛНЕНИЕ към плана за ${dd}</b>` + (newShops.length ? ` — ${TG.escHtml(newShops.join(", "))}` : "")
-        + (add.length ? NL + NL + "<b>Направете още:</b>" + NL + add.join(NL) : "")
-        + (less.length ? NL + NL + "<b>По-малко:</b>" + NL + less.join(NL) : "")
-        + NL + NL + "━━━━━━━━━━" + NL + `📋 <b>ОБЩО за ${dd}</b> (${shopsN} магазина)` + NL + NL + listing();
     }
     // ── Съобщение 2: ЕКСПЕДИЦИЯ (Маша) — ОБЩО за товарене: ПОРЪЧАНИТЕ бройки
     // (сетове като сетове; хачи/поке само ПРОДАДЕНОТО — НЕ произведеното, там влизат
