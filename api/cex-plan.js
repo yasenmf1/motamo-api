@@ -1099,11 +1099,14 @@ async function computeDayPlan(shopsIn, prodDate, lot, razosDate, withOthers, use
   // 2) склад (Основен) и партидите — и двете ЗАДЪЛЖИТЕЛНИ; при неуспех спираме, не гадаем.
   const sm = await stockMap(user, pass);
   const all = await lotRows({}, user, pass);
-  const realL = {}, resL = {}, freeL = {}, resAll = {}, staleMap = {};
+  const realL = {}, resL = {}, freeL = {}, resAll = {}, staleMap = {}, oldHeld = {};
   const today = sofiaToday(), staleBefore = prodDate < today ? prodDate : today; // вечерта за утре: днешните още отворени НЕ са „стари"
+  const lotCur = lotIso(lot);
   for (const x of all) {
     const id = String(x.article_id), real = Number(x.amount_real) || 0, rsv = Number(x.amount_reserved) || 0;
     resAll[id] = (resAll[id] || 0) + rsv;
+    // по-стара партида с бройки, запазени за отворена сметка — производство на СЕТ ги изяжда първи (най-старата партида)
+    if (lotCur && rsv < 0 && real > 0) { const iso = lotIso(x.lot_value); if (iso && iso < lotCur) (oldHeld[id] = oldHeld[id] || []).push({ lot: String(x.lot_value), held: round(-rsv) }); }
     if (lot && String(x.lot_value) === String(lot)) { realL[id] = (realL[id] || 0) + real; resL[id] = (resL[id] || 0) + rsv; freeL[id] = (freeL[id] || 0) + real + rsv; }
     else if (rsv < 0) { const iso = lotIso(x.lot_value); if (iso && iso < staleBefore) { const k = String(x.lot_value || "без партида"); staleMap[k] = (staleMap[k] || 0) + 1; } }
   }
@@ -1125,7 +1128,7 @@ async function computeDayPlan(shopsIn, prodDate, lot, razosDate, withOthers, use
     try { const sm2 = await stockMap(user, pass, 2); for (const id of Object.keys(plan.loadRaw)) { const q = Number(sm2[String(id)]) || 0; if (q > 0) inPoint[id] = round(q); } } catch (e) {}
   }
   const stale = Object.entries(staleMap).map(([l, n]) => ({ lot: l, articles: n }));
-  return { plan, sm, underLot: realL, underRel: true, freeStock, others: [], table, stale, inPoint, withAccount: shopsIn.length - needShops.length, needShops: needShops.length };
+  return { plan, sm, underLot: realL, underRel: true, freeStock, others: [], table, stale, oldHeld, inPoint, withAccount: shopsIn.length - needShops.length, needShops: needShops.length };
 }
 function dayPlan(agg, total, underL) {
   const aT = {}; for (const k in (total || {})) aT[k] = Number(total[k]) || 0;
@@ -2547,6 +2550,23 @@ module.exports = async function handler(req, res) {
     const alreadyNamed = {}; for (const [id, q] of Object.entries(underLot)) { const a = byId(id); if (a && q > 0) alreadyNamed[a.name] = round(q); }
     const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate, other_accounts: others.map(x => (x.client || "") + (x.rep ? " / " + x.rep : "") + " #" + x.account_id), already_under_lot: sortObj(alreadyNamed, 2), load_raw: sortObj(loadRawNamed, 3), produced_zagotovki: sortObj(zagProduce, 3), produced_rolls: sortObj(rollProduce, 2), produced_sets: sortObj(setProduce, 2),
       table: cdp.table, stale: cdp.stale, in_point: Object.fromEntries(Object.entries(cdp.inPoint).map(([id, q]) => [(byId(id) || {}).name || id, q])), with_account: cdp.withAccount, need_shops: cdp.needShops };
+    // ★ S28 — ПРЕДПАЗИТЕЛ: производството на СЕТ взима компонентите (НАЧИ) от НАЙ-СТАРАТА партида,
+    // включително запазените за отворени сметки → старите сметки после не могат да се приключат.
+    // Ако сет от плана има компонент, запазен под по-стара партида → СТОП, нищо не се произвежда.
+    if (doArticles && setRows.length) {
+      const hit = {};
+      for (const r of setRows) for (const c of ((byId(r.article_id) || {}).components || [])) {
+        const ca = c.id != null ? byId(c.id) : resolve(c.name);
+        if (ca && cdp.oldHeld[String(ca.id)]) hit[ca.name] = cdp.oldHeld[String(ca.id)];
+      }
+      if (Object.keys(hit).length) {
+        out.step = only || "all"; out.ok = false; out.error = "old_lot_reserved"; out.old_lot_reserved = hit;
+        out.message = "СТОП: сетовете ще изядат бройки, запазени за отворени сметки от по-стара партида — "
+          + Object.entries(hit).map(([n, a]) => n + " " + a.map(x => x.held + " бр. (" + x.lot + ")").join(", ")).join("; ")
+          + ". Първо приключи тези сметки, после натисни ② пак. Нищо не е произведено.";
+        res.status(200).json(out); return;
+      }
+    }
     // Ред: заготовки → ролки → сетове.
     try {
       // Заготовките — ЕДНА ПО ЕДНА (best-effort): някои нямат производствена рецепта в

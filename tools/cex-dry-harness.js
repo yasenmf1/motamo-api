@@ -81,7 +81,11 @@ const live = async (body) => (await realFetch('https://motamo-api.vercel.app/api
 
   console.log('\n══ 6) УТРЕШНА партида L.02.10 (празна) за магазин А — прави пълното, днешните сметки не пречат ══');
   r = await run({ action: 'produce_plan', only: 'articles', shops: [shopA], prod_date: '2026-10-02' });
-  console.log('  ok', r.j.ok, '| производства:', JSON.stringify(W.prods.slice(n4)));
+  console.log('  ok', r.j.ok, r.j.error || '', r.j.message || '', '| производства:', JSON.stringify(W.prods.slice(n4)));
+  console.log('  ↑ ПРЕДПАЗИТЕЛ: ако под по-стара партида има запазени НАЧИ → очаквано ok false, old_lot_reserved, 0 производства');
+  const n5 = W.prods.length; const shopP = { client: 'ТЕСТ', rep: 'Магазин П', client_id: 991, person_id: 5, order: { 'Poke ТОКЕ': 3 } };
+  r = await run({ action: 'produce_plan', only: 'articles', shops: [shopP], prod_date: '2026-10-02' });
+  console.log('  6б) без сетове (само поке) под L.02.10 → минава: ok', r.j.ok, '| производства:', JSON.stringify(W.prods.slice(n5)));
 
   console.log('\n══ 7) Telegram: първо пращане (А), после вълна (А+Б) — на сухо ══');
   await run({ shops: [shopA], publish_kitchen: true, kitchen_date: '2026-10-03', preflight: false });
