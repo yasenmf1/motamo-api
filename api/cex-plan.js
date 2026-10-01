@@ -1088,7 +1088,7 @@ async function computeDayPlan(shopsIn, prodDate, lot, razosDate, withOthers, use
   // ползвахме общото свободно (physBase) → без-партида/чужда наличност заблуждаваше ② да прави 0
   // за последния магазин, а 30-те под L бяха вече запазени → сметката падаше „няма в партида L".
   const freeUnderLot = {};
-  if (underRel) { const ks = new Set([...Object.keys(underLot || {}), ...Object.keys(reserved || {})]); for (const k of ks) { if (k === "_ok") continue; freeUnderLot[k] = Math.max(0, (Number(underLot[k]) || 0) - (Number(reserved[k]) || 0) + (Number(ownRes[k]) || 0)); } }
+  if (underRel) { const ks = new Set([...Object.keys(underLot || {}), ...Object.keys(reserved || {})]); for (const k of ks) { if (k === "_ok") continue; freeUnderLot[k] = (Number(underLot[k]) || 0) - (Number(reserved[k]) || 0) + (Number(ownRes[k]) || 0); } } // ★ S27: БЕЗ клампване — минусът е реална дупка (виж sellLine)
   const planPhys = dayPlan(aggTicked, physBase, underRel ? freeUnderLot : physBase);
   const maxMerge = (x, y) => { const o = Object.assign({}, x); for (const k in y) o[k] = Math.max(o[k] || 0, y[k] || 0); return o; };
   const plan = { produce: maxMerge(planLot.produce, planPhys.produce), loadRaw: maxMerge(planLot.loadRaw, planPhys.loadRaw) };
@@ -1115,9 +1115,13 @@ function dayPlan(agg, total, underL) {
   }
   function sellLine(art, qty) {
     const id = String(art.id);
-    const haveL = gL(id), useL = Math.min(haveL, qty); aL[id] = haveL - useL;
+    // ★ S27 — Barsy пуска сметка само ако (под партидата − в отворени сметки) ≥ бройката. Когато
+    // свободното под L е ОТРИЦАТЕЛНО (отворените сметки държат повече от наличното — след ревизия),
+    // дупката се произвежда заедно с нуждата; иначе „25 в партидата, искате 2" отказва вечно.
+    const rawL = aL[id] || 0, hole = Math.max(0, -rawL);
+    const haveL = Math.max(0, rawL), useL = Math.min(haveL, qty); aL[id] = haveL - useL;
     aT[id] = Math.max(0, gT(id) - useL); // продадените под-L бройки напускат и общото
-    const np = qty - useL; if (np <= 1e-9) return;
+    const np = qty - useL + hole; if (np <= 1e-9) return;
     produce[id] = (produce[id] || 0) + np;
     for (const c of (art.components || [])) { const ca = c.id != null ? byId(c.id) : resolve(c.name); if (ca) consumeTotal(ca, np * (Number(c.qty) || 0)); }
   }
