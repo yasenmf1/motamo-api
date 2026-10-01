@@ -2331,9 +2331,13 @@ module.exports = async function handler(req, res) {
     const kitchenBody = lines(now.groups, isWave ? flat(oldShops).groups : null);
     const expoBody = lines(soldG(merged), isWave ? soldG(oldShops) : null);
     if (isWave && !changed && !body.full) { res.status(200).json({ ok: true, unchanged: true, message: "Няма промяна спрямо пратеното — нищо не е изпратено." }); return; }
+    // Кратко име на магазина (като в решетката): обектът, без „ул./бул./ж.к." и без пощенски код.
+    const shopLabel = sh => String(sh.rep || sh.client || "").replace(/[„“”"']/g, "").replace(/^\s*(ул\.|бул\.|ж\.к\.?|жк|пл\.)\s*/i, "").replace(/,?\s*\d{4}\s+/g, ", ").replace(/\s{2,}/g, " ").trim();
+    const allNames = Object.values(merged).map(shopLabel).filter(Boolean);
+    const newLabels = Object.keys(merged).filter(k => !oldShops[k]).map(k => shopLabel(merged[k])).filter(Boolean);
     const head = (who, what) => isWave
-      ? `${who} — ДОБАВКА №${waveN} за ${dd}</b> (общо ${shopsN} магазина)` + (newNames.length ? NL + "нови: " + TG.escHtml(newNames.join(", ")) : "") + NL + `<i>първото число е НОВОТО ${what}</i>`
-      : (body.full ? "🔄 ПОПРАВЕН план — важи този</b>" + NL + "<b>" : "") + `${who} — план за ${dd}</b> (${shopsN} магазина)`;
+      ? `${who} — ДОБАВКА №${waveN} за ${dd}</b> (общо ${shopsN} магазина)` + (newLabels.length ? NL + "➕ нови: " + TG.escHtml(newLabels.join(" · ")) : "") + NL + "всички: " + TG.escHtml(allNames.join(" · ")) + NL + `<i>първото число е НОВОТО ${what}</i>`
+      : (body.full ? "🔄 ПОПРАВЕН план — важи този</b>" + NL + "<b>" : "") + `${who} — план за ${dd}</b> (${shopsN} магазина)` + NL + "магазини: " + TG.escHtml(allNames.join(" · "));
     const text = "🍳 <b>" + head("Кухня (Йорданка)", "за правене") + NL + NL + kitchenBody;
     const expoText = "🚚 <b>" + head("Експедиция (Маша)", "за товарене") + NL + NL + expoBody;
     // Таблицата „какво вижда Barsy" — ЛИЧНО на собственика (не в групата): под партидата, запазено,
