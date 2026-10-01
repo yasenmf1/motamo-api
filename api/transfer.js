@@ -1491,8 +1491,14 @@ module.exports = async function handler(req, res) {
     let sh = null;
     try {
       const tok = [process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET].find(Boolean);
-      const rr = await fetch(`https://${(req.headers && req.headers.host) || "motamo-api.vercel.app"}/api/cex-plan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tok, action: "shortage", date: today }) });
-      sh = await rr.json();
+      // Винаги през публичния адрес: при cron `host` е адресът на самия деплой (зад защитата на
+      // Vercel → HTML вместо JSON → „Цехът не отговори" всяка сутрин). Един повторен опит при засечка.
+      for (let i = 0; i < 2 && !(sh && sh.ok); i++) {
+        try {
+          const rr = await fetch("https://motamo-api.vercel.app/api/cex-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tok, action: "shortage", date: today }) });
+          sh = await rr.json();
+        } catch (e) { sh = null; }
+      }
     } catch (e) { sh = null; }
     const shRaw = sh && sh.ok ? (sh.shortages || []).filter(x => x.cat === "Суровини") : [];
     const shZag = sh && sh.ok ? (sh.shortages || []).filter(x => x.cat === "Заготовки") : [];
