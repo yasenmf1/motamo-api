@@ -324,8 +324,8 @@ async function readStock(user, pass) {
   return rows;
 }
 // Карта {article_id: наличност} за всички артикули (една заявка).
-async function stockMap(user, pass) {
-  const r = await cexCall("Articles_getlistobject", { filters: { depot_id: CEX_DEPOT }, extra_properties: ["store_amount"] }, user, pass);
+async function stockMap(user, pass, depot) {
+  const r = await cexCall("Articles_getlistobject", { filters: { depot_id: depot || CEX_DEPOT }, extra_properties: ["store_amount"] }, user, pass);
   const L = r.data && (r.data.list || r.data) || {};
   const list = Array.isArray(L) ? L : Object.values(L);
   const m = {};
@@ -348,6 +348,48 @@ async function reservedOpen(user, pass) {
     } catch (e) {}
   });
   return { reserved, count: open.length };
+}
+
+// ★ S27 — ЕДИН ИЗТОЧНИК ЗА ПАРТИДИТЕ. Barsy сам казва по (артикул, партида, склад) колко е
+// „реално" (amount_real) и колко е „запазено" от отворени сметки (amount_reserved, с минус).
+// Сметка минава само ако реално + запазено ≥ бройката. Преди смятахме това по три заобиколни
+// пътя (справка за партиди + всички отворени сметки + сметки по дата) и всяка сутрин единият
+// се разминаваше с Barsy. Една заявка, ~1 сек. filters: {} = всички партиди; {lot_value} = една.
+async function lotRows(filters, user, pass) {
+  const auth = Buffer.from(`${user}:${pass}`).toString("base64");
+  return withTimeout(async (signal) => {
+    const rr = await fetch(`${CEX_API}/endpoints/json?bid=1`, { method: "POST",
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify({ Lots_GetListAvailability: { params: { bid: 1, article_id: 1, id: 1 }, filters: Object.assign({ has_amount_real_or_reserved: 1 }, filters || {}) } }), signal });
+    const d = await rr.json();
+    const rows = d && d.Lots_GetListAvailability;
+    if (!Array.isArray(rows)) throw new Error("партидите не се прочетоха от Barsy");
+    return rows.filter(x => Number(x.depot_id) === CEX_DEPOT);
+  });
+}
+// „L.dd.mm.yyyy" → „yyyy-mm-dd" (за сравнение по дата); друго → null.
+const lotIso = v => { const m = /^L\.(\d{2})\.(\d{2})\.(\d{4})/.exec(String(v || "")); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; };
+// ★ S27 — СЪСТОЯНИЕ НА ДЕНЯ (Supabase `cex_day_state`, ключ = датата на разноса/партидата):
+// grid = решетката на собственика (магазини, заявки, тикове); accounts = кои магазини вече имат
+// сметка за тази дата (пише го ③ на сървъра — не зависи от браузъра). Четенето ХВЪРЛЯ при
+// неуспех: без него не знаем кой магазин има сметка и бихме произвели двойно → по-добре стоп.
+const dayKey = s => String(s.client_id != null ? s.client_id : "") + "|" + String(s.person_id != null ? s.person_id : "") + "|" + String(s.client_id != null ? "" : (s.client || "") + "/" + (s.rep || ""));
+async function dayGet(forDate) {
+  return withTimeout(async (signal) => {
+    const r = await fetch(`${SB_URL}/rest/v1/cex_day_state?for_date=eq.${forDate}&limit=1`, { headers: sbHeaders(), signal });
+    if (!r.ok) throw new Error("записът на деня не се прочете (" + r.status + ")");
+    const d = await r.json();
+    return (d && d[0]) || { for_date: forDate, state: {}, updated_at: null };
+  });
+}
+async function daySave(forDate, state) {
+  return withTimeout(async (signal) => {
+    const now = new Date().toISOString();
+    const r = await fetch(`${SB_URL}/rest/v1/cex_day_state?on_conflict=for_date`, { method: "POST",
+      headers: { ...sbHeaders(), Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify([{ for_date: forDate, state, updated_at: now }]), signal });
+    return { ok: r.ok, status: r.status, updated_at: now };
+  });
 }
 async function seedShops(date, user, pass) {
   const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 900 }, user, pass);
@@ -1031,68 +1073,55 @@ const RAWCATS = new Set(["Суровини", "Консумативи", "Нека
 // показва точно каквото ①/② ще направят (преди панелът ползваше брутния склад sm, а ①/② —
 // свободното = склад − запазено от отворените сметки → разминаваха се).
 async function computeDayPlan(shopsIn, prodDate, lot, razosDate, withOthers, user, pass) {
-  const keyOf = s => String(s.client_id || "") + ":" + String(s.person_id || "");
-  const ticked = new Set(shopsIn.map(keyOf));
-  const others = [], tickedAccts = [];
-  if (withOthers) {
-    const seen = new Set();
-    // по партида L — ВСИЧКИ (и затворените: те също са изяли от брутното underLot);
-    // по разнос-дата — само ОТВОРЕНИТЕ (затворените там може да са от друга партида).
-    const add = (list, openOnly) => { for (const x of (list || [])) { if (!x || seen.has(x.account_id) || (openOnly && x.close_date)) continue; seen.add(x.account_id); (ticked.has(keyOf(x)) ? tickedAccts : others).push(x); } };
-    try { add((await seedByLot(prodDate, user, pass)).shops, false); } catch (e) {}
-    // ★ 30.09 — разнос-сметките се броят САМО когато разнос-датата = деня на производство.
-    // Иначе (правиш УТРЕШНА партида L.<утре>, а полето „Зареди" сочи ДНЕШНИЯ разнос) тук
-    // влизаха всички ДНЕШНИ отворени сметки → те са от ДРУГА партида, underLot(утре) не ги
-    // нетира → ② произвеждаше целия ден под утрешната партида (свръхпроизводство 6×) и ①
-    // подценяваше заготовките. Същодневното „добавяне на магазин" пак работи (razos=prod),
-    // а и seedByLot(prodDate) вече хваща сметките под същата партида.
-    if (/^\d{4}-\d{2}-\d{2}$/.test(razosDate || "") && razosDate === prodDate) { try { add((await seedRazos(razosDate, user, pass, true)).shops, true); } catch (e) {} }
+  // ★ S27 — ЕДНА ФОРМУЛА, същата като на Barsy (razosDate/withOthers вече не се ползват):
+  //   свободно под партидата = реално + запазено (запазеното е с минус; само за ТАЗИ партида)
+  //   ② произвежда = нуждата на тикнатите БЕЗ сметка − свободното  (+ дупката, ако свободното е < 0)
+  // Чуждите сметки (на нетикнати магазини и забравени от вчера) не се смятат отделно: тези от
+  // същата партида вече са в „запазено", а тези от друга партида не я засягат. Затворените сметки
+  // вече са извадени от „реално". Повторно ② → нищо (реалното е пораснало); добавен магазин → разликата.
+  // 1) кои тикнати вече имат сметка за тази дата (записва го ③) — те вече са в „запазено".
+  const day = await dayGet(prodDate);
+  const accs = Object.assign({}, (day.state && day.state.accounts) || {});
+  const known = shopsIn.filter(s => accs[dayKey(s)] && accs[dayKey(s)].account_id);
+  if (known.length) {
+    // анулирана в Barsy сметка не държи нищо → магазинът пак има нужда
+    const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 600 }, user, pass);
+    let all = list.data || []; if (!Array.isArray(all)) all = Object.values(all);
+    const byAcc = {}; for (const x of all) byAcc[String(x.account_id)] = x;
+    for (const sh of known) { const x = byAcc[String(accs[dayKey(sh)].account_id)]; if (x && String(x.is_anulate != null ? x.is_anulate : (x.anulate_flag != null ? x.anulate_flag : "0")) === "1") delete accs[dayKey(sh)]; }
   }
-  const { agg } = compute(shopsIn.concat(others));   // нуждата по партида: тикнатите + сметките на другите
-  const aggTicked = compute(shopsIn).agg;              // физическата нужда: само тикнатите
-  let sm = {};
-  try { sm = await stockMap(user, pass); } catch (e) { sm = {}; }
-  // ★ S23 — ЧЕТЕМ произведеното под партида L (БРУТНО, от справката за партиди). То е
-  // основата на идемпотентността на ② (виж soldBase по-долу). Преди беше игнорирано (underL={}),
-  // затова всяко повторно ② преправяше ЦЯЛАТА поръчка → свръхпроизводство (S21, 24.09).
-  let underLot = {}, underRel = false;
-  if (lot) { try { underLot = await producedUnderLot(lot, user, pass); underRel = underLot._ok !== false; } catch (e) { underLot = {}; underRel = false; } }
-  // ★ РЕАЛНО СВОБОДНО = склад − запазено от отворените сметки (Barsy не приспада при отворена
-  // сметка). Иначе компонентите (НАЧИ за сетовете) се подценяваха → последните сметки падаха.
-  let reserved = {};
-  try { const ro = await reservedOpen(user, pass); reserved = ro.reserved || {}; } catch (e) { reserved = {}; }
+  const needShops = shopsIn.filter(s => !accs[dayKey(s)]);
+  const agg = Object.assign({}, compute(needShops).agg);
+  // 2) склад (Основен) и партидите — и двете ЗАДЪЛЖИТЕЛНИ; при неуспех спираме, не гадаем.
+  const sm = await stockMap(user, pass);
+  const all = await lotRows({}, user, pass);
+  const realL = {}, resL = {}, freeL = {}, resAll = {}, staleMap = {};
+  const today = sofiaToday(), staleBefore = prodDate < today ? prodDate : today; // вечерта за утре: днешните още отворени НЕ са „стари"
+  for (const x of all) {
+    const id = String(x.article_id), real = Number(x.amount_real) || 0, rsv = Number(x.amount_reserved) || 0;
+    resAll[id] = (resAll[id] || 0) + rsv;
+    if (lot && String(x.lot_value) === String(lot)) { realL[id] = (realL[id] || 0) + real; resL[id] = (resL[id] || 0) + rsv; freeL[id] = (freeL[id] || 0) + real + rsv; }
+    else if (rsv < 0) { const iso = lotIso(x.lot_value); if (iso && iso < staleBefore) { const k = String(x.lot_value || "без партида"); staleMap[k] = (staleMap[k] || 0) + 1; } }
+  }
+  // свободно за КОМПОНЕНТИТЕ (НАЧИ за сетовете, заготовки, суровини) = склад − запазено по всички партиди
   const freeStock = {};
-  for (const k in sm) freeStock[k] = (Number(sm[k]) || 0) - (Number(reserved[k]) || 0);
-  for (const k in reserved) if (!(k in freeStock)) freeStock[k] = -(Number(reserved[k]) || 0);
-  // ★ S23 — СТРОГА ИДЕМПОТЕНТНОСТ на ②. Трети аргумент = вече произведеното под партида L
-  // (БРУТНО от справката): продаваме max(0, поръчка − вече произведено). Повторно ② → нищо;
-  // добавен магазин → само разликата; грешка 200-вместо-20 → второто ② не дублира.
-  // Не вадим „запазеното от отворени сметки" тук — справката брои ПРОИЗВОДСТВОТО, а нуждата
-  // е цялата поръчка на тикнатите; иначе след ③ същите магазини биха се произвели пак.
-  // Ако справката за партиди НЕ е надеждна (паднала заявка) → падаме на СВОБОДНОТО: по-малко
-  // производство (③ допроизвежда точно колкото липсва), но НИКОГА двойно.
-  const soldBase = underRel ? underLot : freeStock;
-  const planLot = dayPlan(agg, freeStock, soldBase); // по партида: продаваните нетно спрямо L; компонентите спрямо СВОБОДНОТО
-  // ★ S24 — ФИЗИЧЕСКА проверка. Брутното под L не вижда, че сетовете са изяли НАЧИ (Barsy ги
-  // тегли от по-стара наличност, не от L) → 26 ORO се броят два пъти. Затова смятаме и спрямо
-  // РЕАЛНО СВОБОДНОТО в цеха (склад − запазено от отворени сметки), като връщаме запазеното от
-  // собствените сметки на тикнатите (иначе повторно тикнат магазин със сметка би се удвоил).
-  // Произвеждаме ПО-СТРОГОТО от двете → идемпотентно (и двете мерки растат след производство).
-  const physBase = Object.assign({}, freeStock);
-  const ownRes = {};
-  for (const x of tickedAccts) for (const [n, q] of Object.entries(x.order || {})) { const a = resolve(n); if (a) { physBase[String(a.id)] = (Number(physBase[String(a.id)]) || 0) + (Number(q) || 0); ownRes[String(a.id)] = (Number(ownRes[String(a.id)]) || 0) + (Number(q) || 0); } }
-  // ★ S26 — КОРЕН на „последният магазин пада". Сметките теглят СОЛД артикулите (ролки/сетове)
-  // ТОЧНО от партида L, не от общото/без-партида. Затова физическата проверка нетира продаваните
-  // спрямо СВОБОДНОТО ПОД ПАРТИДАТА = произведено под L − запазено от ЧУЖДИ отворени сметки (те
-  // пак теглят от L) + върнато запазеното от СОБСТВЕНИТЕ (иначе повторно ② удвоява). Преди
-  // ползвахме общото свободно (physBase) → без-партида/чужда наличност заблуждаваше ② да прави 0
-  // за последния магазин, а 30-те под L бяха вече запазени → сметката падаше „няма в партида L".
-  const freeUnderLot = {};
-  if (underRel) { const ks = new Set([...Object.keys(underLot || {}), ...Object.keys(reserved || {})]); for (const k of ks) { if (k === "_ok") continue; freeUnderLot[k] = (Number(underLot[k]) || 0) - (Number(reserved[k]) || 0) + (Number(ownRes[k]) || 0); } } // ★ S27: БЕЗ клампване — минусът е реална дупка (виж sellLine)
-  const planPhys = dayPlan(aggTicked, physBase, underRel ? freeUnderLot : physBase);
-  const maxMerge = (x, y) => { const o = Object.assign({}, x); for (const k in y) o[k] = Math.max(o[k] || 0, y[k] || 0); return o; };
-  const plan = { produce: maxMerge(planLot.produce, planPhys.produce), loadRaw: maxMerge(planLot.loadRaw, planPhys.loadRaw) };
-  return { plan, sm, underLot, underRel, freeStock, others };
+  for (const k in sm) freeStock[k] = (Number(sm[k]) || 0) + (resAll[k] || 0);
+  for (const k in resAll) if (!(k in freeStock)) freeStock[k] = resAll[k];
+  const plan = dayPlan(agg, freeStock, lot ? freeL : {});
+  // 3) таблицата „какво вижда Barsy" — за собственика (Telegram) и за проверка
+  const need = {}; for (const [n, q] of Object.entries(agg)) { const art = resolve(n); if (art && (art.is_menu || art.is_set)) need[String(art.id)] = (need[String(art.id)] || 0) + (Number(q) || 0); }
+  const ids = new Set([...Object.keys(need), ...Object.keys(realL)]);
+  const table = [];
+  for (const id of ids) { const art = byId(id); if (!art || !(art.is_menu || art.is_set)) continue;
+    table.push({ id: Number(id), name: art.name, is_set: !!art.is_set, real: round(realL[id] || 0), reserved: round(-(resL[id] || 0)), free: round(freeL[id] || 0), need: round(need[id] || 0), produce: round(plan.produce[id] || 0) }); }
+  table.sort((x, y) => (y.is_set - x.is_set) || x.name.localeCompare(y.name));
+  // 4) липсваща суровина, която я има в склад „Точка" (заредена/прехвърлена там по грешка)
+  const inPoint = {};
+  if (Object.keys(plan.loadRaw).length) {
+    try { const sm2 = await stockMap(user, pass, 2); for (const id of Object.keys(plan.loadRaw)) { const q = Number(sm2[String(id)]) || 0; if (q > 0) inPoint[id] = round(q); } } catch (e) {}
+  }
+  const stale = Object.entries(staleMap).map(([l, n]) => ({ lot: l, articles: n }));
+  return { plan, sm, underLot: realL, underRel: true, freeStock, others: [], table, stale, inPoint, withAccount: shopsIn.length - needShops.length, needShops: needShops.length };
 }
 function dayPlan(agg, total, underL) {
   const aT = {}; for (const k in (total || {})) aT[k] = Number(total[k]) || 0;
@@ -1129,6 +1158,9 @@ function dayPlan(agg, total, underL) {
     const art = resolve(name), q = Number(qty) || 0; if (!art || q <= 0) continue;
     if (art.is_menu || art.is_set) sellLine(art, q); else consumeTotal(art, q);
   }
+  // ★ S27 — остана ли отрицателно свободно под партидата (отворени сметки държат повече от
+  // наличното), произвеждаме дупката: иначе тези сметки не могат да се приключат.
+  for (const id in aL) { if (aL[id] < -1e-9) { const art = byId(id); if (art && (art.is_menu || art.is_set)) sellLine(art, 0); } }
   return { produce, loadRaw };
 }
 const round = n => Math.round(n * 1000) / 1000;
@@ -1511,7 +1543,7 @@ h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.
 <span class="grp"><label>Зареди</label><input id="date" type="date" lang="bg-BG"><b class="dlab" id="dlab"></b><button class="alt" onclick="loadRazos()" title="Зарежда РАЗНОСА за деня = отворените сметки (направени в навечерието/сутринта), без вчерашните затворени. За ③ Стокова.">Отворени сметки</button><button class="alt" onclick="loadByLot()" title="Зарежда сметките от партида L.[деня от Зареди] (±2 дни), през реалните движения. За референтен минал ден или преди ③ Стокова.">↻ По партида</button></span>
 <span class="grp"><button class="alt" onclick="loadSug()" title="Средно изпратено в същия ден от седмицата (последните 4) минус % връщане. Датата е от „Партида". Не пише в Barsy.">Предложение</button><button class="alt" onclick="fillSug()" title="Слага предложението в полетата на ТИКНАТИТЕ магазини">Попълни</button></span>
 <span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="openPicker()" title="Добави магазин, който днешният разнос не е заредил">+ Магазин</button><button class="alt" onclick="sendTg()" title="Праща плана от последното Изчисли (датата в Партида) в Telegram групата на цеха. Пак натиснато = само разликата.">📤 Прати на цеха</button></span>
-<span class="grp"><label>Партида</label><input id="pdate" type="date" lang="bg-BG" title="Партида L.<тази дата>, срок +3 дни"><b class="dlab" id="plab"></b></span>
+<span class="grp"><label>Партида</label><input id="pdate" type="date" lang="bg-BG" title="Партида L.<тази дата>, срок +3 дни"><b class="dlab" id="plab"></b><button class="alt" onclick="openDay()" title="Отваря записаното за датата в „Партида" (магазини и заявки) — от всяко устройство.">📂 Отвори деня</button><b class="dlab" id="daysav"></b></span>
 <span class="grp"><button class="prod" onclick="doZagotovki()">① Заготовки</button><button class="prod" onclick="doArticles()">② Артикули</button><button class="acc" onclick="doAccounts()">③ Генерирай сметки</button><button class="acc" onclick="doStokova()">④ Генерирай стокова</button></span></header>
 <div class="wrap"><div id="msg" class="msg"></div><div class="scroll"><table id="grid"></table></div><div id="planbox"></div></div>
 <div id="picker" class="pickwrap" style="display:none"><div class="pickbox">
@@ -1554,7 +1586,7 @@ function collect(){document.querySelectorAll('#grid input[data-n]').forEach(func
 function selShops(){collect();var out=[];document.querySelectorAll('#grid .selbox').forEach(function(cb){if(cb.checked){var i=+cb.getAttribute('data-i');if(shops[i])out.push(shops[i])}});return out}
 function calc(){var sel=selShops();if(!sel.length){msg('Избери поне един магазин (тикчето отляво).','err');return}msg('Смятам и записвам за кухнята…');var kd=$('pdate').value||$('date').value;api({shops:sel,publish_kitchen:true,kitchen_date:kd}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}renderPlan(j);var sv=j.kitchen_saved?(' Записано за кухнята ('+j.kitchen_saved+') — момичетата го виждат на екрана.'):(j.kitchen_saved===false?' (записът за кухнята не мина)':'');msg('Планът е готов за '+sel.length+' магазина.'+sv,'ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function tbl(t,o){var ks=Object.keys(o||{});if(!ks.length)return '';var h='<table><tr><th class="shop">'+t+'</th><th>кол.</th></tr>';ks.forEach(function(k){h+='<tr><td class="shop">'+esc(k)+'</td><td class="q">'+o[k]+'</td></tr>'});return h+'</table>'}
-function preBox(pf){if(!pf)return '';if(pf.error)return '<div class="prewarn" style="background:#fff8e1;border:1px solid #f0c36d;color:#7a5b00;padding:8px 10px;border-radius:8px;margin-bottom:10px">⚠ Не можах да прочета склада за проверка ('+esc(pf.message||'')+'). Плана по-долу е наред, но провери суровините ръчно.</div>';var lr=pf.load_raw||{},lk=Object.keys(lr);var zg=pf.produce_zagotovki||{};var h='';if(lk.length){h+='<div class="prebad" style="background:#fdecea;border:1px solid #e0a0a0;color:#8a1c1c;padding:10px 12px;border-radius:8px;margin-bottom:10px"><b>⚠ ЗАРЕДИ ПЪРВО (суровини — не могат да се произведат):</b><table style="margin-top:6px">'+lk.map(function(k){return '<tr><td class="shop">'+esc(k)+'</td><td class="q">'+lr[k]+'</td></tr>'}).join('')+'</table><div style="margin-top:4px;font-size:12px">Зареди тези, инак производството ще гръмне насред процеса.</div></div>'}else{h+='<div class="preok" style="background:#e9f7ec;border:1px solid #a5d6b0;color:#1c6b2e;padding:8px 12px;border-radius:8px;margin-bottom:10px">✓ Няма суровини за зареждане — всички стигат.</div>'}var zk=Object.keys(zg);h+=tbl('Произведи заготовки ПЪРВО',zg);if(zk.length)h+='<div style="background:#eef4ff;border:1px solid #b9cdf0;color:#1f3f77;padding:8px 12px;border-radius:8px;margin-top:6px;font-size:13px">Кухнята ги прави физически. После натисни <b>„① Заготовки"</b> — бутонът само ги записва в Barsy и изписва суровините.</div>';return h?('<div style="margin-bottom:6px">'+h+'</div>'):''}
+function preBox(pf){if(!pf)return '';if(pf.error)return '<div class="prewarn" style="background:#fff8e1;border:1px solid #f0c36d;color:#7a5b00;padding:8px 10px;border-radius:8px;margin-bottom:10px">⚠ Не можах да прочета склада за проверка ('+esc(pf.message||'')+'). Плана по-долу е наред, но провери суровините ръчно.</div>';var lr=pf.load_raw||{},lk=Object.keys(lr);var zg=pf.produce_zagotovki||{};var h='';var ip=pf.in_point||{};if(pf.stale&&pf.stale.length){h+='<div style="background:#fff8e1;border:1px solid #f0c36d;color:#7a5b00;padding:8px 12px;border-radius:8px;margin-bottom:10px">⚠ Имаш отворени сметки от СТАРА партида: <b>'+pf.stale.map(function(x){return esc(x.lot)}).join(', ')+'</b>. Не пречат на днешната, но ги затвори в Barsy.</div>'}if(pf.with_account){h+='<div style="background:#eef4ff;border:1px solid #b9cdf0;color:#1f3f77;padding:8px 12px;border-radius:8px;margin-bottom:10px">'+pf.with_account+' от тикнатите магазини вече имат сметка за тази дата — не се броят втори път.</div>'}if(lk.length){h+='<div class="prebad" style="background:#fdecea;border:1px solid #e0a0a0;color:#8a1c1c;padding:10px 12px;border-radius:8px;margin-bottom:10px"><b>⚠ ЗАРЕДИ ПЪРВО (суровини — не могат да се произведат):</b><table style="margin-top:6px">'+lk.map(function(k){return '<tr><td class="shop">'+esc(k)+(ip[k]?' <small>(в склад „Точка" има '+ip[k]+' — прехвърли го в Основен)</small>':'')+'</td><td class="q">'+lr[k]+'</td></tr>'}).join('')+'</table><div style="margin-top:4px;font-size:12px">Зареди тези, инак производството ще гръмне насред процеса.</div></div>'}else{h+='<div class="preok" style="background:#e9f7ec;border:1px solid #a5d6b0;color:#1c6b2e;padding:8px 12px;border-radius:8px;margin-bottom:10px">✓ Няма суровини за зареждане — всички стигат.</div>'}var zk=Object.keys(zg);h+=tbl('Произведи заготовки ПЪРВО',zg);if(zk.length)h+='<div style="background:#eef4ff;border:1px solid #b9cdf0;color:#1f3f77;padding:8px 12px;border-radius:8px;margin-top:6px;font-size:13px">Кухнята ги прави физически. После натисни <b>„① Заготовки"</b> — бутонът само ги записва в Barsy и изписва суровините.</div>';return h?('<div style="margin-bottom:6px">'+h+'</div>'):''}
 function renderPlan(j){$('planbox').innerHTML=preBox(j.preflight)+'<h2>За производство</h2><div class="plan">'+tbl('Сетове',j.produce_sets)+tbl('Ролки / поке',j.produce_rolls)+tbl('Заготовки',j.produce_zagotovki)+'</div>'}
 function doZagotovki(){if(!shops.length){msg('Първо натисни „Зареди".','err');return}var sel=selShops();if(!sel.length){msg('Избери поне един магазин.','err');return}var pd=$('pdate').value;if(!confirm('① Ще произведа ЗАГОТОВКИТЕ (майонези, сосове, ориз…) за '+sel.length+' магазина, дата '+pd+'.\\nПродължавам?'))return;msg('Правя заготовките…');api({action:'produce_plan',only:'zag',shops:sel,prod_date:pd}).then(function(j){if(j.error&&!j.zagotovki){msg('Грешка: '+(j.error||j.message||''),'err');return}var z=j.zagotovki||{};var zp=(z.produced||[]).length,zs=(z.skipped||[]).length,zf=z.failed||[];var lr=j.load_raw||{},lrk=Object.keys(lr);var lrTxt=lrk.length?(' · ⚠️ ЗАРЕДИ суровини: '+lrk.map(function(k){return k+' '+lr[k]}).join(', ')):'';var zfTxt=zf.length?(' · ⚠️ НЕ излязоха: '+zf.map(function(f){return f.name+(f.reason?(' — '+f.reason):'')}).join(' | ')):'';var bad=zf.length||lrk.length;msg((bad?'⚠️ ':'✓ ')+'Заготовки: '+zp+' произв.'+(zs?(' ('+zs+' ръчни, без рецепта)'):'')+zfTxt+lrTxt+(bad?'':'. Сега натисни „② Артикули".'),bad?'err':'ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function detail(t){var d=document.getElementById('detailline');if(!d){d=document.createElement('div');d.id='detailline';d.style.cssText='margin:6px 0 0;font-size:13px;color:#9aa3b2;line-height:1.4';var m=document.getElementById('msg');if(m&&m.parentNode)m.parentNode.insertBefore(d,m.nextSibling)}d.textContent=t}
@@ -1579,7 +1611,10 @@ function addShop(idx){var o=OBJECTS[idx];if(!o)return;if(inShops(o)){msg('„'+p
 function renderCreated(cr){var h='<h2>Създадени сметки</h2><table><tr><th class="shop">Магазин</th><th>сметка №</th><th>артикули</th><th>статус</th></tr>';cr.forEach(function(c){var full=(c.client||'')+(c.rep?(' · '+c.rep):'');var tn=(c.topped_names&&c.topped_names.length)?(' [допроизв.: '+c.topped_names.join(', ')+']'):(c.topped?(' [допроизв. '+c.topped+']'):'');var st=c.ok?('✓'+(c.topped?tn:'')):('<span style="color:#c00" title="'+esc(c.error||'')+'">'+esc((c.error||c.skipped||'грешка'))+esc(tn)+'</span>');h+='<tr><td class="shop" title="'+esc(full)+'">'+esc(shortName(c.client,c.rep))+'</td><td>'+(c.account_id||'—')+'</td><td>'+(c.items||0)+'</td><td>'+st+'</td></tr>'});$('planbox').innerHTML=h+'</table>'}
 // ── Авто-запис на попълненото (localStorage) — рефреш вече не трие решетката ──
 var RESTORING=false;
-function saveGrid(){if(RESTORING)return;try{collect();if(!shops.length){localStorage.removeItem('cex_grid');return}var ticks=[];document.querySelectorAll('#grid .selbox').forEach(function(cb){ticks[+cb.getAttribute('data-i')]=cb.checked});localStorage.setItem('cex_grid',JSON.stringify({v:1,date:$('date').value,pdate:$('pdate').value,shops:shops,ticks:ticks,ts:Date.now()}))}catch(e){}}
+function saveGrid(){if(RESTORING)return;try{collect();if(!shops.length){localStorage.removeItem('cex_grid');return}var ticks=[];document.querySelectorAll('#grid .selbox').forEach(function(cb){ticks[+cb.getAttribute('data-i')]=cb.checked});localStorage.setItem('cex_grid',JSON.stringify({v:1,date:$('date').value,pdate:$('pdate').value,shops:shops,ticks:ticks,ts:Date.now()}));queueDay()}catch(e){}}
+var DAYT=null;function queueDay(){clearTimeout(DAYT);DAYT=setTimeout(saveDay,2500)}
+function saveDay(){var pd=$('pdate').value;if(RESTORING||!pd||!shops.length||!$('tok').value)return;var ticks=[];document.querySelectorAll('#grid .selbox').forEach(function(cb){ticks[+cb.getAttribute('data-i')]=cb.checked});api({action:'save_day',date:pd,grid:{v:1,date:$('date').value,pdate:pd,shops:shops,ticks:ticks,ts:Date.now()}}).then(function(j){$('daysav').textContent=(j&&j.ok)?('💾 записано '+new Date().toLocaleTimeString('bg-BG',{hour:'2-digit',minute:'2-digit'})):'⚠ не е записано'}).catch(function(){$('daysav').textContent='⚠ не е записано'})}
+function openDay(){var pd=$('pdate').value;if(!pd){msg('Избери дата в „Партида".','err');return}msg('Отварям записа за '+pd+'…');api({action:'load_day',date:pd}).then(function(j){if(!j.ok){msg('Грешка: '+(j.message||j.error||''),'err');return}var g=j.grid;if(!g||!g.shops||!g.shops.length){msg('Няма запис за '+pd+'.','err');return}RESTORING=true;shops=g.shops;if(g.date)$('date').value=g.date;updLabs();renderGrid();if(g.ticks)document.querySelectorAll('#grid .selbox').forEach(function(cb){var i=+cb.getAttribute('data-i');if(g.ticks[i]===false)cb.checked=false;else if(g.ticks[i]===true)cb.checked=true});syncRows();RESTORING=false;LASTACC=shops.filter(function(x){return x.account_id}).map(function(x){return x.account_id});var n=Object.keys(j.accounts||{}).length;msg('📂 Отворен записът за '+pd+': '+shops.length+' магазина, '+n+' със сметка.','ok')}).catch(function(e){RESTORING=false;msg('Мрежова грешка: '+e,'err')})}
 function restoreGrid(){try{var raw=localStorage.getItem('cex_grid');if(!raw)return;var st=JSON.parse(raw);if(!st||!Array.isArray(st.shops)||!st.shops.length)return;RESTORING=true;shops=st.shops;if(st.date)$('date').value=st.date;if(st.pdate&&st.pdate>=new Date().toISOString().slice(0,10))$('pdate').value=st.pdate;updLabs();renderGrid();if(Array.isArray(st.ticks))document.querySelectorAll('#grid .selbox').forEach(function(cb){var i=+cb.getAttribute('data-i');if(st.ticks[i]===true)cb.checked=true;else if(st.ticks[i]===false)cb.checked=false});syncRows();LASTACC=shops.filter(function(s){return s.account_id}).map(function(s){return s.account_id});RESTORING=false;var d=st.ts?new Date(st.ts):null;msg('↩ Върнах попълненото'+(d?(' от '+d.toLocaleString('bg-BG')):'')+'.','ok')}catch(e){RESTORING=false}}
 $('grid').addEventListener('input',saveGrid);$('grid').addEventListener('change',saveGrid);
 $('date').addEventListener('change',saveGrid);$('pdate').addEventListener('change',saveGrid);
@@ -2259,60 +2294,66 @@ module.exports = async function handler(req, res) {
     const dd = date.split("-").reverse().slice(0, 2).join(".");
     const fmtQ = q => String(Math.round(q * 1000) / 1000).replace(".", ",");
     const shopsN = Object.keys(merged).length;
-    const fmtG = (groups) => groups.map(([g, o]) => {
-      const rows = Object.entries(o).filter(([, q]) => Number(q));
-      return rows.length ? `<b>${g}</b>` + NL + rows.map(([n, q]) => `• ${TG.escHtml(n)} — <b>${fmtQ(Number(q))}</b>`).join(NL) : "";
-    }).filter(Boolean).join(NL + NL);
-    const listing = () => fmtG(now.groups);
-    let text;
-    if (!oldCur) {
-      text = (body.full ? "🔄 <b>ПОПРАВЕН план</b> — важи този" + NL : "") + `🍳 <b>За кухнята (Йорданка) — ${dd}</b> (${shopsN} магазина)` + NL + `<i>какво да се произведе (пълно, вкл. хачи за сетовете)</i>` + NL + NL + listing();
-    } else {
-      const newKeys = Object.keys(merged).filter(k => !oldShops[k]);
-      if (newKeys.length) {
-        // ★ ВЪЛНИ: кухнята вече е правила ПРАТЕНОТО; показваме ➕ ДОБАВЕТЕ СЕГА (само новите
-        // магазини) + ✅ ВЕЧЕ ПРАТЕНО (за справка) + 📋 ОБЩО (пратени + добавени = тотал).
-        const newMap = {}; for (const k of newKeys) newMap[k] = merged[k];
-        const newNames = newKeys.map(k => merged[k].rep || merged[k].client).filter(Boolean);
-        text = `🍳 <b>За кухнята (Йорданка) — ${dd}</b>` + (newNames.length ? ` · ➕ ${TG.escHtml(newNames.join(", "))}` : "")
-          + NL + NL + `<b>➕ ДОБАВЕТЕ СЕГА</b> <i>(новите магазини)</i>:` + NL + fmtG(flat(newMap).groups)
-          + NL + NL + `<b>✅ ВЕЧЕ ПРАТЕНО</b> <i>(правено):</i>` + NL + fmtG(flat(oldShops).groups)
-          + NL + NL + "━━━━━━━━━━" + NL + `📋 <b>ОБЩО за ${dd}</b> (${shopsN} магазина)` + NL + NL + listing();
-      } else {
-        // Само количествена промяна по същите магазини → разлика +/−.
-        const add = [], less = [];
-        for (const k of new Set([...Object.keys(now.cur), ...Object.keys(oldCur)])) {
-          const d = (now.cur[k] || 0) - (oldCur[k] || 0);
-          if (Math.abs(d) < 1e-9) continue;
-          const n = k.split("|")[1];
-          (d > 0 ? add : less).push(`• ${TG.escHtml(n)} — <b>${d > 0 ? "+" : "−"}${fmtQ(Math.abs(d))}</b> → общо ${fmtQ(now.cur[k] || 0)}`);
-        }
-        if (!add.length && !less.length) { res.status(200).json({ ok: true, unchanged: true, message: "Няма промяна спрямо пратеното — нищо не е изпратено." }); return; }
-        text = `🍳 <b>За кухнята (Йорданка) — ПРОМЯНА за ${dd}</b>`
-          + (add.length ? NL + NL + "<b>➕ Направете още:</b>" + NL + add.join(NL) : "")
-          + (less.length ? NL + NL + "<b>➖ По-малко:</b>" + NL + less.join(NL) : "")
-          + NL + NL + "━━━━━━━━━━" + NL + `📋 <b>ОБЩО за ${dd}</b> (${shopsN} магазина)` + NL + NL + listing();
+    // ★ S27 — ЕДИН СПИСЪК, ТРИ ЧИСЛА НА РЕД (ново · беше · общо). Преди бяха три отделни списъка
+    // един под друг (добавете / вече пратено / общо) и кухнята четеше грешния. Първото пращане за
+    // деня е обикновен списък; всяко следващо е номерирана ДОБАВКА.
+    const soldG = shopMap => { const sets = {}, rest = {};
+      for (const sh of Object.values(shopMap)) for (const [n, q] of Object.entries(sh.order || {})) { if (!Number(q)) continue; const art = resolve(n); const t = (art && art.is_set) ? sets : rest; t[n] = (t[n] || 0) + Number(q); }
+      return [["🍱 Сетове", sortObj(sets, 2)], ["🍣 Ролки / поке", sortObj(rest, 2)]]; };
+    const isWave = !!(pay && pay.shops && Object.keys(pay.shops).length);
+    const waveN = isWave ? (Number(pay.n) || 1) + 1 : 1;
+    let changed = false;
+    const lines = (nowG, oldG) => {
+      const oldM = {}; for (const [g, o] of (oldG || [])) oldM[g] = o || {};
+      return nowG.map(([g, o]) => {
+        const names = [...new Set([...Object.keys(o || {}), ...Object.keys(oldM[g] || {})])].sort();
+        const rows = names.map(n => {
+          const tot = Number((o || {})[n]) || 0, was = Number((oldM[g] || {})[n]) || 0, d = Math.round((tot - was) * 1000) / 1000;
+          if (!isWave) return tot ? { k: 0, t: `• ${TG.escHtml(n)} — <b>${fmtQ(tot)}</b>` } : null;
+          if (Math.abs(d) > 1e-9) changed = true;
+          if (!tot && !was) return null;
+          if (d > 1e-9) return { k: 0, t: `• ${TG.escHtml(n)}: <b>ново ${fmtQ(d)}</b> · беше ${fmtQ(was)} · общо ${fmtQ(tot)}` };
+          if (d < -1e-9) return { k: 0, t: `• ${TG.escHtml(n)}: <b>по-малко ${fmtQ(-d)}</b> · беше ${fmtQ(was)} · общо ${fmtQ(tot)}` };
+          return { k: 1, t: `• ${TG.escHtml(n)}: без промяна · общо ${fmtQ(tot)}` };
+        }).filter(Boolean).sort((x, y) => x.k - y.k).map(x => x.t); // променените — първи
+        return rows.length ? `<b>${g}</b>` + NL + rows.join(NL) : "";
+      }).filter(Boolean).join(NL + NL);
+    };
+    const newNames = Object.keys(merged).filter(k => !oldShops[k]).map(k => merged[k].rep || merged[k].client).filter(Boolean);
+    const kitchenBody = lines(now.groups, isWave ? flat(oldShops).groups : null);
+    const expoBody = lines(soldG(merged), isWave ? soldG(oldShops) : null);
+    if (isWave && !changed && !body.full) { res.status(200).json({ ok: true, unchanged: true, message: "Няма промяна спрямо пратеното — нищо не е изпратено." }); return; }
+    const head = (who, what) => isWave
+      ? `${who} — ДОБАВКА №${waveN} за ${dd}</b> (общо ${shopsN} магазина)` + (newNames.length ? NL + "нови: " + TG.escHtml(newNames.join(", ")) : "") + NL + `<i>първото число е НОВОТО ${what}</i>`
+      : (body.full ? "🔄 ПОПРАВЕН план — важи този</b>" + NL + "<b>" : "") + `${who} — план за ${dd}</b> (${shopsN} магазина)`;
+    const text = "🍳 <b>" + head("Кухня (Йорданка)", "за правене") + NL + NL + kitchenBody;
+    const expoText = "🚚 <b>" + head("Експедиция (Маша)", "за товарене") + NL + NL + expoBody;
+    // Таблицата „какво вижда Barsy" — ЛИЧНО на собственика (не в групата): под партидата, запазено,
+    // свободно, трябва, ще произведа. Смята се за магазините от последното „Изчисли".
+    let ownerText = null;
+    try {
+      const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+      if (user && pass) {
+        const sh = (Array.isArray(snap.shops) ? snap.shops : []).map(x => ({ order: x.order || {}, client_id: x.client_id, person_id: x.person_id, client: x.client, rep: x.rep }));
+        const cdp = await computeDayPlan(sh, date, lotFor(date).lot, null, false, user, pass);
+        const pad = (v, n) => { const t = String(v); return t.length >= n ? t : " ".repeat(n - t.length) + t; };
+        const rowsT = cdp.table.map(r => (r.name.replace("НACHI", "H.").replace("Poke ", "P.").replace("CET ", "C.") + "          ").slice(0, 9) + pad(fmtQ(r.real), 6) + pad(fmtQ(r.reserved), 6) + pad(fmtQ(r.free), 6) + pad(fmtQ(r.need), 6) + pad(fmtQ(r.produce), 6));
+        const raw = Object.entries(cdp.plan.loadRaw).map(([id, q]) => ((byId(id) || {}).name || id) + " " + fmtQ(q) + (cdp.inPoint[id] ? " (в склад Точка има " + fmtQ(cdp.inPoint[id]) + ")" : ""));
+        ownerText = `📊 <b>Партида ${TG.escHtml(lotFor(date).lot)}</b> — какво вижда Barsy` + NL
+          + `магазини в „Изчисли": ${sh.length} (със сметка: ${cdp.withAccount})` + NL
+          + "<pre>" + TG.escHtml("артикул   под п. запаз  своб трябва правя" + NL + rowsT.join(NL)) + "</pre>"
+          + (raw.length ? NL + "⚠️ <b>Липсват суровини:</b> " + TG.escHtml(raw.join("; ")) : NL + "✓ Суровините стигат.")
+          + (cdp.stale.length ? NL + "⚠️ Отворени сметки от стара партида: " + TG.escHtml(cdp.stale.map(x => x.lot).join(", ")) : "");
       }
-    }
-    // ── Съобщение 2: ЕКСПЕДИЦИЯ (Маша) — ОБЩО за товарене: ПОРЪЧАНИТЕ бройки
-    // (сетове като сетове; хачи/поке само ПРОДАДЕНОТО — НЕ произведеното, там влизат
-    //  и хачи за сетовете). Тотал по всички магазини; детайлът е по стоковите.
-    const sold = {};
-    for (const s of Object.values(merged)) for (const [n, q] of Object.entries(s.order || {})) if (Number(q)) sold[n] = (sold[n] || 0) + Number(q);
-    const eSets = {}, eRest = {};
-    for (const [n, q] of Object.entries(sold)) { const a = resolve(n); if (a && a.is_set) eSets[n] = q; else eRest[n] = q; }
-    const eGroups = [["🍱 Сетове", sortObj(eSets, 2)], ["🍣 Ролки / поке", sortObj(eRest, 2)]];
-    const eListing = eGroups.map(([g, o]) => {
-      const rows = Object.entries(o).filter(([, q]) => Number(q));
-      return rows.length ? `<b>${g}</b>` + NL + rows.map(([n, q]) => `• ${TG.escHtml(n)} — <b>${fmtQ(Number(q))}</b>`).join(NL) : "";
-    }).filter(Boolean).join(NL + NL);
-    const expoText = `🚚 <b>Експедиция (Маша) — ОБЩО за ${dd}</b> (${shopsN} магазина)` + NL + `<i>за товарене; детайлът по магазини е в стоковите</i>` + NL + NL + eListing;
-    if (body.dry) { res.status(200).json({ ok: true, dry: true, kind: oldCur ? "addition" : "full", text, expo_text: expoText }); return; }
+    } catch (e) { ownerText = "📊 Таблицата за партидата не се прочете: " + TG.escHtml(String(e && e.message).slice(0, 120)); }
+    if (body.dry) { res.status(200).json({ ok: true, dry: true, kind: isWave ? "addition" : "full", wave: waveN, text, expo_text: expoText, owner_text: ownerText }); return; }
     const r = await TG.tgSend(text, null, date);
     if (!r.ok) { res.status(502).json({ ok: false, error: "telegram", message: r.error }); return; }
     const r2 = await TG.tgSend(expoText, null, date).catch(() => ({ ok: false }));
-    await TG.sentSave("plan", date, { shops: merged }).catch(() => {});
-    res.status(200).json({ ok: true, kind: oldCur ? "addition" : "full", shops: shopsN, expo_ok: !!(r2 && r2.ok) });
+    let r3 = { ok: false };
+    if (ownerText && TG.OWNER_CHAT_ID) r3 = await TG.tgSend(ownerText, String(TG.OWNER_CHAT_ID), date).catch(() => ({ ok: false }));
+    await TG.sentSave("plan", date, { shops: merged, n: waveN }).catch(() => {});
+    res.status(200).json({ ok: true, kind: isWave ? "addition" : "full", wave: waveN, shops: shopsN, expo_ok: !!(r2 && r2.ok), owner_ok: !!(r3 && r3.ok) });
     return;
   }
   // ★ S25 — кои обекти имат СТОКОВА за деня (за маршрута на шофьора). Досинхронизира кеша на
@@ -2405,7 +2446,28 @@ module.exports = async function handler(req, res) {
     // lot: изрична партида от клиента, или „" за без партида, иначе L.<дата>.
     const lotOverride = (typeof body.lot === "string") ? body.lot : undefined;
     const created = await createAccounts(shopsIn, date, user, pass, lotOverride);
-    res.status(200).json({ ok: true, created });
+    // ★ S27 — помним на СЪРВЪРА кой магазин вече има сметка за тази дата: ② не го брои втори
+    // път (сметката му вече е в „запазено"). Не зависи от браузъра/устройството.
+    let day_saved = false;
+    try {
+      const day = await dayGet(date); const st = Object.assign({}, day.state || {}); const accs = Object.assign({}, st.accounts || {});
+      shopsIn.forEach((sh, i) => { const c = created[i]; if (c && c.ok) accs[dayKey(sh)] = { account_id: c.account_id || (accs[dayKey(sh)] && accs[dayKey(sh)].account_id) || null, existed: c.existed || undefined, at: new Date().toISOString() }; });
+      st.accounts = accs; day_saved = (await daySave(date, st)).ok;
+    } catch (e) { day_saved = false; }
+    res.status(200).json({ ok: true, created, day_saved });
+    return;
+  }
+  // ★ S27 — запис/отваряне на деня (решетката на собственика) в Supabase. Не пипа Barsy.
+  if (body.action === "save_day" || body.action === "load_day") {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : null;
+    if (!date) { res.status(400).json({ ok: false, error: "no_date" }); return; }
+    try {
+      const day = await dayGet(date);
+      if (body.action === "load_day") { res.status(200).json({ ok: true, date, grid: (day.state && day.state.grid) || null, accounts: (day.state && day.state.accounts) || {}, updated_at: day.updated_at }); return; }
+      const st = Object.assign({}, day.state || {}); st.grid = body.grid || null;
+      const sv = await daySave(date, st);
+      res.status(200).json({ ok: sv.ok, date, updated_at: sv.updated_at });
+    } catch (e) { res.status(200).json({ ok: false, error: "day_state", message: String(e && e.message).slice(0, 160) }); }
     return;
   }
 
@@ -2436,7 +2498,7 @@ module.exports = async function handler(req, res) {
   if (body.action === "produce_plan") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
-    const shopsIn = Array.isArray(body.shops) ? body.shops.map(s => ({ order: s.order || {}, client_id: s.client_id, person_id: s.person_id })) : [];
+    const shopsIn = Array.isArray(body.shops) ? body.shops.map(s => ({ order: s.order || {}, client_id: s.client_id, person_id: s.person_id, client: s.client, rep: s.rep })) : [];
     if (!shopsIn.length) { res.status(400).json({ ok: false, error: "no_shops" }); return; }
     const prodDate = /^\d{4}-\d{2}-\d{2}$/.test(body.prod_date || "") ? body.prod_date : sofiaToday();
     // ★ S24 — ДОБАВЕН МАГАЗИН ПО-КЪСНО. underLot е ЦЯЛОТО произведено под L (за магазините от
@@ -2449,7 +2511,11 @@ module.exports = async function handler(req, res) {
     const toRows = (map) => Object.entries(map)
       .map(([name, qty]) => { const a = resolve(name); return a ? { article_id: a.id, article_name: a.name, amount: round(Number(qty)) } : null; })
       .filter(r => r && r.amount > 0);
-    const { plan, sm, underLot, others } = await computeDayPlan(shopsIn, prodDate, lot, body.razos_date, body.only !== "zag", user, pass);
+    // ★ S27 — планът чете склада и партидите от Barsy + записа на деня; не се ли прочете нещо → СТОП (без гадаене).
+    let cdp;
+    try { cdp = await computeDayPlan(shopsIn, prodDate, lot, body.razos_date, body.only !== "zag", user, pass); }
+    catch (e) { res.status(200).json({ ok: false, error: "plan_unreadable", message: "Не успях да прочета данните за плана (" + String(e && e.message).slice(0, 120) + "). Нищо не е произведено — натисни пак." }); return; }
+    const { plan, sm, underLot, others } = cdp;
     const rawStock = id => { const q = sm[String(id)]; return (q == null || isNaN(q)) ? 0 : q; };
     const shortfall = (need, id) => Math.max(0, Number(need) - rawStock(id));
     const zagProduce = {}, rollProduce = {}, setProduce = {}, loadRawNamed = {};
@@ -2467,7 +2533,8 @@ module.exports = async function handler(req, res) {
     const zagRows = toRows(zagProduce).sort((a, b) => zagDepth(byId(a.article_id)) - zagDepth(byId(b.article_id)));
     const rollRows = toRows(rollProduce), setRows = toRows(setProduce);
     const alreadyNamed = {}; for (const [id, q] of Object.entries(underLot)) { const a = byId(id); if (a && q > 0) alreadyNamed[a.name] = round(q); }
-    const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate, other_accounts: others.map(x => (x.client || "") + (x.rep ? " / " + x.rep : "") + " #" + x.account_id), already_under_lot: sortObj(alreadyNamed, 2), load_raw: sortObj(loadRawNamed, 3), produced_zagotovki: sortObj(zagProduce, 3), produced_rolls: sortObj(rollProduce, 2), produced_sets: sortObj(setProduce, 2) };
+    const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate, other_accounts: others.map(x => (x.client || "") + (x.rep ? " / " + x.rep : "") + " #" + x.account_id), already_under_lot: sortObj(alreadyNamed, 2), load_raw: sortObj(loadRawNamed, 3), produced_zagotovki: sortObj(zagProduce, 3), produced_rolls: sortObj(rollProduce, 2), produced_sets: sortObj(setProduce, 2),
+      table: cdp.table, stale: cdp.stale, in_point: Object.fromEntries(Object.entries(cdp.inPoint).map(([id, q]) => [(byId(id) || {}).name || id, q])), with_account: cdp.withAccount, need_shops: cdp.needShops };
     // Ред: заготовки → ролки → сетове.
     try {
       // Заготовките — ЕДНА ПО ЕДНА (best-effort): някои нямат производствена рецепта в
@@ -2843,13 +2910,18 @@ module.exports = async function handler(req, res) {
         // нетно спрямо L; физическа проверка) → панелът показва ТОЧНО каквото ще се произведе.
         const pfDay = /^\d{4}-\d{2}-\d{2}$/.test(body.kitchen_date || "") ? body.kitchen_date : sofiaToday();
         const pfShops = (shops || []).map(x => ({ order: x.order || {}, client_id: x.client_id, person_id: x.person_id }));
-        const { plan: pf } = await computeDayPlan(pfShops, pfDay, lotFor(pfDay).lot, null, false, user, pass); // = ① (only:zag)
+        const pfShopsFull = (shops || []).map(x => ({ order: x.order || {}, client_id: x.client_id, person_id: x.person_id, client: x.client, rep: x.rep }));
+        const cdp = await computeDayPlan(pfShopsFull, pfDay, lotFor(pfDay).lot, null, false, user, pass);
+        const pf = cdp.plan;
         const zag = {}; for (const [id, q] of Object.entries(pf.produce)) { const a = byId(id); if (a && a.cat === "Заготовки" && q > 0) zag[id] = q; }
         const named = (m, d) => { const o = {}; for (const [k, q] of Object.entries(m)) { const a = resolve(k); o[a ? a.name : k] = Math.round(q * 10 ** d) / 10 ** d; } return o; };
         preflight = {
           load_raw: named(pf.loadRaw, 3),        // СУРОВИНИ за зареждане (недостиг)
           produce_zagotovki: named(zag, 3),      // ЗАГОТОВКИ за производство (нетно)
-          ok: Object.keys(pf.loadRaw).length === 0 // true = нищо не липсва → чисто минаване
+          ok: Object.keys(pf.loadRaw).length === 0, // true = нищо не липсва → чисто минаване
+          in_point: named(cdp.inPoint, 3),        // липсващото го ИМА в склад „Точка" → прехвърли го обратно
+          stale: cdp.stale,                       // отворени сметки от СТАРА партида (забравени)
+          with_account: cdp.withAccount, table: cdp.table
         };
       } catch (e) { preflight = { error: "stock_read_failed", message: String(e && e.message).slice(0, 120) }; }
     }
