@@ -1441,7 +1441,13 @@ $('tx').textContent=t;$('tx').style.display='';$('acts').style.display='';$('vb'
 // Viber не носи текст към конкретен номер → ползваме forward?text: отваря Viber с ГОТОВИЯ
 // текст (шаблона), ти избираш доставчика и натискаш Изпрати. Текстът се и копира за резерва.
 $('vb').href='viber://forward?text='+encodeURIComponent(t)}
-$('vb')&&document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('#vb');if(!a)return;var t=$('tx').textContent;try{navigator.clipboard&&navigator.clipboard.writeText(t)}catch(x){}msg('✓ Viber се отвори с готовия текст. Избери «'+SEL+'» и натисни Изпрати. (Ако е празно — задръж и Постави.)','ok')})
+// Viber РЕЖЕ текста във forward?text на ~200 знака → дългата заявка стигаше наполовина.
+// Затова: (1) копираме целия текст; (2) телефонът отваря „Сподели" с ЦЕЛИЯ текст (избираш Viber);
+// (3) без „Сподели": кратък текст → forward, дълъг → чатът на доставчика + „Постави".
+$('vb')&&document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('#vb');if(!a)return;var t=$('tx').textContent;try{navigator.clipboard&&navigator.clipboard.writeText(t)}catch(x){}
+if(navigator.share){e.preventDefault();navigator.share({text:t}).then(function(){msg('✓ Избери Viber → «'+SEL+'» → Изпрати. Целият текст е вътре.','ok')},function(){msg('Текстът е копиран. Отвори Viber → «'+SEL+'» → задръж в полето → Постави.','info')});return}
+if(t.length>180){e.preventDefault();var ph=PH[SEL];msg('Заявката е дълга — текстът е КОПИРАН. В чата с «'+SEL+'»: задръж в полето → Постави → Изпрати.','ok');if(ph)location.href='viber://chat?number='+encodeURIComponent(ph);return}
+msg('✓ Viber се отвори с готовия текст. Избери «'+SEL+'» и натисни Изпрати. (Ако е празно — задръж и Постави.)','ok')})
 function cp(){var t=$('tx').textContent;(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){msg('✓ Копирано','ok')},function(){prompt('Копирай:',t)})}
 function toOwner(){var t='Поръчка към '+SEL+':'+String.fromCharCode(10)+lines().join(String.fromCharCode(10));if(!confirm('Да пратя на Ясен в Telegram?'))return;
 fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:K,action:'tg_supply',text:t})}).then(function(r){return r.json()}).then(function(j){msg(j.ok?'✓ Пратено на Ясен':'Не мина: '+(j.error||''),j.ok?'ok':'err')})}
