@@ -1114,6 +1114,11 @@ async function computeDayPlan(shopsIn, prodDate, lot, razosDate, withOthers, use
   const freeStock = {};
   for (const k in sm) freeStock[k] = (Number(sm[k]) || 0) + (resAll[k] || 0);
   for (const k in resAll) if (!(k in freeStock)) freeStock[k] = resAll[k];
+  // ★ S28 — СКРИТ МИНУС под стара партида (ред с отрицателно „реално" не идва в списъка): общото в склада
+  // е по-малко от видимото под L, а Barsy отказва сметката по ОБЩОТО. Свободното под L не може да е повече
+  // от свободното общо → дупката се произвежда заедно с нуждата (02.10: RAY −13, AMO −3 под L.01.10).
+  const hidden = {};
+  if (lot) for (const id in freeL) { if (sm[id] == null || isNaN(sm[id])) continue; const tot = freeStock[id]; if (tot < freeL[id] - 1e-9) { hidden[id] = round(freeL[id] - tot); freeL[id] = tot; } }
   const plan = dayPlan(agg, freeStock, lot ? freeL : {});
   // 3) таблицата „какво вижда Barsy" — за собственика (Telegram) и за проверка
   const need = {}; for (const [n, q] of Object.entries(agg)) { const art = resolve(n); if (art && (art.is_menu || art.is_set)) need[String(art.id)] = (need[String(art.id)] || 0) + (Number(q) || 0); }
@@ -1128,7 +1133,7 @@ async function computeDayPlan(shopsIn, prodDate, lot, razosDate, withOthers, use
     try { const sm2 = await stockMap(user, pass, 2); for (const id of Object.keys(plan.loadRaw)) { const q = Number(sm2[String(id)]) || 0; if (q > 0) inPoint[id] = round(q); } } catch (e) {}
   }
   const stale = Object.entries(staleMap).map(([l, n]) => ({ lot: l, articles: n }));
-  return { plan, sm, underLot: realL, underRel: true, freeStock, others: [], table, stale, oldHeld, inPoint, withAccount: shopsIn.length - needShops.length, needShops: needShops.length };
+  return { plan, sm, underLot: realL, underRel: true, freeStock, others: [], table, stale, oldHeld, hidden, inPoint, withAccount: shopsIn.length - needShops.length, needShops: needShops.length };
 }
 function dayPlan(agg, total, underL) {
   const aT = {}; for (const k in (total || {})) aT[k] = Number(total[k]) || 0;

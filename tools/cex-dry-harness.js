@@ -104,6 +104,16 @@ const live = async (body) => (await realFetch('https://motamo-api.vercel.app/api
   const nz2 = W.prods.length; r = await run({ action: 'produce_plan', only: 'articles', shops: [shopZ], prod_date: '2026-10-05' });
   console.log('  ② пак → нови производства:', JSON.stringify(W.prods.slice(nz2)));
 
+  console.log('\n══ H) СКРИТ МИНУС: под L.06.10 се виждат 3 НАЧИ RAY, но общо свободни в склада са 1 → ② трябва да направи още 2 ══');
+  const shopH = { client: 'ТЕСТ', rep: 'Магазин Х', client_id: 991, person_id: 8, order: { 'НACHI RAY': 3 } };
+  r = await run({ action: 'produce_plan', only: 'articles', shops: [shopH], prod_date: '2026-10-06' });
+  const rsv74 = LOTS.filter(x => String(x.article_id) === '74' && Number(x.depot_id) === 1).reduce((s, x) => s + (Number(x.amount_reserved) || 0), 0);
+  STOCK[74] = -rsv74 + 1; const nh = W.prods.length;
+  r = await run({ action: 'produce_plan', only: 'articles', shops: [shopH], prod_date: '2026-10-06' });
+  console.log('  ok', r.j.ok, '| нови производства:', JSON.stringify(W.prods.slice(nh)), '→ очаквано НACHI RAY 2');
+  const nh2 = W.prods.length; r = await run({ action: 'produce_plan', only: 'articles', shops: [shopH], prod_date: '2026-10-06' });
+  console.log('  ② пак → нови производства:', JSON.stringify(W.prods.slice(nh2)), '→ очаквано нищо');
+
   console.log('\n══ 8) Страницата на инструмента — валиден ли е вграденият скрипт ══');
   r = await run({}, 'GET', { view: 'tool', k: 't' });
   const scripts = [...(r.html || '').matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]); let ok = scripts.length > 0;
