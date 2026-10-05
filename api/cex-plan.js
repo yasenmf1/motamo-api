@@ -749,6 +749,8 @@ const CEX_OBJECTS = {
   // Ад-хок / по заявка (показват се, но не се тикат)
   "4:": { group: "adhoc" }, "8:": { group: "adhoc" }, "8:21": { group: "adhoc" }, "8:22": { group: "adhoc" },
   "5:": { group: "adhoc" }, "5:16": { group: "adhoc" }, "5:17": { group: "adhoc" }, "5:18": { group: "adhoc" },
+  // нови представители (05.10) — без сметка досега; client/rep са нужни, за да се покажат в „+ Магазин"
+  "5:19": { group: "adhoc", client: "Пламен Петров", rep: "кафе Винил" }, "5:20": { group: "adhoc", client: "Пламен Петров", rep: "лог. център Била" },
   "12:": { group: "adhoc" }, "7:": { group: "adhoc" }, "10:": { group: "adhoc" }, "13:": { group: "adhoc" }, "3:": { group: "adhoc" }
 };
 function cexKey(a) { return (a.client_id != null ? a.client_id : "") + ":" + (a.person_id != null ? a.person_id : ""); }
@@ -1889,6 +1891,12 @@ module.exports = async function handler(req, res) {
       byKey[key] = { key, client_id: a.client_id, person_id: a.person_id, client: a.client_name || null,
         rep: a.person_name || null, group: (CEX_OBJECTS[key] || {}).group || "adhoc",
         last: String(a.close_date || a.create_date || "").slice(0, 10) };
+    }
+    // ★ S28 — обект от регистъра БЕЗ нито една сметка (нов представител) иначе никога не се появява
+    for (const [key, o] of Object.entries(CEX_OBJECTS)) {
+      if (byKey[key] || !o.rep) continue;
+      const [c, p] = key.split(":");
+      byKey[key] = { key, client_id: Number(c), person_id: p ? Number(p) : null, client: o.client || null, rep: o.rep, group: o.group || "adhoc", last: "" };
     }
     const objects = Object.values(byKey).sort((x, y) =>
       (x.client || "").localeCompare(y.client || "", "bg") || (x.rep || "").localeCompare(y.rep || "", "bg"));
