@@ -547,38 +547,56 @@ const CARD_PAYMETHOD = 8;
 function isCardAccount(a) {
   return Number(a.paymethod_id) === CARD_PAYMETHOD || /карта/i.test(String(a.payment_name || ""));
 }
+// S28 (06.10): статусите на Barsy (Accounts_servicestatusgetlist): 0 Нова · 1 Чака плащане ·
+// 2 Чака одобрение · 3 За обслужване · 4 Обслужена · 5 В куриер · 6 Доставена · 100 Отказана.
+// Таблетът „Модул каса“ ги мести; клиентът вижда: pending → preparing → ready → done / cancelled.
 function accountState(a) {
   const card = isCardAccount(a);
+  const sid = a.service_status_id != null ? Number(a.service_status_id) : null;
   const svc = String(a.service_status_name || "");
-  let step = null;
-  if (/одобр|чака|нов/i.test(svc)) step = "pending";
-  else if (/обслуж|приет|готв|готов|изпълн|прикл/i.test(svc)) step = "preparing";
+  if (sid === 100 || /отказ|анулир/i.test(svc)) return "cancelled";
   if (!card && a.close_date) return "done";
-  if (step) return step;
-  return a.close_date ? "preparing" : "accepted";
+  if (sid === 3 || /за обслужване|готв|приготв/i.test(svc)) return "preparing";
+  if (sid === 4 || sid === 5 || sid === 6 || /обслужена|готов|изпълн|прикл|достав/i.test(svc)) return "ready";
+  if (sid === 0 || sid === 1 || sid === 2 || /одобр|чака|нов/i.test(svc)) return "pending";
+  return a.close_date ? "ready" : "accepted";
+}
+// Сметка по кода ѝ (ref) в последните сметки — за поръчка в брой клиентът няма account_id
+// (заявката става сметка чак когато касата я одобри).
+function findByRef(data, ref) {
+  let list = Array.isArray(data) ? data : (data && Array.isArray(data.list) ? data.list : (data ? Object.values(data) : []));
+  for (const a of list) {
+    if (!a || typeof a !== "object") continue;
+    const m = REF_LOOKUP.exec(a.description || "") || REF_LOOKUP.exec(a.account_alias || "");
+    if (m && m[1].toUpperCase() === ref) return a;
+  }
+  return null;
 }
 
 async function orderStatus(req, res, user, pass) {
   const q = req.query || {};
   const ref = String(q.ref || "").trim().toUpperCase();
-  const acct = Number(q.acct);
-  if (!REF_PATTERN.test(ref) || !Number.isInteger(acct) || acct <= 0) {
-    fail(res, 400, "bad_request", "ref and acct are required");
+  const acct = q.acct != null && q.acct !== "" ? Number(q.acct) : null;
+  if (!REF_PATTERN.test(ref) || (acct != null && (!Number.isInteger(acct) || acct <= 0))) {
+    fail(res, 400, "bad_request", "ref is required");
     return;
   }
   let a = null, src = null;
   try {
-    const r = await authedCall("Accounts_get", { account_id: acct }, user, pass);
-    if (r.ok) { a = pickAccount(r.data, acct); if (a) src = "get"; }
+    if (acct) {
+      const r = await authedCall("Accounts_get", { account_id: acct }, user, pass);
+      if (r.ok) { a = pickAccount(r.data, acct); if (a) src = "get"; }
+    }
     if (!a) {
       const l = await authedCall("Accounts_getlist", { order_by: "account_id desc", length: 300 }, user, pass);
-      if (l.ok) { a = pickAccount(l.data, acct); if (a) src = "list"; }
+      if (l.ok) { a = acct ? pickAccount(l.data, acct) : findByRef(l.data, ref); if (a) src = "list"; }
     }
   } catch (err) {
     fail(res, 504, "barsy_unreachable", "No response from Barsy");
     return;
   }
-  if (!a) { fail(res, 404, "not_found", "No such order"); return; }
+  // Още няма сметка с този код = заявката чака одобрение на касата (режим „Ръчен“).
+  if (!a) { res.status(200).json({ ok: true, ref: ref, state: "pending", found: false }); return; }
   const m = REF_LOOKUP.exec(a.description || "") || REF_LOOKUP.exec(a.account_alias || "");
   if (!m || m[1].toUpperCase() !== ref) { fail(res, 404, "not_found", "No such order"); return; }
   const created = Date.parse(String(a.create_date || "").replace(" ", "T"));
