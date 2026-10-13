@@ -97,6 +97,29 @@ function costOf(id, revenueNeto, cat) {
 }
 function packOf(cat) { return typeof PACKAGING[cat] === "number" ? PACKAGING[cat] : PACKAGING_DEFAULT; }
 
+// ── ФИКСИРАНИ МЕСЕЧНИ РАЗХОДИ на ТОЧКАТА (бруто заплати в EUR + наем/ток) — от 01.2026 (S30, 13.10).
+// Роксана (от ведомост „ЧОВЕК И БЪДЕЩЕ" Септ.2026) + Радостина/наем/ток от собственика.
+const FIXED_START = "2026-01-01";
+const SHOP_FIXED_LINES = [
+  { label: "Роксана Панчева (заплата)", amount: 1616.48 },
+  { label: "Радостина (заплата)", amount: 850 },
+  { label: "Наем", amount: 500 },
+  { label: "Ток", amount: 250 },
+];
+const SHOP_FIXED_MONTHLY = Math.round(SHOP_FIXED_LINES.reduce((s, l) => s + l.amount, 0) * 100) / 100; // 3216.48
+function monthsInRange(from, to, start) {
+  const s = (from && from > start) ? from : start;
+  if (!to || s > to) return 0;
+  const d0 = Date.parse(s + "T00:00:00Z"), d1 = Date.parse(to + "T00:00:00Z");
+  if (!(d1 >= d0)) return 0;
+  const days = (d1 - d0) / 86400000 + 1;
+  return days / 30.4375;
+}
+function fixedForRange(from, to, monthly, start) {
+  const m = monthsInRange(from, to, start);
+  return { total: Math.round(monthly * m * 100) / 100, months: Math.round(m * 100) / 100, monthly };
+}
+
 async function shopDashData(from, to, expenses, user, pass) {
   const inRange = d => d && d >= from && d <= to;
   // предходен период със същата дължина (за „растеж/спад")
@@ -260,7 +283,7 @@ td.c{text-align:right;color:#7a8087}tr:nth-child(even) td{background:#fafbfc}
   <input type="hidden" name="view" value="dashboard">${k ? `<input type="hidden" name="k" value="${esc(k)}">` : ""}
   <div><label>от</label><input type="date" name="from" lang="bg-BG" value="${esc((data && data.from) || "")}"></div>
   <div><label>до</label><input type="date" name="to" lang="bg-BG" value="${esc((data && data.to) || "")}"></div>
-  <div><label>разходи €</label><input type="number" step="0.01" name="exp" value="${err ? "" : (data.expenses || 0)}" style="width:90px"></div>
+  <div><label>разходи € (ръчно)</label><input type="number" step="0.01" name="exp" value="" placeholder="авто ${err ? "0" : bg(data.expenses || 0)}" style="width:110px"></div>
   <button type="submit">Покажи</button>
   <div class="quick" id="quick"></div>
 </form>
@@ -273,6 +296,12 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
   <div class="kpi on"><div class="l">Онлайн (сайт)</div><div class="v">${bg(data.online_neto)} €</div><div class="s">${data.online_n || 0} поръчки · каса ${bg(data.counter_neto)} €</div></div>
   <div class="kpi card2"><div class="l">Плащане с карта</div><div class="v">${data.pay_used ? bg(pay.card.neto) + " €" : "—"}</div><div class="s">${data.pay_used ? "в брой " + bg(pay.cash.neto) + " €" : "няма данни за плащане"}</div></div>
 </div>
+${data.fixed ? `<div class="card"><h2>Фиксирани разходи<span>${data.fixed.auto ? "авто · " : "ръчно · "}${bg(data.fixed.monthly)} €/мес × ${data.fixed.months} мес</span></h2>
+  <table><thead><tr><th>Разход (от 01.2026)</th><th class="q">€/мес</th></tr></thead><tbody>
+  ${data.fixed.lines.map(l => `<tr><td>${esc(l.label)}</td><td class="q">${bg(l.amount)}</td></tr>`).join("")}
+  <tr><td><b>Общо месечно</b></td><td class="q"><b>${bg(data.fixed.monthly)}</b></td></tr>
+  <tr><td><b>За периода (${data.fixed.months} мес)</b></td><td class="q"><b>${bg(data.fixed.total)} €</b></td></tr>
+  </tbody></table></div>` : ""}
 <div class="card"><h2>Разбивка на оборота<span>${bg(data.total_neto)} € общо · без ДДС</span></h2>
   <div class="split">
     <table><thead><tr><th>По плащане</th><th class="q">Сума</th><th class="q">Дял</th><th class="q">Бр.</th></tr></thead><tbody>
@@ -372,10 +401,12 @@ module.exports = async function handler(req, res) {
   const today = sofiaToday();
   const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 4) + "-01-01";
   const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
-  const expenses = Number(q.exp) || 0;
+  const fx = fixedForRange(from, to, SHOP_FIXED_MONTHLY, FIXED_START);
+  const expenses = (q.exp !== undefined && q.exp !== "") ? (Number(q.exp) || 0) : fx.total;
   let data;
   try { data = await shopDashData(from, to, expenses, user, pass); }
   catch (e) { data = { from, to, error: "Не мога да прочета данните сега. Опитай пак след минута. (" + String(e && e.message) + ")" }; }
+  if (data && !data.error) data.fixed = { months: fx.months, monthly: fx.monthly, total: fx.total, lines: SHOP_FIXED_LINES, auto: !(q.exp !== undefined && q.exp !== "") };
   if (q.debug === "1") { res.setHeader("Content-Type", "application/json; charset=utf-8"); res.status(200).send(JSON.stringify(data, null, 2)); return; }
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.status(200).send(page(data, q.k));

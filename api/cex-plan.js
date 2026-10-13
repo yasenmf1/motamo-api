@@ -542,6 +542,34 @@ const TRIAL_CLIENTS = /^\s*(анонимен|саси трейд|симеоно�
 const isTrialClient = a => TRIAL_CLIENTS.test(String((a && a.client_name) || ""));
 
 
+// ── ФИКСИРАНИ МЕСЕЧНИ РАЗХОДИ (бруто заплати в EUR + наем/ток) — от 01.2026 (S30, 13.10).
+// Източник: ведомост „ЧОВЕК И БЪДЕЩЕ ЕООД" Септ.2026 (бруто) + наем/ток от собственика.
+// Цех = всички заплати без Роксана + управител; точката (в api/shop-dash.js) = Роксана + Радостина + наем + ток.
+const FIXED_START = "2026-01-01";
+const CEX_FIXED_LINES = [
+  { label: "Ясен Начев (управител)", amount: 5129.49 },
+  { label: "Румена Тенева", amount: 1420.37 },
+  { label: "Йорданка Янкова", amount: 1588.48 },
+  { label: "Диана Филипова", amount: 587.10 },
+  { label: "Мария Пейчева", amount: 1250.01 },
+  { label: "Митьо Димитров (шофьор)", amount: 824.35 },
+  { label: "Станислав Покотилюк", amount: 827.14 },
+];
+const CEX_FIXED_MONTHLY = Math.round(CEX_FIXED_LINES.reduce((s, l) => s + l.amount, 0) * 100) / 100; // 11626.94
+// Пропорционално по дни: месеци в [from,to] ∩ [start,∞); частичен месец се брои пропорционално.
+function monthsInRange(from, to, start) {
+  const s = (from && from > start) ? from : start;
+  if (!to || s > to) return 0;
+  const d0 = Date.parse(s + "T00:00:00Z"), d1 = Date.parse(to + "T00:00:00Z");
+  if (!(d1 >= d0)) return 0;
+  const days = (d1 - d0) / 86400000 + 1; // включително крайния ден
+  return days / 30.4375;
+}
+function fixedForRange(from, to, monthly, start) {
+  const m = monthsInRange(from, to, start);
+  return { total: Math.round(monthly * m * 100) / 100, months: Math.round(m * 100) / 100, monthly };
+}
+
 // ── ДАШБОРД агрегатор (Фаза 1): оборот по ден + по клиент, издадени фактури, разлика.
 // Оборот = сумата на ЗАТВОРЕНИТЕ сметки (`total_sum` е с ДДС → нето = /1.2), групиран по
 // ден на затваряне и по клиент. Фактури = Invoices type_id 1 (не стокови 11), неанулирани.
@@ -1349,7 +1377,7 @@ tr:nth-child(even) td{background:#fafbfc}
   <input type="hidden" name="view" value="dashboard">${k ? `<input type="hidden" name="k" value="${esc(k)}">` : ""}
   <div><label>от</label><input type="date" name="from" lang="bg-BG" value="${esc((data && data.from) || "")}"></div>
   <div><label>до</label><input type="date" name="to" lang="bg-BG" value="${esc((data && data.to) || "")}"></div>
-  <div><label>разходи €</label><input type="number" step="0.01" name="exp" value="${err ? "" : (data.expenses || 0)}" style="width:90px"></div>
+  <div><label>разходи € (ръчно)</label><input type="number" step="0.01" name="exp" value="" placeholder="авто ${err ? "0" : bg(data.expenses || 0)}" style="width:110px"></div>
   <button type="submit">Покажи</button>
   <div class="quick" id="quick"></div>
 </form>
@@ -1365,6 +1393,13 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
   <div class="kpi stock"><div class="l">Склад (в пари)</div><div class="v">${bg(data.stock_value)} €</div><div class="s">${data.stock_items || 0} артикула · себест.</div></div>
   <div class="kpi"><div class="l">Сметки</div><div class="v">${data.accounts || 0}</div><div class="s">среден чек ${bg(data.avg_check)} €</div></div>
 </div>
+${data.fixed ? `<div class="card"><h2>Фиксирани разходи<span>${data.fixed.auto ? "авто · " : "ръчно · "}${bg(data.fixed.monthly)} €/мес × ${data.fixed.months} мес</span></h2>
+  <table><thead><tr><th>Заплата (бруто, от 01.2026)</th><th class="q">€/мес</th></tr></thead><tbody>
+  ${data.fixed.lines.map(l => `<tr><td>${esc(l.label)}</td><td class="q">${bg(l.amount)}</td></tr>`).join("")}
+  <tr><td><b>Общо месечно</b></td><td class="q"><b>${bg(data.fixed.monthly)}</b></td></tr>
+  <tr><td><b>За периода (${data.fixed.months} мес)</b></td><td class="q"><b>${bg(data.fixed.total)} €</b></td></tr>
+  </tbody></table>
+  <div class="s">Само цехът. Точката (Роксана + Радостина + наем + ток) е в „Точка" дашборда.</div></div>` : ""}
 ${tips ? `<div class="card"><h2>💡 Съвети / Наблюдения</h2><ul class="tips">${tips}</ul></div>` : ""}
 <div class="card"><h2>Оборот по период<span class="seg" id="seg"><button data-g="day">Ден</button><button data-g="week">Седмица</button><button data-g="month" class="on">Месец</button></span></h2>
   <div class="chartbox"><canvas id="cTrend" height="150"></canvas></div>
@@ -1672,10 +1707,13 @@ module.exports = async function handler(req, res) {
     const today = sofiaToday();
     const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 4) + "-01-01"; // по подразбиране от 1 януари
     const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
-    const expenses = Number(q.exp) || 0;
+    // Фиксирани разходи (бруто заплати от 01.2026) — авто за периода; ?exp= ги замества ръчно.
+    const fx = fixedForRange(from, to, CEX_FIXED_MONTHLY, FIXED_START);
+    const expenses = (q.exp !== undefined && q.exp !== "") ? (Number(q.exp) || 0) : fx.total;
     let data;
     try { data = await dashData(from, to, expenses, user, pass); }
     catch (e) { data = { from, to, error: "Не мога да прочета данните сега. Опитай пак след минута. (" + String(e && e.message) + ")" }; }
+    if (!data.error) data.fixed = { months: fx.months, monthly: fx.monthly, total: fx.total, lines: CEX_FIXED_LINES, auto: !(q.exp !== undefined && q.exp !== "") };
     res.status(200).send(dashboardPage(data, q.k));
     return;
   }
