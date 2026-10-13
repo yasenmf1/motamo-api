@@ -245,8 +245,11 @@ function page(data, k) {
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Каравелов · Дашборд</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script><style>
 :root{color-scheme:light}*{box-sizing:border-box}
-body{font:15px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#eef0f3;color:#14171a}
-header{background:linear-gradient(135deg,#c8151f,#7a0c12);color:#fff;padding:16px 20px;position:sticky;top:0;z-index:5;box-shadow:0 2px 12px rgba(122,12,18,.3)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes sheen{to{background-position:200% 0}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+body{font:15px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:radial-gradient(1200px 600px at 80% -5%,#fbf4f4,#eef0f3 55%,#e8ebf0);color:#14171a;min-height:100vh}
+header{background:linear-gradient(135deg,#d41822,#7a0c12 70%);background-size:200% 100%;color:#fff;padding:16px 20px;position:sticky;top:0;z-index:5;box-shadow:0 4px 18px rgba(122,12,18,.32);animation:sheen 18s linear infinite alternate}
 header h1{margin:0;font-size:22px;font-weight:800}header .d{font-size:14px;opacity:.92;margin-top:3px}
 .wrap{padding:16px;max-width:960px;margin:0 auto;display:grid;gap:16px}
 form.period{display:flex;gap:8px;align-items:end;flex-wrap:wrap;background:#fff;border-radius:12px;padding:12px 14px;box-shadow:0 2px 8px rgba(20,23,26,.08)}
@@ -257,18 +260,22 @@ form.period button{font:14px system-ui;font-weight:700;padding:7px 14px;border:0
 .quick a{font:12px system-ui;font-weight:700;text-decoration:none;color:#7a0c12;background:#f7e1e2;border-radius:20px;padding:5px 12px}
 .quick a:hover{background:#f0cdcf}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
-.kpi{background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 2px 8px rgba(20,23,26,.08);border-left:5px solid #cfd4da;transition:transform .12s}
-.kpi:hover{transform:translateY(-2px)}
+.kpi{--ac:#cfd4da;position:relative;overflow:hidden;background:linear-gradient(180deg,#fff,#fbfcfe);border-radius:14px;padding:15px 16px;box-shadow:0 3px 10px rgba(20,23,26,.07),0 1px 2px rgba(20,23,26,.05);border-left:5px solid var(--ac);transition:transform .18s cubic-bezier(.2,.7,.3,1),box-shadow .18s;animation:fadeUp .5s both}
+.kpi::after{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--ac);opacity:.85}
+.kpi:hover{transform:translateY(-4px) scale(1.01);box-shadow:0 10px 24px rgba(20,23,26,.14)}
+.kpi:nth-child(1){animation-delay:.02s}.kpi:nth-child(2){animation-delay:.07s}.kpi:nth-child(3){animation-delay:.12s}.kpi:nth-child(4){animation-delay:.17s}.kpi:nth-child(5){animation-delay:.22s}.kpi:nth-child(6){animation-delay:.27s}
 .kpi .l{font-size:12px;color:#7a8087;text-transform:uppercase;letter-spacing:.4px}
-.kpi .v{font-size:26px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums}
+.kpi .v{font-size:26px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums;line-height:1.1}
 .kpi .s{font-size:11px;color:#9aa0a6;margin-top:2px}
-.kpi.turn{border-color:#b3121b}.kpi.turn .v{color:#b3121b}
-.kpi.cost{border-color:#b06a00}.kpi.cost .v{color:#b06a00}
-.kpi.res{border-color:#0a6b2e}.kpi.res .v{color:#0a6b2e}
-.kpi.on{border-color:#2b6ca3}.kpi.on .v{color:#2b6ca3}
-.kpi.card2{border-color:#7a4b8a}.kpi.card2 .v{color:#7a4b8a}
-.card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(20,23,26,.08)}
-.card>h2{margin:0;font-size:15px;font-weight:800;color:#fff;background:#c8151f;padding:11px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.kpi.turn{--ac:#b3121b}.kpi.turn .v{color:#b3121b}
+.kpi.cost{--ac:#b06a00}.kpi.cost .v{color:#b06a00}
+.kpi.res{--ac:#0a6b2e}.kpi.res .v{color:#0a6b2e}
+.kpi.on{--ac:#2b6ca3}.kpi.on .v{color:#2b6ca3}
+.kpi.card2{--ac:#7a4b8a}.kpi.card2 .v{color:#7a4b8a}
+.card{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 3px 12px rgba(20,23,26,.08);animation:fadeUp .55s both;transition:box-shadow .2s}
+.card:hover{box-shadow:0 10px 28px rgba(20,23,26,.12)}
+.wrap>.card:nth-of-type(1){animation-delay:.12s}.wrap>.card:nth-of-type(2){animation-delay:.18s}.wrap>.card:nth-of-type(3){animation-delay:.24s}.wrap>.card:nth-of-type(4){animation-delay:.3s}.wrap>.card:nth-of-type(n+5){animation-delay:.36s}
+.card>h2{margin:0;font-size:15px;font-weight:800;color:#fff;background:linear-gradient(135deg,#d41822,#9a0f16);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .card>h2>span:not(.seg){font-size:12px;font-weight:600;opacity:.9}
 .seg{display:flex;gap:4px}.seg button{font:12px system-ui;font-weight:700;border:0;border-radius:6px;padding:4px 10px;cursor:pointer;background:rgba(255,255,255,.25);color:#fff}
 .seg button.on{background:#fff;color:#b3121b}
@@ -401,6 +408,21 @@ renderProducts('revenue');
 (function(){var q=document.getElementById('quick');if(!q)return;var y=new Date().getFullYear();var t=new Date().toISOString().slice(0,10);
   var m0=t.slice(0,7)+'-01';var qs=[[y+' г.',y+'-01-01',t],['този месец',m0,t],['30 дни',new Date(Date.now()-30*864e5).toISOString().slice(0,10),t],['7 дни',new Date(Date.now()-7*864e5).toISOString().slice(0,10),t]];
   qs.forEach(function(o){var a=document.createElement('a');a.textContent=o[0];a.href='?view=dashboard${k ? "&k=" + encodeURIComponent(k) : ""}&from='+o[1]+'&to='+o[2];q.appendChild(a)})})();
+// брояч на числата в KPI (count-up)
+(function(){
+  if(window.matchMedia&&matchMedia('(prefers-reduced-motion:reduce)').matches)return;
+  [].slice.call(document.querySelectorAll('.kpi .v')).forEach(function(el){
+    var txt=el.textContent, m=txt.match(/-?\\d[\\d\\s\\u00a0.,]*/);
+    if(!m)return; var raw=m[0];
+    var dec=/,/.test(raw), target=parseFloat(raw.replace(/[\\s\\u00a0]/g,'').replace(',','.'));
+    if(!isFinite(target)||target===0)return;
+    var pre=txt.slice(0,m.index), suf=txt.slice(m.index+raw.length);
+    var fmt=function(v){return dec?v.toLocaleString('bg-BG',{minimumFractionDigits:2,maximumFractionDigits:2}):Math.round(v).toLocaleString('bg-BG')};
+    var t0=null,dur=850;
+    function step(ts){if(t0===null)t0=ts;var p=Math.min((ts-t0)/dur,1);var e=1-Math.pow(1-p,3);el.textContent=pre+fmt(target*e)+suf;if(p<1)requestAnimationFrame(step);else el.textContent=pre+fmt(target)+suf;}
+    el.textContent=pre+fmt(0)+suf;requestAnimationFrame(step);
+  });
+})();
 </script>`}
 </div></body></html>`;
 }
