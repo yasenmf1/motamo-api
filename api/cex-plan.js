@@ -1362,7 +1362,7 @@ function load(){var d=document.getElementById('date').value;document.getElementB
     var missing=ST.stops.filter(function(s){return !inPlan[s.key]}).map(function(s){return s.key});
     if(missing.length){if(!ST.routes.length)ST.routes.push({name:'Маршрут 1',keys:[]});ST.routes[ST.routes.length-1].keys=ST.routes[ST.routes.length-1].keys.concat(missing)}
     ST.routes.forEach(function(r){r.keys=r.keys.filter(function(k){return ST.stops.some(function(s){return s.key===k})})});
-    document.getElementById('state').textContent=ST.stops.length+' обекта · '+(j.saved&&j.saved.length?'записан план ('+new Date(j.saved_at).toLocaleTimeString('bg-BG',{hour:'2-digit',minute:'2-digit'})+')':'автоматично предложение');
+    document.getElementById('state').textContent=ST.stops.length+' обекта · '+(j.saved&&j.saved.length?'записан план ('+new Date(j.saved_at).toLocaleTimeString('bg-BG',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Sofia'})+')':'автоматично предложение');
     render()})}
 function nameOf(k){var s=ST.stops.filter(function(x){return x.key===k})[0];return s?s.name:k}
 function zoneOf(k){var s=ST.stops.filter(function(x){return x.key===k})[0];return s?s.zone:''}
