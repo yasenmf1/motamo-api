@@ -546,16 +546,29 @@ const isTrialClient = a => TRIAL_CLIENTS.test(String((a && a.client_name) || "")
 // Източник: ведомост „ЧОВЕК И БЪДЕЩЕ ЕООД" Септ.2026 (бруто) + наем/ток от собственика.
 // Цех = всички заплати без Роксана + управител; точката (в api/shop-dash.js) = Роксана + Радостина + наем + ток.
 const FIXED_START = "2026-01-01";
-const CEX_FIXED_LINES = [
+// Осигуровки ЗА СМЕТКА НА РАБОТОДАТЕЛЯ (категория 3): ~18.92% върху осиг. доход,
+// с таван 2300 €/мес (видян във ведомостта за управителя). Ведомостта не ги показва изрично.
+const EMPLOYER_OSIG_RATE = 0.1892, OSIG_CAP = 2300;
+const CEX_FIXED_SALARIES = [
   { label: "Ясен Начев (управител)", amount: 5129.49 },
   { label: "Румена Тенева", amount: 1420.37 },
   { label: "Йорданка Янкова", amount: 1588.48 },
-  { label: "Диана Филипова", amount: 587.10 },
+  { label: "Лидия (на мястото на Диана)", amount: 1250.01 },
   { label: "Мария Пейчева", amount: 1250.01 },
   { label: "Митьо Димитров (шофьор)", amount: 824.35 },
-  { label: "Станислав Покотилюк", amount: 827.14 },
+  { label: "Станислав Покотилюк", amount: 1250.01 },
 ];
-const CEX_FIXED_MONTHLY = Math.round(CEX_FIXED_LINES.reduce((s, l) => s + l.amount, 0) * 100) / 100; // 11626.94
+const CEX_FIXED_OTHER = []; // цехът няма наем/ток в тази сметка
+function employerOsig(salaries) { return Math.round(salaries.reduce((s, l) => s + Math.min(l.amount, OSIG_CAP) * EMPLOYER_OSIG_RATE, 0) * 100) / 100; }
+function buildFixed(salaries, other) {
+  const salSum = Math.round(salaries.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+  const othSum = Math.round(other.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+  const osig = employerOsig(salaries);
+  const monthly = Math.round((salSum + othSum + osig) * 100) / 100;
+  return { salaries, other, salSum, othSum, osig, monthly };
+}
+const CEX_FIXED = buildFixed(CEX_FIXED_SALARIES, CEX_FIXED_OTHER);
+const CEX_FIXED_MONTHLY = CEX_FIXED.monthly; // бруто заплати + осигуровки работодател
 // Пропорционално по дни: месеци в [from,to] ∩ [start,∞); частичен месец се брои пропорционално.
 function monthsInRange(from, to, start) {
   const s = (from && from > start) ? from : start;
@@ -1394,12 +1407,14 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
   <div class="kpi"><div class="l">Сметки</div><div class="v">${data.accounts || 0}</div><div class="s">среден чек ${bg(data.avg_check)} €</div></div>
 </div>
 ${data.fixed ? `<div class="card"><h2>Фиксирани разходи<span>${data.fixed.auto ? "авто · " : "ръчно · "}${bg(data.fixed.monthly)} €/мес × ${data.fixed.months} мес</span></h2>
-  <table><thead><tr><th>Заплата (бруто, от 01.2026)</th><th class="q">€/мес</th></tr></thead><tbody>
-  ${data.fixed.lines.map(l => `<tr><td>${esc(l.label)}</td><td class="q">${bg(l.amount)}</td></tr>`).join("")}
+  <table><thead><tr><th>Разход (от 01.2026)</th><th class="q">€/мес</th></tr></thead><tbody>
+  ${data.fixed.salaries.map(l => `<tr><td>${esc(l.label)}</td><td class="q">${bg(l.amount)}</td></tr>`).join("")}
+  <tr><td>Осигуровки работодател (~18,9%, таван 2300)</td><td class="q">${bg(data.fixed.osig)}</td></tr>
+  ${data.fixed.other.map(l => `<tr><td>${esc(l.label)}</td><td class="q">${bg(l.amount)}</td></tr>`).join("")}
   <tr><td><b>Общо месечно</b></td><td class="q"><b>${bg(data.fixed.monthly)}</b></td></tr>
   <tr><td><b>За периода (${data.fixed.months} мес)</b></td><td class="q"><b>${bg(data.fixed.total)} €</b></td></tr>
   </tbody></table>
-  <div class="s">Само цехът. Точката (Роксана + Радостина + наем + ток) е в „Точка" дашборда.</div></div>` : ""}
+  <div class="s">Само цехът (бруто заплати + осигуровки работодател). Точката (Роксана + Радостина + наем + ток) е в „Точка" дашборда.</div></div>` : ""}
 ${tips ? `<div class="card"><h2>💡 Съвети / Наблюдения</h2><ul class="tips">${tips}</ul></div>` : ""}
 <div class="card"><h2>Оборот по период<span class="seg" id="seg"><button data-g="day">Ден</button><button data-g="week">Седмица</button><button data-g="month" class="on">Месец</button></span></h2>
   <div class="chartbox"><canvas id="cTrend" height="150"></canvas></div>
@@ -1713,7 +1728,9 @@ module.exports = async function handler(req, res) {
     let data;
     try { data = await dashData(from, to, expenses, user, pass); }
     catch (e) { data = { from, to, error: "Не мога да прочета данните сега. Опитай пак след минута. (" + String(e && e.message) + ")" }; }
-    if (!data.error) data.fixed = { months: fx.months, monthly: fx.monthly, total: fx.total, lines: CEX_FIXED_LINES, auto: !(q.exp !== undefined && q.exp !== "") };
+    if (!data.error) data.fixed = { months: fx.months, monthly: fx.monthly, total: fx.total,
+      salaries: CEX_FIXED.salaries, other: CEX_FIXED.other, salSum: CEX_FIXED.salSum, othSum: CEX_FIXED.othSum, osig: CEX_FIXED.osig,
+      auto: !(q.exp !== undefined && q.exp !== "") };
     res.status(200).send(dashboardPage(data, q.k));
     return;
   }

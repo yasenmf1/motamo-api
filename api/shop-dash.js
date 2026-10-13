@@ -100,13 +100,25 @@ function packOf(cat) { return typeof PACKAGING[cat] === "number" ? PACKAGING[cat
 // ── ФИКСИРАНИ МЕСЕЧНИ РАЗХОДИ на ТОЧКАТА (бруто заплати в EUR + наем/ток) — от 01.2026 (S30, 13.10).
 // Роксана (от ведомост „ЧОВЕК И БЪДЕЩЕ" Септ.2026) + Радостина/наем/ток от собственика.
 const FIXED_START = "2026-01-01";
-const SHOP_FIXED_LINES = [
-  { label: "Роксана Панчева (заплата)", amount: 1616.48 },
-  { label: "Радостина (заплата)", amount: 850 },
+const EMPLOYER_OSIG_RATE = 0.1892, OSIG_CAP = 2300; // осигуровки за сметка на работодателя (кат.3), таван 2300 €/мес
+const SHOP_FIXED_SALARIES = [
+  { label: "Роксана Панчева", amount: 1616.48 },
+  { label: "Радостина", amount: 850 },
+];
+const SHOP_FIXED_OTHER = [
   { label: "Наем", amount: 500 },
   { label: "Ток", amount: 250 },
 ];
-const SHOP_FIXED_MONTHLY = Math.round(SHOP_FIXED_LINES.reduce((s, l) => s + l.amount, 0) * 100) / 100; // 3216.48
+function employerOsig(salaries) { return Math.round(salaries.reduce((s, l) => s + Math.min(l.amount, OSIG_CAP) * EMPLOYER_OSIG_RATE, 0) * 100) / 100; }
+function buildFixed(salaries, other) {
+  const salSum = Math.round(salaries.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+  const othSum = Math.round(other.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+  const osig = employerOsig(salaries);
+  const monthly = Math.round((salSum + othSum + osig) * 100) / 100;
+  return { salaries, other, salSum, othSum, osig, monthly };
+}
+const SHOP_FIXED = buildFixed(SHOP_FIXED_SALARIES, SHOP_FIXED_OTHER);
+const SHOP_FIXED_MONTHLY = SHOP_FIXED.monthly;
 function monthsInRange(from, to, start) {
   const s = (from && from > start) ? from : start;
   if (!to || s > to) return 0;
@@ -298,7 +310,9 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
 </div>
 ${data.fixed ? `<div class="card"><h2>Фиксирани разходи<span>${data.fixed.auto ? "авто · " : "ръчно · "}${bg(data.fixed.monthly)} €/мес × ${data.fixed.months} мес</span></h2>
   <table><thead><tr><th>Разход (от 01.2026)</th><th class="q">€/мес</th></tr></thead><tbody>
-  ${data.fixed.lines.map(l => `<tr><td>${esc(l.label)}</td><td class="q">${bg(l.amount)}</td></tr>`).join("")}
+  ${data.fixed.salaries.map(l => `<tr><td>${esc(l.label)} (заплата)</td><td class="q">${bg(l.amount)}</td></tr>`).join("")}
+  <tr><td>Осигуровки работодател (~18,9%)</td><td class="q">${bg(data.fixed.osig)}</td></tr>
+  ${data.fixed.other.map(l => `<tr><td>${esc(l.label)}</td><td class="q">${bg(l.amount)}</td></tr>`).join("")}
   <tr><td><b>Общо месечно</b></td><td class="q"><b>${bg(data.fixed.monthly)}</b></td></tr>
   <tr><td><b>За периода (${data.fixed.months} мес)</b></td><td class="q"><b>${bg(data.fixed.total)} €</b></td></tr>
   </tbody></table></div>` : ""}
@@ -406,7 +420,9 @@ module.exports = async function handler(req, res) {
   let data;
   try { data = await shopDashData(from, to, expenses, user, pass); }
   catch (e) { data = { from, to, error: "Не мога да прочета данните сега. Опитай пак след минута. (" + String(e && e.message) + ")" }; }
-  if (data && !data.error) data.fixed = { months: fx.months, monthly: fx.monthly, total: fx.total, lines: SHOP_FIXED_LINES, auto: !(q.exp !== undefined && q.exp !== "") };
+  if (data && !data.error) data.fixed = { months: fx.months, monthly: fx.monthly, total: fx.total,
+    salaries: SHOP_FIXED.salaries, other: SHOP_FIXED.other, salSum: SHOP_FIXED.salSum, othSum: SHOP_FIXED.othSum, osig: SHOP_FIXED.osig,
+    auto: !(q.exp !== undefined && q.exp !== "") };
   if (q.debug === "1") { res.setHeader("Content-Type", "application/json; charset=utf-8"); res.status(200).send(JSON.stringify(data, null, 2)); return; }
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.status(200).send(page(data, q.k));
