@@ -45,6 +45,22 @@ const BARSY_ID = 1;
 // price the rows at full catalogue price and reject the order.
 const PICKUP_CLIENT_ID = 7;
 
+// ---------- ДОСТАВКА ДО АДРЕС (Wolt Drive) ----------
+// Сайтът праща mode:"delivery" + address{lat,lon,formatted,details} + promise_id
+// (доказателство, че Wolt може до адреса). Таксата за клиента е ФИКСИРАНА (4 €,
+// безплатна ≥ 30 €) и влиза като ред „Доставка" (артикул WOLT_FEE_ARTICLE_ID в
+// Barsy, цена 4,00). Самата доставка в Wolt се създава след плащането (карта →
+// api/pay-return.js) или веднага (в брой, само ако WOLT_CASH=1). Огледало на
+// DELIVERY_* в index.html. Виж docs/WOLT_DRIVE_API.md в motamo_site.
+const wolt = require("../lib/wolt");
+const woltOrder = require("../lib/wolt-order");
+const DELIVERY_ENABLED = process.env.WOLT_DELIVERY === "1";
+const DELIVERY_CASH = process.env.WOLT_CASH === "1";
+const DELIVERY_FEE_EUR = 4.00;
+const DELIVERY_FREE_FROM_EUR = 30.00;
+const DELIVERY_FEE_ARTICLE_ID = Number(process.env.WOLT_FEE_ARTICLE_ID) || 0;
+const DELIVERY_CUTOFF_MIN = 18 * 60 + 15;
+
 // Kept in sync with the pricelist so the site can show the price the POS will
 // charge. Barsy rounds half-up at two decimals — verified against every computed
 // price in its own pricelist screen — so the arithmetic is done in integer
@@ -684,6 +700,29 @@ module.exports = async function handler(req, res) {
 
   const note = sanitizeText(body.note, MAX_NOTE_LEN);
 
+  // --- доставка до адрес? ----------------------------------------------------
+  const mode = body.mode === "delivery" ? "delivery" : "pickup";
+  let dlv = null;
+  if (mode === "delivery") {
+    if (!DELIVERY_ENABLED || !wolt.configured()) {
+      fail(res, 409, "delivery_unavailable", "Delivery is not available");
+      return;
+    }
+    const a = body.address && typeof body.address === "object" ? body.address : {};
+    const lat = Number(a.lat), lon = Number(a.lon);
+    const text = sanitizeText(a.formatted || a.text, 160);
+    const details = sanitizeText(a.details, 80);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180 || text.length < 5) {
+      fail(res, 400, "delivery_invalid_address", "Invalid delivery address");
+      return;
+    }
+    if (typeof body.promise_id !== "string" || body.promise_id.length < 4) {
+      fail(res, 400, "delivery_quote_expired", "Address check missing or expired");
+      return;
+    }
+    dlv = { lat: lat, lon: lon, text: text, details: details, promise_id: body.promise_id.slice(0, 80) };
+  }
+
   // Cash or card, both paid at the counter — nothing is charged online yet. The
   // kitchen needs to know which, so the terminal is ready when the customer
   // arrives. A cached copy of the old page sends nothing; treat that as cash
@@ -691,6 +730,11 @@ module.exports = async function handler(req, res) {
   const pay = body.pay === "card" ? "card" : "cash";
   if (body.pay != null && body.pay !== "card" && body.pay !== "cash") {
     fail(res, 400, "invalid_payment", "Invalid payment method");
+    return;
+  }
+  // Доставка в брой = наложен платеж на куриера; само ако Wolt го е включил.
+  if (dlv && pay === "cash" && !DELIVERY_CASH) {
+    fail(res, 400, "invalid_payment", "Delivery orders are paid by card");
     return;
   }
 
@@ -741,6 +785,10 @@ module.exports = async function handler(req, res) {
 
   if (!isOpen() && !previewing) {
     fail(res, 409, "closed", "Online ordering is closed right now");
+    return;
+  }
+  if (dlv && !previewing && sofiaNow().mins > DELIVERY_CUTOFF_MIN) {
+    fail(res, 409, "delivery_cutoff", "Delivery orders are closed for today");
     return;
   }
 
@@ -832,6 +880,24 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // Такса за доставка — сметната ТУК, не от браузъра: 4 € под 30 € храна, иначе 0.
+  // Ред с артикула „Доставка" (цена 4,00 в ценоразписа на Barsy, иначе Barsy отказва).
+  let feeEur = 0;
+  const foodDueTotal = Number((dueCentsTotal / 100).toFixed(2));
+  if (dlv) {
+    feeEur = foodDueTotal >= DELIVERY_FREE_FROM_EUR ? 0 : DELIVERY_FEE_EUR;
+    if (feeEur > 0) {
+      if (!DELIVERY_FEE_ARTICLE_ID) {
+        console.error(JSON.stringify({ event: "delivery_fee_article_missing" }));
+        fail(res, 503, "delivery_unavailable", "Delivery fee article is not configured");
+        return;
+      }
+      rows.push({ article_id: DELIVERY_FEE_ARTICLE_ID, amount: 1, original_current_price: feeEur });
+      baseCentsTotal += Math.round(feeEur * 100);
+      dueCentsTotal += Math.round(feeEur * 100);
+    }
+  }
+
   const baseTotal = Number((baseCentsTotal / 100).toFixed(2));
   const dueTotal = Number((dueCentsTotal / 100).toFixed(2));
   if (dueTotal <= 0) {
@@ -846,6 +912,11 @@ module.exports = async function handler(req, res) {
   // --- place it ------------------------------------------------------------
   const ref = makeRef(body.ref);
   const payLabel = pay === "card" ? "С КАРТА" : "В БРОЙ";
+  // При доставка адресът стои ПЪРВИ в бележката на сметката — персоналът го вижда
+  // в касата и без Wolt; после — каквото клиентът е написал.
+  const orderNotes = dlv
+    ? [`ДОСТАВКА: ${dlv.text}${dlv.details ? " · " + dlv.details : ""}`, note].filter(Boolean).join("\n")
+    : note;
 
   // ── Вариант 1: картовата поръчка като клиентска заявка (зад ONLINE_CARD_V2) ──
   // Само за карта; в брой продължава надолу като отворена сметка, платена на
@@ -864,9 +935,9 @@ module.exports = async function handler(req, res) {
       contact_name: name,
       client_tel: phone,
       // Печата се на фискалната бележка при превръщането в сметка.
-      description: `Поръчка ${ref} · ВЗЕМАНЕ ОТ МЯСТО`,
+      description: `Поръчка ${ref} · ${dlv ? "ДОСТАВКА WOLT" : "ВЗЕМАНЕ ОТ МЯСТО"}`,
       // Бележката на клиента — не се печата.
-      public_notes: note || "",
+      public_notes: orderNotes,
       // Вземане от място, без доставка — както при отворената сметка.
       delivery_address: { delivery_type: "no" }
     };
@@ -985,13 +1056,13 @@ module.exports = async function handler(req, res) {
       // one is the `payments` array, which settles and closes the account on
       // creation. So the choice is written where staff will read it — the title
       // in the accounts list, and the first line of the notes.
-      account_alias: `ОНЛАЙН ${name} · ${payLabel}`,
+      account_alias: `ОНЛАЙН ${name} · ${payLabel}${dlv ? " · ДОСТАВКА" : ""}`,
       // Prints on the fiscal receipt, so it is short and says what it is.
-      description: `Поръчка ${ref} · ВЗЕМАНЕ ОТ МЯСТО`,
+      description: `Поръчка ${ref} · ${dlv ? "ДОСТАВКА WOLT" : "ВЗЕМАНЕ ОТ МЯСТО"}`,
       // Само това, което клиентът е написал в „Забележка" на сайта — нищо друго.
       // Начинът на плащане вече стои в колона „Начин" на касата, затова „Плащане:
       // …" тук е излишно и цапа Бележката. Празно, ако няма забележка.
-      notes: note,
+      notes: orderNotes,
       delivery_address: { delivery_type: "no" }
     },
     rows: rows
@@ -1058,6 +1129,24 @@ module.exports = async function handler(req, res) {
   // A failure here must not fail the order — the account already exists and the food
   // will be made. The customer simply gets the ordinary confirmation and pays at the
   // counter, which is what every order did until now.
+  // Доставка: записваме реда (адрес, получател) — pay-return.js създава доставката
+  // след плащането. В брой (наложен платеж) — създаваме я веднага.
+  let trackingUrl = null;
+  let deliveryStatus = null;
+  if (dlv) {
+    await woltOrder.saveRow({
+      ref: ref, account_id: accountId, status: pay === "card" ? "pending_payment" : "creating", pay: pay,
+      name: name, phone: phone, address: dlv.text, details: dlv.details || null, lat: dlv.lat, lon: dlv.lon,
+      promise_id: dlv.promise_id, fee: feeEur, subtotal: foodDueTotal
+    });
+    deliveryStatus = pay === "card" ? "pending_payment" : "creating";
+    if (pay === "cash") {
+      const made = await woltOrder.createDeliveryForRef(ref);
+      if (made.ok) { trackingUrl = made.tracking_url || null; deliveryStatus = "created"; }
+      else { deliveryStatus = "failed"; }   // сметката стои; персоналът звъни на клиента
+    }
+  }
+
   let paymentUrl = null;
   if (ONLINE_CARD && pay === "card" && accountId && DIRECT_DSK) {
     // Директен ДСК път: register.do → formUrl. returnUrl носи референцията,
@@ -1145,6 +1234,7 @@ module.exports = async function handler(req, res) {
     discount_pct: PICKUP_DISCOUNT_PCT,
     payment: pay,
     account_id: accountId,
-    online_payment_url: paymentUrl
+    online_payment_url: paymentUrl,
+    ...(dlv ? { mode: "delivery", delivery_fee: feeEur, delivery_status: deliveryStatus, tracking_url: trackingUrl } : {})
   });
 };

@@ -23,6 +23,7 @@
 // е невъзможно, защото поръчката съществува ПРЕДИ плащането.
 
 const crypto = require("crypto");
+const woltOrder = require("../lib/wolt-order");
 
 const BARSY_API = "https://motamoshop.barsy.online";
 const BARSY_ID = 1;
@@ -141,6 +142,17 @@ module.exports = async function handler(req, res) {
   const orderId = String(first(q.orderId) || first(q.mdOrder) || "");
 
   const back = (paid) => `${SITE}/?paid=${paid}${ref ? "&ref=" + encodeURIComponent(ref) : ""}`;
+  // Доставка до адрес (Wolt Drive): след ПОТВЪРДЕНО плащане създаваме доставката.
+  // Поръчка без ред в wolt_deliveries (вземане от място) → not_found → нищо.
+  // Провал тук НЕ спира потвърждението: храната се прави, персоналът звъни.
+  const afterPaid = async () => {
+    try {
+      const made = await woltOrder.createDeliveryForRef(ref);
+      if (!made.ok && made.code !== "not_found") console.error(JSON.stringify({ event: "payreturn_wolt_failed", ref: ref, code: made.code }));
+    } catch (err) {
+      console.error(JSON.stringify({ event: "payreturn_wolt_error", ref: ref, message: String(err && err.message) }));
+    }
+  };
 
   // 1) Подписът пази срещу подправяне: чужда сметка, друга сума.
   const expected = paySign([ref, acct, amt]);
@@ -220,6 +232,7 @@ module.exports = async function handler(req, res) {
     // (рядкото изключение, което пак печата служебен, но само тук — не на всяка
     // поръчка). Клиентът вижда успех: храната ще се направи.
     console.error(JSON.stringify({ event: "payreturn_place_error", ref: ref, acct: acct, orderId: orderId, message: String(err && err.message) }));
+    await afterPaid();
     redirect(res, back(1));
     return;
   }
@@ -230,6 +243,7 @@ module.exports = async function handler(req, res) {
       status: placed.status, barsy: typeof placed.raw === "string" ? placed.raw.slice(0, 600) : null
     }));
     // Пак: платено е, сметката е отворена, персоналът закрива. Успех към клиента.
+    await afterPaid();
     redirect(res, back(1));
     return;
   }
@@ -240,5 +254,6 @@ module.exports = async function handler(req, res) {
     event: "payreturn_settled", ref: ref, acct: acct, orderId: orderId, sum: sumEur,
     barsy: typeof placed.raw === "string" ? placed.raw.slice(0, 800) : placed.data
   }));
+  await afterPaid();
   redirect(res, back(1));
 };
