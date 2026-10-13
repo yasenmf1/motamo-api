@@ -931,7 +931,8 @@ ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
     <a href="?view=cex&k=${encodeURIComponent(k)}"><span><b>Заявки от точката</b><span>цехът изпълнява и издава документите</span></span><span id="pend" class="go">→</span></a>
     <a href="?view=stock&k=${encodeURIComponent(k)}"><span><b>Складът на цеха</b><span>какво няма да стигне до доставката</span></span><span id="short" class="go">→</span></a>
     ${cexToolKey() ? `<a href="/api/cex-plan?view=tool&k=${encodeURIComponent(cexToolKey())}"><span><b>Производство и стокови</b><span>заготовки, артикули, сметки, стокови разписки</span></span><span class="go">→</span></a>
-    <a href="/api/cex-plan?view=reports&k=${encodeURIComponent(cexToolKey())}"><span><b>Отчети</b><span>оборот и себестойност — цех и точка</span></span><span class="go">→</span></a>` : ``}
+    <a href="/api/cex-plan?view=reports&k=${encodeURIComponent(cexToolKey())}"><span><b>Отчети</b><span>оборот и себестойност — цех и точка</span></span><span class="go">→</span></a>
+    <a href="/api/cex-plan?view=routes&k=${encodeURIComponent(cexToolKey())}"><span><b>Маршрути на шофьора</b><span>обектите със стокова — подреди ги по маршрути, ботът ги дава на Митко</span></span><span class="go">→</span></a>` : ``}
     ` : ``}
   </div>
   <div id="msg" class="msg info" style="margin-top:16px">${isOwner(k) ? "Проверявам…" : "Натисни, за да поръчаш от цеха."}</div>
