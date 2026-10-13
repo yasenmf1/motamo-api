@@ -1423,7 +1423,7 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
   <div class="kpi exp"><div class="l">Разходи</div><div class="v">${bg(data.expenses)} €</div></div>
   <div class="kpi res"><div class="l">Резултат${data.units_truncated ? " ⚠" : ""}</div><div class="v">${data.units_truncated ? "~" : ""}${bg(data.result)} €</div></div>
   <div class="kpi inv"><div class="l">Фактурирано</div><div class="v">${bg(data.invoiced_neto)} €</div></div>
-  <div class="kpi gap"><div class="l">Без фактура</div><div class="v">${bg(gapNeto)} €</div><div class="s">ИТТ изключен</div></div>
+  <div class="kpi gap"><div class="l">Без фактура</div><div class="v">${bg(gapNeto)} €</div><div class="s">ИТТ изкл. · разносът в края на месеца се фактурира в началото на следващия</div></div>
   <div class="kpi load"><div class="l">Зареждания</div><div class="v">${bg(data.loads_neto)} €</div></div>
   <div class="kpi stock"><div class="l">Склад (в пари)</div><div class="v">${bg(data.stock_value)} €</div><div class="s">${data.stock_items || 0} артикула · себест.</div></div>
   <div class="kpi"><div class="l">Сметки</div><div class="v">${data.accounts || 0}</div><div class="s">среден чек ${bg(data.avg_check)} €</div></div>
@@ -1459,7 +1459,8 @@ ${tips ? `<div class="card"><h2>💡 Съвети / Наблюдения</h2><ul
   <div class="chartbox donut"><canvas id="cClients" height="260" style="max-width:420px"></canvas></div>
   <details class="tbl" open><summary>таблица</summary>
   <table><thead><tr><th>Клиент</th><th class="q">Оборот</th><th class="q">Маржин</th><th class="q">Фактурирано</th><th class="q">Без фактура</th><th class="q">Сметки</th></tr></thead>
-  <tbody>${rows || '<tr><td colspan="6" class="note">Няма затворени сметки в периода.</td></tr>'}</tbody></table></details></div>
+  <tbody>${rows || '<tr><td colspan="6" class="note">Няма затворени сметки в периода.</td></tr>'}</tbody></table>
+  <div class="note" style="margin:0 0 10px;text-align:left;padding:0 16px">„Без фактура" при месечен изглед включва разноса от края на месеца, който се фактурира в началото на следващия (фактурите са седмични партиди, броят се по датата на издаване). На годишен изглед остава само най-последният нефактуриран разнос.</div></details></div>
 ${(() => {
   const cl = err ? [] : (data.clients || []).filter(c => Array.isArray(c.arts) && c.arts.length);
   if (!cl.length) return "";
