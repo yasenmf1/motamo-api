@@ -294,6 +294,20 @@ td.c{text-align:right;color:#7a8087}tr:nth-child(even) td{background:#fafbfc}
 .split{display:flex;gap:16px;flex-wrap:wrap;padding:8px 8px 14px}.split table{flex:1;min-width:240px;border:1px solid #eef0f3;border-radius:10px;overflow:hidden}
 .note{color:#7a8087;font-size:12px;text-align:center;margin:2px 0 20px}
 .err{background:#fff;border-radius:12px;padding:24px;text-align:center;color:#b3121b}
+@keyframes popIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.kpi.clk{cursor:pointer}.kpi.clk .l::after{content:"▸";float:right;opacity:.4;font-size:11px}
+.kpi.sel{outline:2px solid var(--ac);outline-offset:1px}
+#detail{background:#fff;border-radius:14px;box-shadow:0 3px 12px rgba(20,23,26,.08);overflow:hidden;display:none}
+#detail.show{display:block;animation:popIn .25s both}
+#detail h3{margin:0;font-size:14px;font-weight:800;color:#fff;background:linear-gradient(135deg,#d41822,#9a0f16);padding:10px 16px;display:flex;justify-content:space-between}
+#detail .body{padding:8px 16px 12px}#detail .drow{padding:7px 0;border-top:1px solid #f1f2f4;font-variant-numeric:tabular-nums}#detail .drow:first-child{border-top:0}
+.wf{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:620px){.wf{grid-template-columns:1fr}}
+.wf label{font-size:12px;color:#555;font-weight:700;display:flex;justify-content:space-between}.wf label b{color:#1f2937}
+.wf input[type=range]{width:100%;accent-color:#b3121b;margin-top:4px}
+.wf .out{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
+.wf .out .b{background:#f5f8f7;border-radius:12px;padding:12px 14px;border-left:4px solid #0a6b2e}
+.wf .out .b .l{font-size:11px;color:#7a8087;text-transform:uppercase}.wf .out .b .v{font-size:23px;font-weight:800;font-variant-numeric:tabular-nums}
+.wf .mini{font-size:12px;color:#7a8087;margin-top:8px}.wf .reset{font:12px system-ui;font-weight:700;border:0;border-radius:7px;padding:5px 12px;background:#f7e1e2;color:#7a0c12;cursor:pointer;margin-top:10px}
 @media(max-width:520px){th,td{padding:8px 10px;font-size:13px}.kpi .v{font-size:22px}}
 </style></head><body>
 <header><h1>🍱 Каравелов · Дашборд</h1><div class="d">${err ? "грешка" : esc(data.from) + " – " + esc(data.to) + " · " + (data.accounts || 0) + " сметки · оборот без ДДС"}</div></header>
@@ -315,6 +329,19 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
   <div class="kpi on"><div class="l">Онлайн (сайт)</div><div class="v">${bg(data.online_neto)} €</div><div class="s">${data.online_n || 0} поръчки · каса ${bg(data.counter_neto)} €</div></div>
   <div class="kpi card2"><div class="l">Плащане с карта</div><div class="v">${data.pay_used ? bg(pay.card.neto) + " €" : "—"}</div><div class="s">${data.pay_used ? "в брой " + bg(pay.cash.neto) + " €" : "няма данни за плащане"}</div></div>
 </div>
+<div id="detail"></div>
+<div class="card"><h2>🧮 „Какво ако…"<span>местиш плъзгачите — смята на живо</span></h2>
+  <div class="wf" style="padding:14px 16px 16px">
+   <div>
+     <div><label>Разходи (фиксирани) <b id="wfExpL"></b></label><input type="range" id="wfExp"></div>
+     <div style="margin-top:12px"><label>Цени <b id="wfPriceL"></b></label><input type="range" id="wfPrice" min="-20" max="30" step="1" value="0"></div>
+     <button class="reset" id="wfReset">↺ Върни реалните</button>
+   </div>
+   <div>
+    <div class="out"><div class="b"><div class="l">Резултат</div><div class="v" id="wfRes"></div></div><div class="b" style="border-color:#0a6b2e"><div class="l">Маржин</div><div class="v" id="wfMar" style="color:#0a6b2e"></div></div></div>
+    <div class="mini" id="wfNote"></div>
+   </div>
+  </div></div>
 ${data.fixed ? `<div class="card"><h2>Фиксирани разходи<span>${data.fixed.auto ? "авто · " : "ръчно · "}${bg(data.fixed.monthly)} €/мес × ${data.fixed.months} мес</span></h2>
   <table><thead><tr><th>Разход (от 01.2026)</th><th class="q">€/мес</th></tr></thead><tbody>
   ${data.fixed.salaries.map(l => `<tr><td>${esc(l.label)} (заплата)</td><td class="q">${bg(l.amount)}</td></tr>`).join("")}
@@ -337,7 +364,7 @@ ${data.fixed ? `<div class="card"><h2>Фиксирани разходи<span>${d
   </div>
   ${data.pay_used ? "" : '<div class="note" style="margin:0 0 10px">⚠ Няма данни за начин на плащане по сметките за този период.</div>'}</div>
 ${tips ? `<div class="card"><h2>💡 Съвети / Наблюдения</h2><ul class="tips">${tips}</ul></div>` : ""}
-<div class="card"><h2>Оборот по период<span class="seg" id="seg"><button data-g="day">Ден</button><button data-g="week">Седмица</button><button data-g="month" class="on">Месец</button></span></h2>
+<div class="card"><h2 style="flex-wrap:wrap"><span>Оборот по период <b id="trTot" style="font-weight:600;opacity:.8;font-size:12px"></b></span><span class="seg" id="seg"><button data-g="day">Ден</button><button data-g="week">Седмица</button><button data-g="month" class="on">Месец</button><span style="width:8px"></span><button data-v="period" class="on">Периоди</button><button data-v="total">Тотал</button></span></h2>
   <div class="chartbox"><canvas id="cTrend" height="150"></canvas></div>
   <details class="tbl" open><summary>таблица · сравнение спрямо предходния</summary>
   <table><thead><tr><th>Период</th><th class="q">Оборот без ДДС</th><th class="q">Δ предх.</th></tr></thead><tbody id="bkt"></tbody></table></details></div>
@@ -360,20 +387,29 @@ var BYHOUR=${err ? "{}" : JSON.stringify(data.by_hour || {})};
 var BYCAT=${err ? "{}" : JSON.stringify(data.by_cat || {})};
 var PRODUCTS=${err ? "[]" : JSON.stringify(data.products || [])};
 var MOVERS=${err ? "[]" : JSON.stringify(data.movers || [])};
+var DASH=${err ? "{}" : JSON.stringify({ neto: data.total_neto || 0, cogs: data.cogs || 0, exp: data.expenses || 0, result: data.result || 0, online: data.online_neto || 0, counter: data.counter_neto || 0, card: (pay && pay.card && pay.card.neto) || 0, cash: (pay && pay.cash && pay.cash.neto) || 0, accounts: data.accounts || 0, avg: data.avg_check || 0, fixedMonthly: (data.fixed && data.fixed.monthly) || 0, months: (data.fixed && data.fixed.months) || 0 })};
+var mView='period';
 function bgn(n){return (Math.round((n||0)*100)/100).toLocaleString('bg-BG',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function bgi(n){return Math.round(n||0).toLocaleString('bg-BG')}
 function wk(iso){var d=new Date(iso+'T12:00:00Z');var day=(d.getUTCDay()+6)%7;d.setUTCDate(d.getUTCDate()-day);return d.toISOString().slice(0,10)}
 function bucketize(g){var b={};Object.keys(BYDAY).forEach(function(d){var key=g==='day'?d:g==='week'?wk(d):d.slice(0,7);b[key]=(b[key]||0)+BYDAY[d]});return b}
 function dpct(cur,prev){return (prev!=null&&prev!==0)?((cur-prev)/prev*100):null}
 function dcell(d){if(d==null)return '<td class="c">—</td>';var c=d>=0?'#0a6b2e':'#b3121b';return '<td class="q" style="color:'+c+';font-weight:800">'+(d>=0?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'%</td>'}
-var trendChart=null;
-function render(g){var b=bucketize(g);var keys=Object.keys(b).sort();var vals=keys.map(function(k){return Math.round((b[k]||0)*100)/100});
-  var deltas=keys.map(function(k,i){return dpct(b[k],i>0?b[keys[i-1]]:null)});
-  var h='';for(var i=keys.length-1;i>=0;i--){var lab=g==='week'?'седм. от '+keys[i]:keys[i];h+='<tr><td>'+lab+'</td><td class="q">'+bgn(b[keys[i]])+' €</td>'+dcell(deltas[i])+'</tr>'}
+var trendChart=null,curG='month';
+function render(g){curG=g;var b=bucketize(g);var keys=Object.keys(b).sort();
+  var per=keys.map(function(k){return Math.round((b[k]||0)*100)/100});
+  var tot=0,cum=per.map(function(v){tot+=v;return Math.round(tot*100)/100});
+  var vals=mView==='total'?cum:per;
+  var deltas=keys.map(function(k,i){return (mView==='period'&&i>0)?dpct(per[i],per[i-1]):null});
+  var tt=document.getElementById('trTot');if(tt)tt.textContent='· тотал '+bgi(tot)+' €';
+  var h='';for(var i=keys.length-1;i>=0;i--){var lab=g==='week'?'седм. от '+keys[i]:keys[i];h+='<tr><td>'+lab+'</td><td class="q">'+bgn(vals[i])+' €</td>'+dcell(deltas[i])+'</tr>'}
   var bkt=document.getElementById('bkt');if(bkt)bkt.innerHTML=h||'<tr><td colspan="3" class="note">няма данни</td></tr>';
   if(window.Chart){var ctx=document.getElementById('cTrend');if(trendChart)trendChart.destroy();
-    trendChart=new Chart(ctx,{type:'line',data:{labels:keys,datasets:[{label:'Оборот',data:vals,borderColor:'#b3121b',backgroundColor:'rgba(179,18,27,.12)',fill:true,tension:.3,pointRadius:2,pointHoverRadius:5,borderWidth:2}]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return bgn(c.parsed.y)+' €'}}}},scales:{y:{ticks:{callback:function(v){return bgn(v)}}},x:{ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:14}}}}});}}
-document.querySelectorAll('#seg button').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('#seg button').forEach(function(x){x.className=''});b.className='on';render(b.getAttribute('data-g'))})});
+    trendChart=new Chart(ctx,{type:mView==='total'?'line':'bar',data:{labels:keys,datasets:[{label:'Оборот',data:vals,borderColor:'#b3121b',backgroundColor:mView==='total'?'rgba(179,18,27,.12)':'rgba(179,18,27,.85)',fill:mView==='total',tension:.3,pointRadius:mView==='total'?2:0,pointHoverRadius:5,borderWidth:2,borderRadius:5}]},
+      options:{responsive:true,maintainAspectRatio:false,onClick:function(e,els){if(els.length)periodDetail(keys[els[0].index],per[els[0].index],cum[els[0].index],deltas[els[0].index])},plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return (mView==='total'?'натрупано ':'')+bgn(c.parsed.y)+' €'},afterLabel:function(c){var d=deltas[c.dataIndex];return d==null?'':'спрямо предх.: '+(d>=0?'+':'')+d.toFixed(1)+'%'}}}},scales:{y:{ticks:{callback:function(v){return bgn(v)}}},x:{ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:14}}}}});}}
+function periodDetail(lab,v,c,d){showDetail('Период '+lab,bgi(v)+' €',[['Оборот за периода',bgn(v)+' €'],['Натрупано до тук',bgn(c)+' €'],['Δ спрямо предходния',d==null?'—':((d>=0?'+':'')+d.toFixed(1)+'%')]]);}
+document.querySelectorAll('#seg button[data-g]').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('#seg button[data-g]').forEach(function(x){x.classList.remove('on')});b.classList.add('on');render(b.getAttribute('data-g'))})});
+document.querySelectorAll('#seg button[data-v]').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('#seg button[data-v]').forEach(function(x){x.classList.remove('on')});b.classList.add('on');mView=b.getAttribute('data-v');render(curG)})});
 render('month');
 // Сайт vs Каса по дни
 if(window.Chart){var dk=Object.keys(CHAN).sort();
@@ -385,8 +421,40 @@ if(window.Chart){var dk=Object.keys(CHAN).sort();
 if(window.Chart){var ck=Object.keys(BYCAT).sort(function(a,b){return BYCAT[b]-BYCAT[a]});var cl=ck.slice(0,8);var rest=ck.slice(8).reduce(function(s,k){return s+BYCAT[k]},0);
   var labels=cl.slice();var vals=cl.map(function(k){return Math.round(BYCAT[k]*100)/100});if(rest>0){labels.push('други');vals.push(Math.round(rest*100)/100)}
   var cols=['#b3121b','#2b6ca3','#b06a00','#7a4b8a','#0a6b2e','#0d7a6f','#8a6608','#c8151f','#9aa0a6'];
+  var ctotCat=vals.reduce(function(a,b){return a+b},0);
   if(labels.length)new Chart(document.getElementById('cCat'),{type:'doughnut',data:{labels:labels,datasets:[{data:vals,backgroundColor:cols,borderWidth:2,borderColor:'#fff'}]},
-    options:{responsive:true,maintainAspectRatio:false,cutout:'58%',plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}},tooltip:{callbacks:{label:function(c){var s=c.dataset.data.reduce(function(a,b){return a+b},0);return c.label+': '+bgn(c.parsed)+' € ('+(s?Math.round(c.parsed/s*100):0)+'%)'}}}}}});}
+    options:{responsive:true,maintainAspectRatio:false,cutout:'58%',onClick:function(e,els){if(els.length){var i=els[0].index;showDetail('Категория: '+labels[i],bgi(vals[i])+' €',[['Дял от оборота',(ctotCat?(vals[i]/ctotCat*100).toFixed(1):0)+'%']])}},plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}},tooltip:{callbacks:{label:function(c){var s=c.dataset.data.reduce(function(a,b){return a+b},0);return c.label+': '+bgn(c.parsed)+' € ('+(s?Math.round(c.parsed/s*100):0)+'%)'}}}}}});}
+// ── детайл панел (клик за детайл) ──
+function showDetail(title,sum,rows){var el=document.getElementById('detail');if(!el)return;
+  el.innerHTML='<h3>'+title+(sum?'<span>'+sum+'</span>':'')+'</h3><div class="body">'+rows.map(function(r){return '<div class="drow">'+(r[1]?(r[0]+': <b>'+r[1]+'</b>'):r[0])+'</div>'}).join('')+'</div>';
+  el.className='show';el.scrollIntoView({behavior:'smooth',block:'nearest'});}
+(function(){
+  var det={turn:['Оборот (без ДДС)',function(){return [['Затворени сметки (÷1.2)',bgi(DASH.neto)+' €'],[DASH.accounts+' сметки · среден чек',bgn(DASH.avg)+' €'],['Сайт / Каса',bgi(DASH.online)+' € / '+bgi(DASH.counter)+' €']]}],
+   cost:['Себестойност',function(){return [['Материали + опаковка',bgi(DASH.cogs)+' €'],['Дял от оборота',(DASH.neto?(DASH.cogs/DASH.neto*100).toFixed(1):0)+'%']]}],
+   res:['Резултат',function(){return [['Оборот − Себестойност − Разходи',bgi(DASH.result)+' €'],['= '+bgi(DASH.neto)+' − '+bgi(DASH.cogs)+' − '+bgi(DASH.exp),''],['Маржин',(DASH.neto?(DASH.result/DASH.neto*100).toFixed(1):0)+'%']]}],
+   on:['Онлайн (сайт)',function(){return [['Сайт',bgi(DASH.online)+' €'],['Каса (на място)',bgi(DASH.counter)+' €'],['Дял онлайн',(DASH.neto?(DASH.online/DASH.neto*100).toFixed(1):0)+'%']]}],
+   card2:['Плащане с карта',function(){return [['С карта',bgi(DASH.card)+' €'],['В брой',bgi(DASH.cash)+' €']]}]};
+  var sel=null;
+  document.querySelectorAll('.kpis .kpi').forEach(function(d){
+    var cls=['turn','cost','res','on','card2'].filter(function(c){return d.classList.contains(c)})[0];
+    if(!det[cls])return; d.classList.add('clk');
+    d.addEventListener('click',function(){
+      if(sel===cls){document.getElementById('detail').className='';d.classList.remove('sel');sel=null;return;}
+      document.querySelectorAll('.kpi').forEach(function(x){x.classList.remove('sel')});d.classList.add('sel');sel=cls;
+      showDetail(det[cls][0],'',det[cls][1]());
+    });
+  });
+})();
+// ── „Какво ако" ──
+(function(){var we=document.getElementById('wfExp'),wp=document.getElementById('wfPrice');if(!we)return;
+  we.min=0;we.max=Math.max(Math.round(DASH.exp*2),1000);we.step=100;we.value=Math.round(DASH.exp);
+  function calc(){var p=+wp.value,exp=+we.value;var neto=DASH.neto*(1+p/100);var res=neto-DASH.cogs-exp;var mar=neto>0?res/neto*100:0;
+    document.getElementById('wfExpL').textContent=bgi(exp)+' €';document.getElementById('wfPriceL').textContent=(p>0?'+':'')+p+'%';
+    var rv=document.getElementById('wfRes');rv.textContent=bgi(res)+' €';rv.style.color=res>=0?'#0a6b2e':'#b3121b';
+    document.getElementById('wfMar').textContent=mar.toFixed(1)+'%';
+    var dr=res-DASH.result;document.getElementById('wfNote').innerHTML='спрямо реалното: <b style="color:'+(dr>=0?'#0a6b2e':'#b3121b')+'">'+(dr>=0?'+':'')+bgi(dr)+' €</b> · при цени '+(p>0?'+':'')+p+'% оборотът става '+bgi(neto)+' €';}
+  we.oninput=calc;wp.oninput=calc;document.getElementById('wfReset').onclick=function(){we.value=Math.round(DASH.exp);wp.value=0;calc()};calc();
+})();
 // Часови пик
 if(window.Chart){var hh=[];for(var i=0;i<24;i++)hh.push(i);var hv=hh.map(function(h){return Math.round((BYHOUR[h]||0)*100)/100});
   new Chart(document.getElementById('cHour'),{type:'bar',data:{labels:hh.map(function(h){return (h<10?'0':'')+h+'ч'}),datasets:[{label:'Оборот',data:hv,backgroundColor:'#b06a00',borderRadius:4}]},
@@ -449,3 +517,4 @@ module.exports = async function handler(req, res) {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.status(200).send(page(data, q.k));
 };
+
