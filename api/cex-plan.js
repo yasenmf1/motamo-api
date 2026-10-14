@@ -948,7 +948,7 @@ function render(){var ex=D.existing&&D.existing.for_date===SEL?D.existing:null,e
 $('dd').textContent='за '+dowOf(SEL)+' '+dm(SEL);$('hd').textContent='Заявка към MOTAMO · доставка сутринта';
 var b='';ITEMS.forEach(function(it){var v=ex?(exq[it.id]||0):it.suggest;var cls=ex?'':'sug';var nm=it.name.replace('НACHI','NACHI');var sub=/NACHI/.test(nm)?'8 хапки':(/^CET/.test(nm)?'16 хапки':'');
 b+='<tr data-id="'+it.id+'"><td class="n">'+esc(nm)+(sub?'<small>'+sub+'</small>':'')+'</td>'
-+'<td><div class="q"><button onclick="step(this,-1)">−</button><input type="number" inputmode="numeric" min="0" class="qty '+cls+'" value="'+v+'" oninput="this.className=\'qty\'"><button onclick="step(this,1)">+</button></div></td></tr>'});
++'<td><div class="q"><button onclick="step(this,-1)">−</button><input type="number" inputmode="numeric" min="0" class="qty '+cls+'" value="'+v+'" oninput="this.className=\\'qty\\'"><button onclick="step(this,1)">+</button></div></td></tr>'});
 $('tb').innerHTML=b||'<tr><td colspan="2" style="text-align:center;color:#888">Няма история за този магазин. Добави артикул от „+ Друг артикул".</td></tr>';
 if(ex){msg('Вече има пратена заявка за '+dm(SEL)+' ('+hhmm(ex.sent_at)+'). Промени я и натисни „Прати" пак, ако трябва.','ok')}
 var os='<option value="">— избери артикул —</option>';(D.other||[]).forEach(function(m){os+='<option value="'+m.id+'">'+esc(m.name.replace('НACHI','NACHI'))+'</option>'});$('othersel').innerHTML=os}

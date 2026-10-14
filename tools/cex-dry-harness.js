@@ -135,6 +135,7 @@ const live = async (body) => (await realFetch('https://motamo-api.vercel.app/api
   console.log('  грешен ключ → статус', r.status, '(очаквано 403)');
   r = await run({}, 'GET', { view: 'zayavka', o: '2:4', k: okTok });
   console.log('  верен ключ → статус', r.status, '| страницата носи името:', /Граф Игнатиев/.test(r.html || ''));
+  { const sc = [...(r.html || '').matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]); let okz = sc.length > 0; for (const x of sc) { try { new Function(x); } catch (e) { okz = false; console.log('  JS ГРЕШКА (zayavka):', e.message); } } console.log('  скриптът на формата е валиден JS:', okz); }
   r = await run({ token: undefined, action: 'shop_form_data', o: '2:4', k: okTok, date: '2026-10-01' });
   const it = (r.j.items || []).map(x => x.name + ' мин.същи=' + (x.last_same ? x.last_same.qty : '-') + ' посл=' + (x.last ? x.last.qty : '-') + ' пр=' + x.suggest);
   console.log('  данни ok', r.j.ok, '| обект', r.j.obj && r.j.obj.name, '| артикули:', JSON.stringify(it));
