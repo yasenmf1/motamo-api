@@ -807,7 +807,7 @@ function cexObj(a) { return CEX_OBJECTS[cexKey(a)] || null; }
 // незадължително „останало" (продадено = доставено − останало; ние не виждаме касата на
 // магазина). Заявката се записва в Supabase `cex_shop_requests` (upsert по дата+обект, НЕ се
 // заключва по час — носи час). Нищо не пише в Barsy: собственикът я прилага в решетката.
-const FORM_VERSION = 1, FORM_SWITCH_HOUR = 8, FORM_SWITCH_MIN = 30;   // до 08:30 → „за днес", после → „за утре"
+const FORM_VERSION = 1, FORM_SWITCH_HOUR = 9, FORM_SWITCH_MIN = 30;   // до 09:30 → за днес (разносът 09:00, късните до 09:30), после → за утре; за магазина това е „днес"
 const ROUTE_NAMES = (() => { const m = {}; try { for (const st of require("../lib/route.js").ROUTE) for (const k of (st.keys || [])) if (!m[k]) m[k] = st.name; } catch (e) {} return m; })();
 function formSecret() { return process.env.SHOP_FORM_SECRET || process.env.PAY_HMAC_SECRET || ""; }
 function formToken(key) {
@@ -912,11 +912,11 @@ header h1{margin:0;font-size:20px;font-weight:800}header .d{font-size:13px;opaci
 .days{display:flex;gap:8px}.days button{flex:1;padding:12px 8px;border:2px solid #d7dade;background:#fff;border-radius:12px;font-size:15px;font-weight:700;color:#444}
 .days button.on{border-color:#b3121b;background:#fdecec;color:#b3121b}
 .warn{background:#fff7e0;color:#7a4b00;border-radius:10px;padding:8px 10px;font-size:13px;margin-top:8px;display:none}
-table{width:100%;border-collapse:collapse;table-layout:fixed}th{font-size:10px;color:#777;font-weight:600;text-align:center;padding:4px 1px;white-space:nowrap;overflow:hidden}th.c1{width:31%}th.c2,th.c3{width:13%}th.c4{width:13%}th.c5{width:30%}
-td{padding:6px 1px;border-top:1px solid #f0f1f3;vertical-align:middle}td.n{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}td.n small{display:block;font-weight:400;color:#888;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+table{width:100%;border-collapse:collapse;table-layout:fixed}th{font-size:10px;color:#777;font-weight:600;text-align:center;padding:4px 1px;white-space:nowrap;overflow:hidden}th.c1{width:58%}th.c5{width:42%}
+td{padding:6px 1px;border-top:1px solid #f0f1f3;vertical-align:middle}td.n{font-weight:800;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:6px}td.n small{display:block;font-weight:500;color:#888;font-size:12px}
 td.h{text-align:center;color:#666;font-size:13px;white-space:nowrap;line-height:1.15}td.h small{font-size:10px;color:#999}
-.q{display:flex;align-items:center;justify-content:center;gap:2px}.q button{width:30px;min-width:30px;height:36px;padding:0;border:1px solid #cfd3d8;background:#fafbfc;border-radius:8px;font-size:20px;line-height:1;color:#333}
-.q input{width:38px;min-width:0;height:36px;padding:0;text-align:center;font-size:17px;font-weight:800;border:1px solid #cfd3d8;border-radius:8px;-moz-appearance:textfield}.q input::-webkit-outer-spin-button,.q input::-webkit-inner-spin-button,td.l input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.q{display:flex;align-items:center;justify-content:center;gap:2px}.q button{width:44px;min-width:44px;height:44px;padding:0;border:1px solid #cfd3d8;background:#fafbfc;border-radius:8px;font-size:20px;line-height:1;color:#333}
+.q input{width:52px;min-width:0;height:44px;padding:0;text-align:center;font-size:20px;font-weight:800;border:1px solid #cfd3d8;border-radius:8px;-moz-appearance:textfield}.q input::-webkit-outer-spin-button,.q input::-webkit-inner-spin-button,td.l input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .q input.sug{color:#1565c0}
 td.l{text-align:center}td.l input{width:38px;min-width:0;height:34px;padding:0;text-align:center;font-size:15px;border:1px dashed #cfd3d8;border-radius:8px;color:#555;-moz-appearance:textfield}
 .note{font-size:12px;color:#777;margin-top:8px}
@@ -926,12 +926,11 @@ td.l{text-align:center}td.l input{width:38px;min-width:0;height:34px;padding:0;t
 .msg{padding:10px 12px;border-radius:10px;margin-top:10px;display:none;font-size:14px}.msg.ok{display:block;background:#e8f5e9;color:#1b5e20}.msg.err{display:block;background:#fde8e8;color:#9b1c1c}.msg.info{display:block;background:#e9f0fb;color:#1a3d7a}
 select{width:100%;padding:10px;font-size:15px;border:1px solid #cfd3d8;border-radius:10px;background:#fff}
 </style></head><body>
-<header><h1>${esc(name)}</h1><div class="d" id="hd">Заявка към MOTAMO · разносът тръгва в 09:00</div></header>
+<header><h1>${esc(name)}</h1><div class="d" id="hd">Заявка към MOTAMO</div><div class="d" style="margin-top:6px"><span id="dd" style="font-size:18px;font-weight:800"></span> <a href="#" id="sw" onclick="swap();return false" style="color:#ffd6d6;font-size:12px;margin-left:8px">друг ден</a></div></header>
 <div class="wrap">
-<div class="card"><div class="days" id="days"></div><div class="warn" id="warn"></div></div>
-<div class="card"><table id="t"><thead><tr><th class="c1" style="text-align:left">артикул</th><th class="c2" id="h1">същи ден</th><th class="c3" id="h2">последно</th><th class="c4">останало</th><th class="c5">заявка</th></tr></thead><tbody id="tb"><tr><td colspan="5" style="text-align:center;color:#888">Зареждам…</td></tr></tbody></table>
-<div class="note">Сивите колони = доставено от MOTAMO. „останало" = колко имате сега (по желание, помага за по-точно предложение). Синьото число е предложение по средното за този ден от седмицата — промени го свободно.</div>
-<div class="btns"><button onclick="other()">+ Друг артикул</button><button onclick="likeLast()">Като миналия същи ден</button></div>
+<div class="card"><table id="t"><thead><tr><th class="c1" style="text-align:left">артикул</th><th class="c5">заявка</th></tr></thead><tbody id="tb"><tr><td colspan="2" style="text-align:center;color:#888">Зареждам…</td></tr></tbody></table>
+<div class="note">Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +.</div>
+<div class="btns"><button onclick="other()">+ Друг артикул</button></div>
 <div id="otherwrap" style="display:none;margin-top:8px"><select id="othersel"></select></div>
 <button class="send" id="send" onclick="send()">Прати заявката</button>
 <div class="msg" id="msg"></div></div>
@@ -945,27 +944,22 @@ function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
 function api(b){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({o:O,k:K},b))}).then(function(r){return r.json()})}
 function dm(iso){var p=iso.split('-');return p[2]+'.'+p[1]}
 function load(date){msg('Зареждам…','info');api({action:'shop_form_data',date:date}).then(function(j){if(!j.ok){msg('Грешка: '+(j.message||j.error||''),'err');return}D=j;SEL=j.for_date;ITEMS=j.items;render();$('msg').className='msg'}).catch(function(e){msg('Няма връзка. Опитай пак.','err')})}
-function render(){var t=D.today,tm=addDays(t,1);var h='';[[t,'Днес'],[tm,'Утре']].forEach(function(x){h+='<button class="'+(SEL===x[0]?'on':'')+'" onclick="pick(\\''+x[0]+'\\')">'+x[1]+'<br><small>'+dowOf(x[0])+' '+dm(x[0])+'</small></button>'});$('days').innerHTML=h;
-var w=$('warn');if(SEL===t&&D.default_date!==t){w.style.display='block';w.textContent='Минава 08:30 — заявеното за днес може да дойде с втората вълна след 09:30.'}else w.style.display='none';
-$('hd').textContent='Заявка за '+dowOf(SEL)+' '+dm(SEL)+' · разносът тръгва в 09:00';
-var ex=D.existing&&D.existing.for_date===SEL?D.existing:null,exq={},exl={};if(ex){(ex.rows||[]).forEach(function(r){exq[r.id]=r.qty});exl=ex.left_qty||{}}
-var b='';ITEMS.forEach(function(it){var v=ex?(exq[it.id]||0):it.suggest;var cls=ex?'':'sug';
-b+='<tr data-id="'+it.id+'"><td class="n">'+esc(it.name.replace('НACHI','NACHI'))+(it.avg!=null?'<small>ср. '+it.avg+' / '+it.weeks+' седм.</small>':'')+'</td>'
-+'<td class="h">'+(it.last_same?it.last_same.qty+'<br><small>'+dm(it.last_same.date)+'</small>':'—')+'</td>'
-+'<td class="h">'+(it.last?it.last.qty+'<br><small>'+dm(it.last.date)+'</small>':'—')+'</td>'
-+'<td class="l"><input type="number" inputmode="numeric" min="0" class="left" value="'+(exl[it.id]!=null?exl[it.id]:'')+'" placeholder="–"></td>'
-+'<td><div class="q"><button onclick="step(this,-1)">−</button><input type="number" inputmode="numeric" min="0" class="qty '+cls+'" value="'+v+'" oninput="this.className=\\'qty\\'"><button onclick="step(this,1)">+</button></div></td></tr>'});
-$('tb').innerHTML=b||'<tr><td colspan="5" style="text-align:center;color:#888">Няма история за този магазин. Добави артикул от „+ Друг артикул".</td></tr>';
+function render(){var ex=D.existing&&D.existing.for_date===SEL?D.existing:null,exq={};if(ex){(ex.rows||[]).forEach(function(r){exq[r.id]=r.qty})}
+$('dd').textContent='за '+dowOf(SEL)+' '+dm(SEL);$('hd').textContent='Заявка към MOTAMO · доставка сутринта';
+var b='';ITEMS.forEach(function(it){var v=ex?(exq[it.id]||0):it.suggest;var cls=ex?'':'sug';var nm=it.name.replace('НACHI','NACHI');var sub=/NACHI/.test(nm)?'8 хапки':(/^CET/.test(nm)?'16 хапки':'');
+b+='<tr data-id="'+it.id+'"><td class="n">'+esc(nm)+(sub?'<small>'+sub+'</small>':'')+'</td>'
++'<td><div class="q"><button onclick="step(this,-1)">−</button><input type="number" inputmode="numeric" min="0" class="qty '+cls+'" value="'+v+'" oninput="this.className=\'qty\'"><button onclick="step(this,1)">+</button></div></td></tr>'});
+$('tb').innerHTML=b||'<tr><td colspan="2" style="text-align:center;color:#888">Няма история за този магазин. Добави артикул от „+ Друг артикул".</td></tr>';
 if(ex){msg('Вече има пратена заявка за '+dm(SEL)+' ('+hhmm(ex.sent_at)+'). Промени я и натисни „Прати" пак, ако трябва.','ok')}
 var os='<option value="">— избери артикул —</option>';(D.other||[]).forEach(function(m){os+='<option value="'+m.id+'">'+esc(m.name.replace('НACHI','NACHI'))+'</option>'});$('othersel').innerHTML=os}
+function swap(){var t=D.today,tm=addDays(t,1);var o=SEL===t?tm:t;if(confirm('Да сменя деня на '+dowOf(o)+' '+dm(o)+'?'))load(o)}
 function addDays(iso,n){var d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
 function dowOf(iso){return ['неделя','понеделник','вторник','сряда','четвъртък','петък','събота'][new Date(iso+'T12:00:00Z').getUTCDay()]}
 function hhmm(s){var d=new Date(s);return isNaN(d)?'':('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
 function pick(d){load(d)}
 function step(btn,n){var i=btn.parentNode.querySelector('.qty');i.value=Math.max(0,(parseInt(i.value)||0)+n);i.className='qty'}
-function likeLast(){ITEMS.forEach(function(it){var tr=document.querySelector('tr[data-id="'+it.id+'"] .qty');if(tr){tr.value=it.last_same?it.last_same.qty:(it.last?it.last.qty:0);tr.className='qty'}})}
-function other(){var w=$('otherwrap');w.style.display=w.style.display==='none'?'block':'none';$('othersel').onchange=function(){var id=+this.value;if(!id)return;var m=(D.other||[]).filter(function(x){return x.id===id})[0];if(!m)return;ITEMS.push({id:m.id,name:m.name,last:null,last_same:null,suggest:0,avg:null,weeks:0});D.other=D.other.filter(function(x){return x.id!==id});var keep={};document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){keep[tr.getAttribute('data-id')]=[tr.querySelector('.qty').value,tr.querySelector('.left').value]});render();Object.keys(keep).forEach(function(k){var tr=document.querySelector('tr[data-id="'+k+'"]');if(tr){tr.querySelector('.qty').value=keep[k][0];tr.querySelector('.qty').className='qty';tr.querySelector('.left').value=keep[k][1]}});w.style.display='none'}}
-function send(){var rows=[],left={},n=0;document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){var id=+tr.getAttribute('data-id'),q=parseInt(tr.querySelector('.qty').value)||0,l=tr.querySelector('.left').value;rows.push({id:id,qty:q});if(q>0)n++;if(l!=='')left[id]=parseInt(l)||0});
+function other(){var w=$('otherwrap');w.style.display=w.style.display==='none'?'block':'none';$('othersel').onchange=function(){var id=+this.value;if(!id)return;var m=(D.other||[]).filter(function(x){return x.id===id})[0];if(!m)return;ITEMS.push({id:m.id,name:m.name,last:null,last_same:null,suggest:0,avg:null,weeks:0});D.other=D.other.filter(function(x){return x.id!==id});var keep={};document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){keep[tr.getAttribute('data-id')]=tr.querySelector('.qty').value});render();Object.keys(keep).forEach(function(k){var tr=document.querySelector('tr[data-id="'+k+'"]');if(tr){tr.querySelector('.qty').value=keep[k];tr.querySelector('.qty').className='qty'}});w.style.display='none'}}
+function send(){var rows=[],left={},n=0;document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){var id=+tr.getAttribute('data-id'),q=parseInt(tr.querySelector('.qty').value)||0;rows.push({id:id,qty:q});if(q>0)n++});
 if(!n){if(!confirm('Заявката е с 0 от всичко. Да я пратя така (няма да получите нищо за '+dm(SEL)+')?'))return}else if(!confirm('Пращаш заявка за '+dowOf(SEL).toUpperCase()+' '+dm(SEL)+' — '+n+' артикула. Потвърди.'))return;
 $('send').disabled=true;msg('Пращам…','info');api({action:'shop_form_send',for_date:SEL,rows:rows,left:left}).then(function(j){$('send').disabled=false;if(j.ok){msg('✓ Пратено в '+hhmm(j.sent_at)+' за '+dm(j.for_date)+'. Благодарим!','ok');D.existing={for_date:j.for_date,rows:j.rows,left_qty:j.left,sent_at:j.sent_at}}else msg('Не е пратено: '+(j.message||j.error||''),'err')}).catch(function(){$('send').disabled=false;msg('Няма връзка. Опитай пак.','err')})}
 load(null);
