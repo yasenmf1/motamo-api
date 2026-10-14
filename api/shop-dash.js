@@ -499,6 +499,9 @@ module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   const q = (req.query && typeof req.query === "object") ? req.query : {};
   const okV = [process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].some(t => t && q.k === t);
+  // 🏠 Начало → хъбът (само със силен ключ; ?nohome=1 в iframe-а на Репорти)
+  { const own = process.env.OWNER_TOKEN, strong = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN].filter(Boolean);
+    if (own && strong.includes(q.k) && q.nohome !== "1") { const _send = res.send.bind(res); res.send = (html) => _send(typeof html === "string" ? html.replace(/<body([^>]*)>/, m => m + `<a href="/api/transfer?view=hub&k=${encodeURIComponent(own)}" target="_top" style="position:fixed;top:8px;right:10px;z-index:9999;background:#fff;color:#14171a;border:1px solid #ddd;border-radius:999px;padding:7px 12px;font:14px system-ui,sans-serif;font-weight:700;text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.18)">🏠 Начало</a>`) : html); } }
   if (!okV) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп — липсва или грешен ключ (?k=).</body>"); return; }
   const user = process.env.BARSY_USER, pass = process.env.BARSY_PASS;
   if (!user || !pass) { res.status(500).send("Не е конфигуриран достъп до Barsy."); return; }

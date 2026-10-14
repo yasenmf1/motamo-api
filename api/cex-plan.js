@@ -1240,6 +1240,16 @@ function isoPlusDays(iso, n) { const d = new Date(iso + "T12:00:00Z"); d.setUTCD
 function lotFor(prodDateIso) { return { lot: "L." + isoToDDMMYYYY(prodDateIso), lot_exp: isoToDDMMYYYY(isoPlusDays(prodDateIso, 3)) }; }
 
 // ── HTML: екран за цеха (само четене) ────────────────────────────────────────
+// ★ S31 — 🏠 „Начало" на всяка страница на собственика → хъбът „Цех и точка" (/api/transfer?view=hub).
+// Само при силен ключ (OWNER_TOKEN не бива да се показва на персонала с четящия ключ); ?nohome=1 го маха (iframe в Репорти).
+function withHome(q, html) {
+  const own = process.env.OWNER_TOKEN, k = q && q.k;
+  const strong = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN].filter(Boolean);
+  if (!own || !k || !strong.includes(k) || typeof html !== "string" || (q && q.nohome === "1")) return html;
+  const btn = `<a href="/api/transfer?view=hub&k=${encodeURIComponent(own)}" target="_top" style="position:fixed;top:8px;right:10px;z-index:9999;background:#fff;color:#14171a;border:1px solid #ddd;border-radius:999px;padding:7px 12px;font:14px system-ui,sans-serif;font-weight:700;text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.18)">🏠 Начало</a>`;
+  return html.replace(/<body([^>]*)>/, m => m + btn);
+}
+
 function todayPage(inner) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="180">
@@ -1279,8 +1289,8 @@ header .d{font-size:15px;opacity:.93;margin-top:4px}
 // Вътрешен хъб: Цех + Точка дашбордите в таб-ове (iframe, същия домейн, токен вътре).
 function reportsHubPage(k) {
   const ek = encodeURIComponent(k || "");
-  const cex = `/api/cex-plan?view=dashboard&k=${ek}`;
-  const shop = `/api/shop-dash?view=dashboard&k=${ek}`;
+  const cex = `/api/cex-plan?view=dashboard&k=${ek}&nohome=1`;
+  const shop = `/api/shop-dash?view=dashboard&k=${ek}&nohome=1`;
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>MOTAMO · Репорти</title><style>
 :root{color-scheme:light}*{box-sizing:border-box}html,body{height:100%}
@@ -1307,7 +1317,7 @@ header .brand img{width:30px;height:30px;border-radius:7px;background:#fff;paddi
 <div class="frames">
   <iframe id="fCex" src="${esc(cex)}" title="Цех"></iframe>
   <iframe id="fShop" data-src="${esc(shop)}" title="Точка" hidden></iframe>
-  <iframe id="fRoutes" data-src="/api/cex-plan?view=routes&k=${ek}" title="Маршрути" hidden></iframe>
+  <iframe id="fRoutes" data-src="/api/cex-plan?view=routes&k=${ek}&nohome=1" title="Маршрути" hidden></iframe>
 </div>
 <script>
 var F={cex:'fCex',shop:'fShop',routes:'fRoutes'},T={cex:'tCex',shop:'tShop',routes:'tRoutes'};
@@ -1880,6 +1890,7 @@ restoreGrid();
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   const q = (req.query && typeof req.query === "object") ? req.query : {};
+  if (req.method === "GET" && q.view) { const _send = res.send.bind(res); res.send = (html) => _send(withHome(q, html)); }
   const view = q.view;
 
   // 1) Страница за собственика (само UI shell; данните искат токен през POST).
