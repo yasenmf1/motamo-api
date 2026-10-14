@@ -949,7 +949,8 @@ td.l{text-align:center}td.l input{width:38px;min-width:0;height:34px;padding:0;t
 .msg{padding:10px 12px;border-radius:10px;margin-top:10px;display:none;font-size:14px}.msg.ok{display:block;background:#e8f5e9;color:#1b5e20}.msg.err{display:block;background:#fde8e8;color:#9b1c1c}.msg.info{display:block;background:#e9f0fb;color:#1a3d7a}
 select{width:100%;padding:10px;font-size:15px;border:1px solid #cfd3d8;border-radius:10px;background:#fff}
 </style></head><body>
-<header><h1>${esc(name)}</h1>${place ? `<div class="d">${esc(place)}</div>` : ""}<div class="d" id="hd">Заявка към MOTAMO</div><div class="d" style="margin-top:6px"><span id="dd" style="font-size:18px;font-weight:800"></span> <a href="#" id="sw" onclick="swap();return false" style="color:#ffd6d6;font-size:12px;margin-left:8px">друг ден</a></div></header>
+<header><h1>${esc(name)}</h1>${place ? `<div class="d">${esc(place)}</div>` : ""}<div class="d" id="hd">Заявка към MOTAMO</div></header>
+<div class="wrap" style="padding-bottom:0"><div class="card" style="text-align:center;padding:14px 12px;border:3px solid #b3121b"><div style="font-size:13px;color:#777">Заявката е за</div><div id="dd" style="font-size:26px;font-weight:900;color:#b3121b;line-height:1.15;margin:4px 0"></div><div id="td" style="font-size:13px;color:#777"></div><a href="#" id="sw" onclick="swap();return false" style="display:inline-block;margin-top:6px;color:#1565c0;font-size:13px">Не е за този ден? Смени</a></div></div>
 <div class="wrap">
 <div class="card"><table id="t"><thead><tr><th class="c1" style="text-align:left">артикул</th><th class="c5">заявка</th></tr></thead><tbody id="tb"><tr><td colspan="2" style="text-align:center;color:#888">Зареждам…</td></tr></tbody></table>
 <div class="note">Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +.</div>
@@ -968,7 +969,7 @@ function api(b){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Ty
 function dm(iso){var p=iso.split('-');return p[2]+'.'+p[1]}
 function load(date){msg('Зареждам…','info');api({action:'shop_form_data',date:date}).then(function(j){if(!j.ok){msg('Грешка: '+(j.message||j.error||''),'err');return}D=j;SEL=j.for_date;ITEMS=j.items;render();$('msg').className='msg'}).catch(function(e){msg('Няма връзка. Опитай пак.','err')})}
 function render(){var ex=D.existing&&D.existing.for_date===SEL?D.existing:null,exq={};if(ex){(ex.rows||[]).forEach(function(r){exq[r.id]=r.qty})}
-$('dd').textContent='за '+dowOf(SEL)+' '+dm(SEL);$('hd').textContent='Заявка към MOTAMO · доставка сутринта';
+$('dd').textContent=dowOf(SEL).toUpperCase()+' '+dm(SEL);$('td').textContent='днес е '+dowOf(D.today)+' '+dm(D.today)+(SEL===D.today?' — доставка днес сутринта':' — доставка утре сутринта');$('hd').textContent='Заявка към MOTAMO';
 var b='';ITEMS.forEach(function(it){var v=ex?(exq[it.id]||0):it.suggest;var cls=ex?'':'sug';var nm=it.name.replace('НACHI','NACHI');var sub=/NACHI/.test(nm)?'8 хапки':(/^CET/.test(nm)?'16 хапки':'');
 b+='<tr data-id="'+it.id+'"><td class="n">'+esc(nm)+(sub?'<small>'+sub+'</small>':'')+'</td>'
 +'<td><div class="q"><button onclick="step(this,-1)">−</button><input type="number" inputmode="numeric" min="0" class="qty '+cls+'" value="'+v+'" oninput="this.className=\\'qty\\'"><button onclick="step(this,1)">+</button></div></td></tr>'});
