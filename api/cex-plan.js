@@ -1354,7 +1354,7 @@ input[type=date]{font:15px system-ui;padding:5px 8px;border:1px solid #ccc;borde
 .item{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e6e6e6;border-radius:10px;margin:4px 0;background:#fff;cursor:grab;user-select:none}
 .item:active{cursor:grabbing}.item.drag{opacity:.4}
 .item .h{color:#bbb;font-size:16px}.item .nm{flex:1;min-width:0;font-size:14px}.item .nm small{display:block;color:#999;font-size:11.5px}
-.item.sbs{border-left:4px solid #c8151f}
+.item.sbs{border-left:4px solid #c8151f}.item.nw{border-left:4px solid #e0a800;background:#fffbea}
 .hint{color:#999;font-size:13px;text-align:center;padding:10px}
 .bar{position:sticky;bottom:0;background:#fff;padding:10px 12px;display:flex;gap:8px;box-shadow:0 -2px 10px rgba(0,0,0,.08);border-radius:12px;margin-top:6px;flex-wrap:wrap}
 .bar button{font:15px system-ui;font-weight:800;padding:11px 14px;border-radius:10px;border:0;cursor:pointer}
@@ -1377,6 +1377,7 @@ var K=${JSON.stringify(k || "")},API='/api/cex-plan',MAXR=5,ST={stops:[],routes:
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function post(b){b.token=K;return fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json()})}
 function cityOf(z){return z==='Сливен'||z==='Хасково'?z:'Стара Загора'}
+function isNew(k){var s=stop(k);return !!(s&&s.isNew)}
 function stop(k){return ST.stops.filter(function(s){return s.key===k})[0]}
 function load(){var d=document.getElementById('date').value;document.getElementById('state').textContent='зарежда…';
   post({action:'route_plan',date:d}).then(function(j){if(!j.ok){document.getElementById('state').textContent='грешка: '+(j.error||'');return}
@@ -1387,9 +1388,10 @@ function load(){var d=document.getElementById('date').value;document.getElementB
     document.getElementById('state').textContent=ST.stops.length+' обекта · '+(src.length?'записан план ('+new Date(j.saved_at).toLocaleTimeString('bg-BG',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Sofia'})+')':'няма записан план — влачи или натисни „Автоматично“');
     render()})}
 function placed(){var m={};ST.routes.forEach(function(r){r.keys.forEach(function(k){m[k]=1})});return m}
-function itemHtml(k){var s=stop(k);if(!s)return '';return '<div class="item'+(/^СиБиЕс/.test(s.zone)?' sbs':'')+'" draggable="true" data-k="'+esc(k)+'"><span class="h">⋮⋮</span><span class="nm">'+esc(s.name)+'<small>'+esc(s.zone)+'</small></span></div>'}
-function render(){var p=placed();var pool='';['Стара Загора','Сливен','Хасково'].forEach(function(c){var ks=ST.stops.filter(function(s){return !p[s.key]&&cityOf(s.zone)===c});if(!ks.length)return;pool+='<div class="city">'+c+' <span style="color:#999;font-weight:400">('+ks.length+')</span></div>'+ks.map(function(s){return itemHtml(s.key)}).join('')});
-  if(!pool)pool='<div class="hint">'+(ST.stops.length?'Всички обекти са в маршрути ✓':'Няма издадени стокови за този ден.')+'</div>';
+function itemHtml(k){var s=stop(k);if(!s)return '';return '<div class="item'+(/^СиБиЕс/.test(s.zone)?' sbs':'')+(s.isNew?' nw':'')+'" draggable="true" data-k="'+esc(k)+'"><span class="h">⋮⋮</span><span class="nm">'+esc(s.name)+'<small>'+(s.isNew?'🆕 нов обект — без адрес за навигация (кажи на Claude да го добави)':esc(s.zone))+'</small></span></div>'}
+function render(){var p=placed();var pool='';['Стара Загора','Сливен','Хасково'].forEach(function(c){var all=ST.stops.filter(function(s){return cityOf(s.zone)===c}),ks=all.filter(function(s){return !p[s.key]});
+    pool+='<div class="city">'+c+' <span style="color:#999;font-weight:400">('+(all.length?(ks.length+' от '+all.length):'няма стокова днес')+')</span></div>'+(ks.length?ks.map(function(s){return itemHtml(s.key)}).join(''):(all.length?'<div class="hint" style="padding:4px 10px;text-align:left">всички са в маршрути ✓</div>':''))});
+  if(!ST.stops.length)pool='<div class="hint">Няма издадени стокови за този ден.</div>';
   document.getElementById('pool').innerHTML=pool;
   var h='';ST.routes.forEach(function(r,ri){h+='<div class="route" data-r="'+ri+'"><h2><span class="num">'+(ri+1)+'</span><input value="'+esc(r.name)+'" onchange="ST.routes['+ri+'].name=this.value"><span class="cnt">'+r.keys.length+' об.</span><button class="x" title="Махни маршрута" onclick="delRoute('+ri+')">×</button></h2>'+(r.keys.length?r.keys.map(itemHtml).join(''):'<div class="hint">пусни обекти тук</div>')+'</div>'});
   document.getElementById('routes').innerHTML=h;
@@ -1411,11 +1413,11 @@ function delRoute(ri){if(ST.routes.length<=1){ST.routes[0].keys=[];render();retu
 function clearAll(){ST.routes=[{name:'Маршрут 1',keys:[]}];render()}
 function applyAuto(){ST.routes=ST.auto.slice(0,MAXR).map(function(r){return {name:r.name,keys:r.keys.slice()}});if(!ST.routes.length)ST.routes=[{name:'Маршрут 1',keys:[]}];render()}
 function save(){var m=document.getElementById('msg');var p=placed();var left=ST.stops.filter(function(s){return !p[s.key]}).length;
-  var routes=ST.routes.filter(function(r){return r.keys.length});
+  var routes=ST.routes.filter(function(r){return r.keys.length}).map(function(r){var labels={};r.keys.forEach(function(k){if(isNew(k))labels[k]=stop(k).name});return {name:r.name,keys:r.keys,labels:labels}});
   if(!routes.length){m.className='msg err';m.textContent='Няма обекти в маршрутите.';return}
   m.className='msg';m.textContent='записва…';
   post({action:'route_plan_save',date:document.getElementById('date').value,routes:routes}).then(function(j){
-    if(j.ok){m.className=left?'msg warn':'msg';m.textContent='✅ Записано — шофьорът ще види тези маршрути при „Тръгвам“.'+(left?' ⚠️ '+left+' обекта са извън маршрутите — ботът ще ги сложи в последния.':'');load()}else{m.className='msg err';m.textContent='Грешка: '+(j.error||'')}})}
+    if(j.ok){m.className=left?'msg warn':'msg';m.textContent='✅ Записано — шофьорът ще види тези маршрути при „Тръгвам“.'+(left?' ⚠️ '+left+' обекта остават извън маршрутите (няма да ги види).':'');load()}else{m.className='msg err';m.textContent='Грешка: '+(j.error||'')}})}
 document.getElementById('date').addEventListener('change',load);load();
 </script></body></html>`;
 }
@@ -2653,7 +2655,10 @@ module.exports = async function handler(req, res) {
   if (body.action === "route_plan" || body.action === "route_plan_save") {
     const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
     if (body.action === "route_plan_save") {
-      const routes = Array.isArray(body.routes) ? body.routes.filter(r => r && Array.isArray(r.keys)).map((r, i) => ({ name: String(r.name || `Маршрут ${i + 1}`).slice(0, 40), keys: r.keys.map(String).slice(0, 60) })).filter(r => r.keys.length) : [];
+      const routes = Array.isArray(body.routes) ? body.routes.filter(r => r && Array.isArray(r.keys)).map((r, i) => {
+        const labels = {}; if (r.labels && typeof r.labels === "object") for (const [k, v] of Object.entries(r.labels)) if (r.keys.includes(k)) labels[String(k)] = String(v).slice(0, 60);
+        return { name: String(r.name || `Маршрут ${i + 1}`).slice(0, 40), keys: r.keys.map(String).slice(0, 60), labels };
+      }).filter(r => r.keys.length) : [];
       try {
         await sbReq(`cex_route_plan?on_conflict=for_date`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
           body: JSON.stringify([{ for_date: date, routes, updated_at: new Date().toISOString() }]) });
@@ -2669,7 +2674,20 @@ module.exports = async function handler(req, res) {
       const have = new Set(docs.map(d => (d.client_id != null ? d.client_id : "") + ":" + (d.person_id != null ? d.person_id : "")));
       const dow = new Date(date + "T12:00:00Z").getUTCDay();
       const raw = RT.ROUTE.filter(s => (!s.onlyDow || s.onlyDow.includes(dow)) && s.keys.some(k => have.has(k))).map(s => ({ key: RT.stopKey(s), name: s.name, zone: s.zone }));
-      const auto = RT.splitRoutes(raw).map(g => ({ name: g.zone, keys: g.stops.map(s => s.key) }));
+      // ★ Нов обект със стокова, който го няма в маршрута на буса (lib/route.js) → показва се като „нов, без адрес",
+      // с име от сметките в Barsy. Собственикът го влачи в маршрут; навигация ще има, щом му се добави адрес в route.js.
+      const known = new Set(RT.ROUTE.flatMap(s => s.keys));
+      const unknown = [...have].filter(k => !known.has(k));
+      if (unknown.length) {
+        const names = {};
+        try {
+          const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 400 }, user, pass);
+          let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
+          for (const a of all) { const k = cexKey(a); if (!names[k] && (a.client_name || a.person_name)) names[k] = [a.client_name, a.person_name].filter(Boolean).join(" · "); }
+        } catch (e) { /* без имена — показваме ключа */ }
+        for (const k of unknown) raw.push({ key: k, name: names[k] || ("Обект " + k), zone: "Нов обект", isNew: true });
+      }
+      const auto = RT.splitRoutes(raw.filter(s => !s.isNew)).map(g => ({ name: g.zone, keys: g.stops.map(s => s.key) }));
       const saved = await sbReq(`cex_route_plan?for_date=eq.${date}&select=routes,updated_at&limit=1`).catch(() => null);
       res.status(200).json({ ok: true, date, stops: raw, auto, saved: saved && saved[0] ? saved[0].routes : null, saved_at: saved && saved[0] ? saved[0].updated_at : null });
     } catch (e) { res.status(502).json({ ok: false, error: String(e && e.message).slice(0, 200) }); }
