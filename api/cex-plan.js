@@ -2964,9 +2964,14 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    // Barsy дава НАЙ-СТАРИТЕ 3000 документа, ако няма филтър по дата (order_by не помага) →
+    // винаги филтрираме по `filters.date` (единственият работещ ключ): дадения ден или
+    // последните `days` (по подразбиране 30) дни. Открито 14.10: справката свършваше на 04.10.
+    const days = Math.max(1, Number(body.days) || 30);
+    const from = body.date ? date : (() => { const d = new Date(Date.parse(date + "T00:00:00Z") - (days - 1) * 86400000); return d.toISOString().slice(0, 10); })();
     let list;
     try {
-      const r = await cexCall("Storeproductions_getlist", { filters: {}, extra_properties: ["all", "details"], order_by: "store_production_id desc", length: Number(body.length) || 3000, limit: Number(body.length) || 3000 }, user, pass);
+      const r = await cexCall("Storeproductions_getlist", { filters: { date: [from, date] }, extra_properties: ["all", "details"], order_by: "store_production_id desc", length: Number(body.length) || 3000, limit: Number(body.length) || 3000 }, user, pass);
       list = r.data && (r.data.list || r.data) || [];
       if (!Array.isArray(list)) list = Object.values(list);
     } catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
