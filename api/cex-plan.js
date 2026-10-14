@@ -912,13 +912,13 @@ header h1{margin:0;font-size:20px;font-weight:800}header .d{font-size:13px;opaci
 .days{display:flex;gap:8px}.days button{flex:1;padding:12px 8px;border:2px solid #d7dade;background:#fff;border-radius:12px;font-size:15px;font-weight:700;color:#444}
 .days button.on{border-color:#b3121b;background:#fdecec;color:#b3121b}
 .warn{background:#fff7e0;color:#7a4b00;border-radius:10px;padding:8px 10px;font-size:13px;margin-top:8px;display:none}
-table{width:100%;border-collapse:collapse}th{font-size:11px;color:#777;font-weight:600;text-align:center;padding:4px 2px;white-space:nowrap}
-td{padding:6px 2px;border-top:1px solid #f0f1f3;vertical-align:middle}td.n{font-weight:600;font-size:15px}td.n small{display:block;font-weight:400;color:#888;font-size:11px}
-td.h{text-align:center;color:#666;font-size:14px;white-space:nowrap}
-.q{display:flex;align-items:center;justify-content:center;gap:2px}.q button{width:34px;height:36px;border:1px solid #cfd3d8;background:#fafbfc;border-radius:8px;font-size:20px;line-height:1;color:#333}
-.q input{width:44px;height:36px;text-align:center;font-size:17px;font-weight:800;border:1px solid #cfd3d8;border-radius:8px}
+table{width:100%;border-collapse:collapse;table-layout:fixed}th{font-size:10px;color:#777;font-weight:600;text-align:center;padding:4px 1px;white-space:nowrap;overflow:hidden}th.c1{width:31%}th.c2,th.c3{width:13%}th.c4{width:13%}th.c5{width:30%}
+td{padding:6px 1px;border-top:1px solid #f0f1f3;vertical-align:middle}td.n{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}td.n small{display:block;font-weight:400;color:#888;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+td.h{text-align:center;color:#666;font-size:13px;white-space:nowrap;line-height:1.15}td.h small{font-size:10px;color:#999}
+.q{display:flex;align-items:center;justify-content:center;gap:2px}.q button{width:30px;min-width:30px;height:36px;padding:0;border:1px solid #cfd3d8;background:#fafbfc;border-radius:8px;font-size:20px;line-height:1;color:#333}
+.q input{width:38px;min-width:0;height:36px;padding:0;text-align:center;font-size:17px;font-weight:800;border:1px solid #cfd3d8;border-radius:8px;-moz-appearance:textfield}.q input::-webkit-outer-spin-button,.q input::-webkit-inner-spin-button,td.l input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .q input.sug{color:#1565c0}
-td.l input{width:44px;height:34px;text-align:center;font-size:15px;border:1px dashed #cfd3d8;border-radius:8px;color:#555}
+td.l{text-align:center}td.l input{width:38px;min-width:0;height:34px;padding:0;text-align:center;font-size:15px;border:1px dashed #cfd3d8;border-radius:8px;color:#555;-moz-appearance:textfield}
 .note{font-size:12px;color:#777;margin-top:8px}
 .btns{display:flex;gap:8px;margin-top:10px}.btns button{flex:1;padding:11px;border:1px solid #cfd3d8;background:#fff;border-radius:10px;font-size:14px}
 .send{width:100%;margin-top:10px;padding:15px;border:0;border-radius:12px;background:#0a7d33;color:#fff;font-size:18px;font-weight:800}
@@ -929,7 +929,7 @@ select{width:100%;padding:10px;font-size:15px;border:1px solid #cfd3d8;border-ra
 <header><h1>${esc(name)}</h1><div class="d" id="hd">Заявка към MOTAMO · разносът тръгва в 09:00</div></header>
 <div class="wrap">
 <div class="card"><div class="days" id="days"></div><div class="warn" id="warn"></div></div>
-<div class="card"><table id="t"><thead><tr><th style="text-align:left">артикул</th><th id="h1">мин. същи ден</th><th id="h2">последно</th><th>останало</th><th>заявка</th></tr></thead><tbody id="tb"><tr><td colspan="5" style="text-align:center;color:#888">Зареждам…</td></tr></tbody></table>
+<div class="card"><table id="t"><thead><tr><th class="c1" style="text-align:left">артикул</th><th class="c2" id="h1">същи ден</th><th class="c3" id="h2">последно</th><th class="c4">останало</th><th class="c5">заявка</th></tr></thead><tbody id="tb"><tr><td colspan="5" style="text-align:center;color:#888">Зареждам…</td></tr></tbody></table>
 <div class="note">Сивите колони = доставено от MOTAMO. „останало" = колко имате сега (по желание, помага за по-точно предложение). Синьото число е предложение по средното за този ден от седмицата — промени го свободно.</div>
 <div class="btns"><button onclick="other()">+ Друг артикул</button><button onclick="likeLast()">Като миналия същи ден</button></div>
 <div id="otherwrap" style="display:none;margin-top:8px"><select id="othersel"></select></div>
@@ -950,7 +950,7 @@ var w=$('warn');if(SEL===t&&D.default_date!==t){w.style.display='block';w.textCo
 $('hd').textContent='Заявка за '+dowOf(SEL)+' '+dm(SEL)+' · разносът тръгва в 09:00';
 var ex=D.existing&&D.existing.for_date===SEL?D.existing:null,exq={},exl={};if(ex){(ex.rows||[]).forEach(function(r){exq[r.id]=r.qty});exl=ex.left_qty||{}}
 var b='';ITEMS.forEach(function(it){var v=ex?(exq[it.id]||0):it.suggest;var cls=ex?'':'sug';
-b+='<tr data-id="'+it.id+'"><td class="n">'+esc(it.name.replace('НACHI','NACHI'))+(it.avg!=null?'<small>средно '+it.avg+' · '+it.weeks+' седм.</small>':'')+'</td>'
+b+='<tr data-id="'+it.id+'"><td class="n">'+esc(it.name.replace('НACHI','NACHI'))+(it.avg!=null?'<small>ср. '+it.avg+' / '+it.weeks+' седм.</small>':'')+'</td>'
 +'<td class="h">'+(it.last_same?it.last_same.qty+'<br><small>'+dm(it.last_same.date)+'</small>':'—')+'</td>'
 +'<td class="h">'+(it.last?it.last.qty+'<br><small>'+dm(it.last.date)+'</small>':'—')+'</td>'
 +'<td class="l"><input type="number" inputmode="numeric" min="0" class="left" value="'+(exl[it.id]!=null?exl[it.id]:'')+'" placeholder="–"></td>'
