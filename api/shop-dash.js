@@ -343,12 +343,13 @@ ${err ? `<div class="err"><h2>Грешка</h2><p>${esc(String(err))}</p></div>`
    </div>
   </div></div>
 ${data.fixed ? `<div class="card"><h2>Фиксирани разходи<span>${data.fixed.auto ? "авто · " : "ръчно · "}${bg(data.fixed.monthly)} €/мес × ${data.fixed.months} мес</span></h2>
-  <table><thead><tr><th>Разход (от 01.2026)</th><th class="q">€/мес</th></tr></thead><tbody>
+  <table><thead><tr><th>Разход (${esc(data.fixed.source || "")})</th><th class="q">€ за периода</th></tr></thead><tbody>
   ${data.fixed.salaries.map(l => `<tr><td>${esc(l.label)} (заплата)</td><td class="q">${bg(l.amount)}</td></tr>`).join("")}
   <tr><td>Осигуровки работодател (~18,9%)</td><td class="q">${bg(data.fixed.osig)}</td></tr>
   ${data.fixed.other.map(l => `<tr><td>${esc(l.label)}</td><td class="q">${bg(l.amount)}</td></tr>`).join("")}
-  <tr><td><b>Общо месечно</b></td><td class="q"><b>${bg(data.fixed.monthly)}</b></td></tr>
+  <tr><td><b>Средно месечно</b></td><td class="q"><b>${bg(data.fixed.monthly)}</b></td></tr>
   <tr><td><b>За периода (${data.fixed.months} мес)</b></td><td class="q"><b>${bg(data.fixed.total)} €</b></td></tr>
+  ${data.fixed.byMonth ? `<tr><td colspan="2" style="color:#7a8087;font-size:12px;padding-top:8px">По месеци (бруто + осиг.${data.fixed.other.length ? " + наем/ток" : ""}): ${data.fixed.byMonth.map(b => `${b.month.slice(5)}.${b.month.slice(2,4)}: ${bg(b.total)}${b.share < 1 ? " (" + Math.round(b.share*100) + "%)" : ""}${b.estimated ? "*" : ""}`).join(" · ")}${data.fixed.byMonth.some(b => b.estimated) ? " · *по последната ведомост" : ""}</td></tr>` : ""}
   </tbody></table></div>` : ""}
 <div class="card"><h2>Разбивка на оборота<span>${bg(data.total_neto)} € общо · без ДДС</span></h2>
   <div class="split">
@@ -508,14 +509,13 @@ module.exports = async function handler(req, res) {
   const today = sofiaToday();
   const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : today.slice(0, 4) + "-01-01";
   const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today;
-  const fx = fixedForRange(from, to, SHOP_FIXED_MONTHLY, FIXED_START);
+  // ★ S31 — по РЕАЛНИТЕ ведомости по месеци (lib/payroll.js: Роксана от 09.2026 + наем/ток); ?exp= ги замества ръчно.
+  const fx = require("../lib/payroll.js").fixedFor("shop", from, to);
   const expenses = (q.exp !== undefined && q.exp !== "") ? (Number(q.exp) || 0) : fx.total;
   let data;
   try { data = await shopDashData(from, to, expenses, user, pass); }
   catch (e) { data = { from, to, error: "Не мога да прочета данните сега. Опитай пак след минута. (" + String(e && e.message) + ")" }; }
-  if (data && !data.error) data.fixed = { months: fx.months, monthly: fx.monthly, total: fx.total,
-    salaries: SHOP_FIXED.salaries, other: SHOP_FIXED.other, salSum: SHOP_FIXED.salSum, othSum: SHOP_FIXED.othSum, osig: SHOP_FIXED.osig,
-    auto: !(q.exp !== undefined && q.exp !== "") };
+  if (data && !data.error) data.fixed = { ...fx, auto: !(q.exp !== undefined && q.exp !== "") };
   if (q.debug === "1") { res.setHeader("Content-Type", "application/json; charset=utf-8"); res.status(200).send(JSON.stringify(data, null, 2)); return; }
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.status(200).send(page(data, q.k));
