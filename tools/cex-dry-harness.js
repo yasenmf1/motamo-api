@@ -15,7 +15,7 @@ const live = async (body) => (await realFetch('https://motamo-api.vercel.app/api
   console.log('фикстури: склад', Object.keys(STOCK).length, 'артикула; партидни редове', LOTS.length);
 
   // ── заглушен свят ──
-  const W = { prods: [], accounts: [], tg: [], day: {}, sent: {}, plan: {} };
+  const W = { prods: [], accounts: [], tg: [], day: {}, sent: {}, plan: {}, sreq: {} };
   const J = (o, ok = true) => ({ ok, status: ok ? 200 : 500, json: async () => o, text: async () => JSON.stringify(o) });
   global.fetch = async (url, opt) => {
     url = String(url); const body = opt && opt.body ? JSON.parse(opt.body) : null;
@@ -40,6 +40,14 @@ const live = async (body) => (await realFetch('https://motamo-api.vercel.app/api
     }
     if (url.includes('supabase.co/rest/v1/cex_kitchen_plan')) { if (opt && opt.method === 'POST') { for (const r of body) W.plan[r.for_date] = r; return J({}); } const d = /for_date=eq\.([\d-]+)/.exec(url); return J(d && W.plan[d[1]] ? [W.plan[d[1]]] : []); }
     if (url.includes('supabase.co/rest/v1/cex_tg_sent')) { if (opt && opt.method === 'POST') { for (const r of body) W.sent[r.kind + r.for_date] = r; return J({}); } const k = /kind=eq\.(\w+)/.exec(url), d = /for_date=eq\.([\d-]+)/.exec(url); const r = k && d && W.sent[k[1] + d[1]]; return J(r ? [r] : []); }
+    if (url.includes('supabase.co/rest/v1/cex_shop_requests')) {
+      if (opt && opt.method === 'POST') { for (const r of body) W.sreq[r.for_date + '|' + r.obj_key] = Object.assign({ id: 1, sent_at: '2026-10-01T05:00:00Z' }, W.sreq[r.for_date + '|' + r.obj_key] || {}, r); return J({}); }
+      if (opt && opt.method === 'PATCH') { const id = /id=eq\.(\d+)/.exec(url); for (const k of Object.keys(W.sreq)) if (String(W.sreq[k].id) === id[1]) Object.assign(W.sreq[k], body); return J([{}]); }
+      const d = /for_date=eq\.([\d-]+)/.exec(url), o = /obj_key=eq\.([^&]+)/.exec(url);
+      return J(Object.values(W.sreq).filter(r => (!d || r.for_date === d[1]) && (!o || r.obj_key === decodeURIComponent(o[1]))));
+    }
+    if (url.includes('supabase.co/rest/v1/cex_docs')) return J([{ inv_id: 501, type_id: 11, doc_date: '2026-09-24', client_id: 2, person_id: 4, is_anulate: 0 }, { inv_id: 502, type_id: 11, doc_date: '2026-09-30', client_id: 2, person_id: 4, is_anulate: 0 }, { inv_id: 503, type_id: 11, doc_date: '2026-09-17', client_id: 2, person_id: 4, is_anulate: 0 }]);
+    if (url.includes('supabase.co/rest/v1/cex_doc_rows')) return J([{ inv_id: 501, article_id: 129, qty: 7, line_total: 20, lot_date: '2026-09-24' }, { inv_id: 501, article_id: 81, qty: 6, line_total: 20, lot_date: '2026-09-24' }, { inv_id: 502, article_id: 129, qty: 5, line_total: 15, lot_date: '2026-09-30' }, { inv_id: 503, article_id: 129, qty: 6, line_total: 18, lot_date: '2026-09-17' }, { inv_id: 503, article_id: 81, qty: 4, line_total: 12, lot_date: '2026-09-17' }]);
     if (url.includes('api.telegram.org')) { W.tg.push({ chat: body.chat_id, text: body.text }); return J({ ok: true, result: { message_id: W.tg.length } }); }
     console.log('  !! НЕПОЗНАТА ЗАЯВКА (заглушена):', url.slice(0, 110)); return J({}, false);
   };
@@ -119,5 +127,25 @@ const live = async (body) => (await realFetch('https://motamo-api.vercel.app/api
   const scripts = [...(r.html || '').matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]); let ok = scripts.length > 0;
   for (const sc of scripts) { try { new Function(sc); } catch (e) { ok = false; console.log('  JS ГРЕШКА:', e.message); } }
   console.log('  статус', r.status, '| скриптове', scripts.length, '| валиден JS:', ok, '| има openDay:', /function openDay/.test(r.html), '| има saveDay:', /function saveDay/.test(r.html));
+  console.log('\n══ 9) ФОРМА ЗА ЗАЯВКА на магазин (Граф Игнатиев 2:4): токен, данни, пращане, таб на собственика ══');
+  const crypto = require('crypto');
+  const okTok = crypto.createHmac('sha256', 't').update('zayavka:2:4:v1').digest('hex').slice(0, 24);
+  const TMR = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+  r = await run({}, 'GET', { view: 'zayavka', o: '2:4', k: 'wrong' });
+  console.log('  грешен ключ → статус', r.status, '(очаквано 403)');
+  r = await run({}, 'GET', { view: 'zayavka', o: '2:4', k: okTok });
+  console.log('  верен ключ → статус', r.status, '| страницата носи името:', /Граф Игнатиев/.test(r.html || ''));
+  r = await run({ token: undefined, action: 'shop_form_data', o: '2:4', k: okTok, date: '2026-10-01' });
+  const it = (r.j.items || []).map(x => x.name + ' мин.същи=' + (x.last_same ? x.last_same.qty : '-') + ' посл=' + (x.last ? x.last.qty : '-') + ' пр=' + x.suggest);
+  console.log('  данни ok', r.j.ok, '| обект', r.j.obj && r.j.obj.name, '| артикули:', JSON.stringify(it));
+  r = await run({ token: undefined, action: 'shop_form_send', o: '2:4', k: okTok, for_date: TMR, rows: [{ id: 129, qty: 8 }, { id: 81, qty: 0 }, { id: 999, qty: 3 }], left: { 129: 2 } });
+  console.log('  пращане ok', r.j.ok, '| записано:', JSON.stringify(Object.values(W.sreq).map(x => [x.for_date, x.obj_key, x.rows, x.left_qty])));
+  r = await run({ token: undefined, action: 'shop_form_send', o: '2:4', k: 'wrong', for_date: TMR, rows: [{ id: 129, qty: 1 }] });
+  console.log('  пращане с грешен ключ → ok', r.j.ok, 'статус', r.status, '(очаквано 403)');
+  r = await run({ action: 'shop_requests', date: TMR });
+  console.log('  таб на собственика ok', r.j.ok, '| заявки:', JSON.stringify((r.j.requests || []).map(x => [x.obj_key, x.name, x.rows, x.applied])), '| мълчат:', JSON.stringify(r.j.silent), '| линк за 2:4 съдържа ключа:', String((r.j.links || {})['2:4'] || '').includes(okTok));
+  r = await run({ action: 'shop_request_applied', id: 1, applied_rows: [{ id: 129, qty: 8 }] });
+  console.log('  приложено ok', r.j.ok, '| applied_at записан:', !!Object.values(W.sreq)[0].applied_at);
+
   console.log('\nзаписи към истинския Barsy/Telegram/Supabase: 0 (всичко беше заглушено)');
 })().catch(e => console.log('ХАРНЕС ГРЕШКА', e && e.stack || e));

@@ -781,9 +781,9 @@ const CEX_OBJECTS = {
   "9:": { group: "haskovo" },
   // Стара Загора и региона — СИБИЕС ООД (клиент 2)
   "2:1": { group: "sibies" },  "2:2": { group: "sibies" },  "2:3": { group: "sibies" },
-  "2:4": { group: "sibies" },  "2:5": { group: "sibies" },  "2:6": { group: "sibies" },
+  "2:4": { group: "sibies", form: true },  "2:5": { group: "sibies", form: true },  "2:6": { group: "sibies" },
   "2:7": { group: "sibies" },  "2:8": { group: "sibies" },  "2:9": { group: "sibies" },
-  "2:10": { group: "sibies" }, "2:11": { group: "sibies" }, "2:12": { group: "sibies" },
+  "2:10": { group: "sibies" }, "2:11": { group: "sibies", form: true }, "2:12": { group: "sibies" },
   "2:13": { group: "sibies" }, "2:14": { group: "sibies" }, "2:15": { group: "sibies" },
   // Сливен — Мерканто / АНТОНИЙ ЕООД (клиент 11)
   "11:23": { group: "merkanto" }, "11:25": { group: "merkanto" }, "11:26": { group: "merkanto" },
@@ -798,6 +798,180 @@ const CEX_OBJECTS = {
 };
 function cexKey(a) { return (a.client_id != null ? a.client_id : "") + ":" + (a.person_id != null ? a.person_id : ""); }
 function cexObj(a) { return CEX_OBJECTS[cexKey(a)] || null; }
+// ── ★ S32 — ФОРМА ЗА ЗАЯВКА НА МАГАЗИН (линк без парола) ──────────────────────
+// Управителката отваря `?view=zayavka&o=<client:person>&k=<ключ>` на телефона. Ключът е
+// HMAC на обекта със секрет от Vercel (SHOP_FORM_SECRET, иначе PAY_HMAC_SECRET) — нищо не
+// се пази в база; смяна на `fv` в CEX_OBJECTS обезсилва стария линк. Формата показва само
+// артикулите, които обектът е ПОЛУЧАВАЛ (стоковите в кеша cex_docs/cex_doc_rows), с
+// „миналия същи ден" и „последна доставка", предложена бройка (computeSuggestion) и
+// незадължително „останало" (продадено = доставено − останало; ние не виждаме касата на
+// магазина). Заявката се записва в Supabase `cex_shop_requests` (upsert по дата+обект, НЕ се
+// заключва по час — носи час). Нищо не пише в Barsy: собственикът я прилага в решетката.
+const FORM_VERSION = 1, FORM_SWITCH_HOUR = 8, FORM_SWITCH_MIN = 30;   // до 08:30 → „за днес", после → „за утре"
+const ROUTE_NAMES = (() => { const m = {}; try { for (const st of require("../lib/route.js").ROUTE) for (const k of (st.keys || [])) if (!m[k]) m[k] = st.name; } catch (e) {} return m; })();
+function formSecret() { return process.env.SHOP_FORM_SECRET || process.env.PAY_HMAC_SECRET || ""; }
+function formToken(key) {
+  const v = (CEX_OBJECTS[key] || {}).fv || FORM_VERSION;
+  return crypto.createHmac("sha256", formSecret()).update(`zayavka:${key}:v${v}`).digest("hex").slice(0, 24);
+}
+function formAuth(key, tok) {
+  const o = CEX_OBJECTS[String(key || "")];
+  if (!formSecret() || !o || !o.form) return false;
+  const a = Buffer.from(formToken(key)), b = Buffer.from(String(tok || ""));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function formObjName(key) {
+  const o = CEX_OBJECTS[key] || {};
+  return ROUTE_NAMES[key] || [o.client, o.rep].filter(Boolean).join(" · ") || key;
+}
+function formShops() { return Object.keys(CEX_OBJECTS).filter(k => CEX_OBJECTS[k].form); }
+function formLink(key, host) { return `https://${host || "motamo-api.vercel.app"}/api/cex-plan?view=zayavka&o=${encodeURIComponent(key)}&k=${formToken(key)}`; }
+function sofiaHM() { const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date()); const g = t => Number((p.find(x => x.type === t) || {}).value); return [g("hour"), g("minute")]; }
+function formDefaultDate() { const [h, m] = sofiaHM(); const today = sofiaToday(); return (h < FORM_SWITCH_HOUR || (h === FORM_SWITCH_HOUR && m <= FORM_SWITCH_MIN)) ? today : isoPlusDays(today, 1); }
+const DOW_BG = ["неделя", "понеделник", "вторник", "сряда", "четвъртък", "петък", "събота"];
+function dowBg(iso) { return DOW_BG[new Date(iso + "T12:00:00Z").getUTCDay()]; }
+// История на обекта (само стокови type 11, не анулирани, положителни редове с цена) — последните 35 дни.
+async function shopHistory(key, target) {
+  const [c, p] = key.split(":");
+  const from = isoPlusDays(target, -35);
+  const docs = await sbAll(`cex_docs?select=inv_id,doc_date&type_id=eq.11&is_anulate=eq.0&client_id=eq.${c}&person_id=${p ? "eq." + p : "is.null"}&doc_date=gte.${from}&doc_date=lte.${target}&order=doc_date.asc`);
+  if (!docs.length) return { dates: [], byArt: {} };
+  const byDoc = {}; for (const d of docs) byDoc[d.inv_id] = d.doc_date;
+  const rows = await sbAll(`cex_doc_rows?select=inv_id,article_id,qty,line_total&inv_id=in.(${docs.map(d => d.inv_id).join(",")})`);
+  const byArt = {}; const dates = new Set();
+  for (const r of rows) {
+    const q = Number(r.qty) || 0; if (q <= 0 || (r.line_total != null && Number(r.line_total) === 0)) continue;
+    const d = byDoc[r.inv_id]; if (!d) continue; dates.add(d);
+    const a = byArt[r.article_id] = byArt[r.article_id] || {}; a[d] = (a[d] || 0) + q;
+  }
+  return { dates: [...dates].sort(), byArt };
+}
+async function shopFormData(key, dateIso) {
+  const today = sofiaToday();
+  const def = formDefaultDate();
+  const target = /^\d{4}-\d{2}-\d{2}$/.test(dateIso || "") && dateIso >= today && dateIso <= isoPlusDays(today, 3) ? dateIso : def;
+  const [hist, sug] = await Promise.all([shopHistory(key, today), computeSuggestion(target).catch(() => ({ by: {} }))]);
+  const sgObj = (sug.by || {})[key] || {};
+  const dow = new Date(target + "T12:00:00Z").getUTCDay();
+  const items = [];
+  for (const m of MENU) {
+    const h = hist.byArt[String(m.id)] || hist.byArt[m.id]; if (!h) continue;
+    const ds = Object.keys(h).sort();
+    const last = ds[ds.length - 1];
+    const same = ds.filter(d => d !== target && new Date(d + "T12:00:00Z").getUTCDay() === dow).pop();
+    const sg = sgObj[m.name];
+    items.push({ id: m.id, name: m.name, is_set: !!m.is_set, last: last ? { date: last, qty: h[last] } : null,
+      last_same: same ? { date: same, qty: h[same] } : null, today: h[today] || 0,
+      suggest: sg ? sg.n : (same ? h[same] : (last ? h[last] : 0)), avg: sg ? sg.avg : null, weeks: sg ? sg.weeks : 0 });
+  }
+  let existing = null;
+  try { const ex = await sbAll(`cex_shop_requests?select=id,for_date,rows,left_qty,note,sent_at,updated_at&for_date=eq.${target}&obj_key=eq.${encodeURIComponent(key)}`); existing = ex[0] || null; } catch (e) {}
+  return { obj: { key, name: formObjName(key) }, for_date: target, default_date: def, today, dow: dowBg(target), items, existing,
+    other: MENU.filter(m => !items.some(i => i.id === m.id)).map(m => ({ id: m.id, name: m.name })) };
+}
+async function shopFormSend(key, body) {
+  const today = sofiaToday();
+  const forDate = String(body.for_date || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(forDate) || forDate < today || forDate > isoPlusDays(today, 3)) return { ok: false, error: "bad_date", message: "Датата трябва да е днес или до 3 дни напред." };
+  const rows = [];
+  for (const r of (Array.isArray(body.rows) ? body.rows : [])) {
+    const id = Number(r && r.id), qty = Math.round(Number(r && r.qty));
+    if (!MENU.some(m => m.id === id) || !(qty >= 0 && qty <= 300)) continue;
+    if (qty > 0) rows.push({ id, name: byId(id).name, qty });
+  }
+  const left = {};
+  for (const [id, v] of Object.entries(body.left && typeof body.left === "object" ? body.left : {})) { const q = Math.round(Number(v)); if (MENU.some(m => String(m.id) === String(id)) && q >= 0 && q <= 300) left[id] = q; }
+  const now = new Date().toISOString();
+  const row = { for_date: forDate, obj_key: key, rows, left_qty: left, note: String(body.note || "").slice(0, 300) || null, source: "form", sent_at: now, updated_at: now };
+  try { await sbReq(`cex_shop_requests?on_conflict=for_date,obj_key`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify([row]) }); }
+  catch (e) { return { ok: false, error: "save_failed", message: "Заявката не се записа. Опитай пак след минута." }; }
+  return { ok: true, for_date: forDate, rows, left, sent_at: now };
+}
+async function shopRequestsFor(dateIso, host) {
+  const list = await sbAll(`cex_shop_requests?select=id,for_date,obj_key,rows,left_qty,note,source,sent_at,updated_at,applied_at,applied_rows&for_date=eq.${dateIso}&order=sent_at.asc`);
+  const requests = list.map(x => { const o = CEX_OBJECTS[x.obj_key] || {}; const [c, p] = x.obj_key.split(":"); return {
+    id: x.id, obj_key: x.obj_key, name: formObjName(x.obj_key), client_id: Number(c), person_id: p ? Number(p) : null, group: o.group || "adhoc",
+    rows: x.rows || [], left: x.left_qty || {}, note: x.note, source: x.source, sent_at: x.sent_at, applied_at: x.applied_at,
+    applied: !!x.applied_at && JSON.stringify(x.applied_rows || []) === JSON.stringify(x.rows || []) }; });
+  const got = new Set(requests.map(r => r.obj_key));
+  const silent = formShops().filter(k => !got.has(k)).map(k => ({ obj_key: k, name: formObjName(k) }));
+  const links = {}; for (const k of formShops()) links[k] = formLink(k, host);
+  return { date: dateIso, requests, silent, links };
+}
+function zayavkaPage(key, tok) {
+  const name = formObjName(key);
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>Заявка · ${esc(name)}</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}
+body{font:17px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#eef0f3;color:#14171a}
+header{background:linear-gradient(135deg,#b3121b,#7a0c12);color:#fff;padding:14px 16px;position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:20px;font-weight:800}header .d{font-size:13px;opacity:.9;margin-top:3px}
+.wrap{padding:12px;max-width:560px;margin:0 auto}
+.card{background:#fff;border-radius:14px;box-shadow:0 2px 8px rgba(20,23,26,.08);padding:12px;margin-bottom:12px}
+.days{display:flex;gap:8px}.days button{flex:1;padding:12px 8px;border:2px solid #d7dade;background:#fff;border-radius:12px;font-size:15px;font-weight:700;color:#444}
+.days button.on{border-color:#b3121b;background:#fdecec;color:#b3121b}
+.warn{background:#fff7e0;color:#7a4b00;border-radius:10px;padding:8px 10px;font-size:13px;margin-top:8px;display:none}
+table{width:100%;border-collapse:collapse}th{font-size:11px;color:#777;font-weight:600;text-align:center;padding:4px 2px;white-space:nowrap}
+td{padding:6px 2px;border-top:1px solid #f0f1f3;vertical-align:middle}td.n{font-weight:600;font-size:15px}td.n small{display:block;font-weight:400;color:#888;font-size:11px}
+td.h{text-align:center;color:#666;font-size:14px;white-space:nowrap}
+.q{display:flex;align-items:center;justify-content:center;gap:2px}.q button{width:34px;height:36px;border:1px solid #cfd3d8;background:#fafbfc;border-radius:8px;font-size:20px;line-height:1;color:#333}
+.q input{width:44px;height:36px;text-align:center;font-size:17px;font-weight:800;border:1px solid #cfd3d8;border-radius:8px}
+.q input.sug{color:#1565c0}
+td.l input{width:44px;height:34px;text-align:center;font-size:15px;border:1px dashed #cfd3d8;border-radius:8px;color:#555}
+.note{font-size:12px;color:#777;margin-top:8px}
+.btns{display:flex;gap:8px;margin-top:10px}.btns button{flex:1;padding:11px;border:1px solid #cfd3d8;background:#fff;border-radius:10px;font-size:14px}
+.send{width:100%;margin-top:10px;padding:15px;border:0;border-radius:12px;background:#0a7d33;color:#fff;font-size:18px;font-weight:800}
+.send:disabled{opacity:.5}
+.msg{padding:10px 12px;border-radius:10px;margin-top:10px;display:none;font-size:14px}.msg.ok{display:block;background:#e8f5e9;color:#1b5e20}.msg.err{display:block;background:#fde8e8;color:#9b1c1c}.msg.info{display:block;background:#e9f0fb;color:#1a3d7a}
+select{width:100%;padding:10px;font-size:15px;border:1px solid #cfd3d8;border-radius:10px;background:#fff}
+</style></head><body>
+<header><h1>${esc(name)}</h1><div class="d" id="hd">Заявка към MOTAMO · разносът тръгва в 09:00</div></header>
+<div class="wrap">
+<div class="card"><div class="days" id="days"></div><div class="warn" id="warn"></div></div>
+<div class="card"><table id="t"><thead><tr><th style="text-align:left">артикул</th><th id="h1">мин. същи ден</th><th id="h2">последно</th><th>останало</th><th>заявка</th></tr></thead><tbody id="tb"><tr><td colspan="5" style="text-align:center;color:#888">Зареждам…</td></tr></tbody></table>
+<div class="note">Сивите колони = доставено от MOTAMO. „останало" = колко имате сега (по желание, помага за по-точно предложение). Синьото число е предложение по средното за този ден от седмицата — промени го свободно.</div>
+<div class="btns"><button onclick="other()">+ Друг артикул</button><button onclick="likeLast()">Като миналия същи ден</button></div>
+<div id="otherwrap" style="display:none;margin-top:8px"><select id="othersel"></select></div>
+<button class="send" id="send" onclick="send()">Прати заявката</button>
+<div class="msg" id="msg"></div></div>
+<div class="note" style="text-align:center">Заявката се записва с час. Може да я промениш и пратиш пак — важи последната.</div>
+</div>
+<script>
+var O=${JSON.stringify(key)},K=${JSON.stringify(tok)},D=null,SEL=null,ITEMS=[];
+function $(i){return document.getElementById(i)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
+function api(b){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({o:O,k:K},b))}).then(function(r){return r.json()})}
+function dm(iso){var p=iso.split('-');return p[2]+'.'+p[1]}
+function load(date){msg('Зареждам…','info');api({action:'shop_form_data',date:date}).then(function(j){if(!j.ok){msg('Грешка: '+(j.message||j.error||''),'err');return}D=j;SEL=j.for_date;ITEMS=j.items;render();$('msg').className='msg'}).catch(function(e){msg('Няма връзка. Опитай пак.','err')})}
+function render(){var t=D.today,tm=addDays(t,1);var h='';[[t,'Днес'],[tm,'Утре']].forEach(function(x){h+='<button class="'+(SEL===x[0]?'on':'')+'" onclick="pick(\\''+x[0]+'\\')">'+x[1]+'<br><small>'+dowOf(x[0])+' '+dm(x[0])+'</small></button>'});$('days').innerHTML=h;
+var w=$('warn');if(SEL===t&&D.default_date!==t){w.style.display='block';w.textContent='Минава 08:30 — заявеното за днес може да дойде с втората вълна след 09:30.'}else w.style.display='none';
+$('hd').textContent='Заявка за '+dowOf(SEL)+' '+dm(SEL)+' · разносът тръгва в 09:00';
+var ex=D.existing&&D.existing.for_date===SEL?D.existing:null,exq={},exl={};if(ex){(ex.rows||[]).forEach(function(r){exq[r.id]=r.qty});exl=ex.left_qty||{}}
+var b='';ITEMS.forEach(function(it){var v=ex?(exq[it.id]||0):it.suggest;var cls=ex?'':'sug';
+b+='<tr data-id="'+it.id+'"><td class="n">'+esc(it.name.replace('НACHI','NACHI'))+(it.avg!=null?'<small>средно '+it.avg+' · '+it.weeks+' седм.</small>':'')+'</td>'
++'<td class="h">'+(it.last_same?it.last_same.qty+'<br><small>'+dm(it.last_same.date)+'</small>':'—')+'</td>'
++'<td class="h">'+(it.last?it.last.qty+'<br><small>'+dm(it.last.date)+'</small>':'—')+'</td>'
++'<td class="l"><input type="number" inputmode="numeric" min="0" class="left" value="'+(exl[it.id]!=null?exl[it.id]:'')+'" placeholder="–"></td>'
++'<td><div class="q"><button onclick="step(this,-1)">−</button><input type="number" inputmode="numeric" min="0" class="qty '+cls+'" value="'+v+'" oninput="this.className=\\'qty\\'"><button onclick="step(this,1)">+</button></div></td></tr>'});
+$('tb').innerHTML=b||'<tr><td colspan="5" style="text-align:center;color:#888">Няма история за този магазин. Добави артикул от „+ Друг артикул".</td></tr>';
+if(ex){msg('Вече има пратена заявка за '+dm(SEL)+' ('+hhmm(ex.sent_at)+'). Промени я и натисни „Прати" пак, ако трябва.','ok')}
+var os='<option value="">— избери артикул —</option>';(D.other||[]).forEach(function(m){os+='<option value="'+m.id+'">'+esc(m.name.replace('НACHI','NACHI'))+'</option>'});$('othersel').innerHTML=os}
+function addDays(iso,n){var d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
+function dowOf(iso){return ['неделя','понеделник','вторник','сряда','четвъртък','петък','събота'][new Date(iso+'T12:00:00Z').getUTCDay()]}
+function hhmm(s){var d=new Date(s);return isNaN(d)?'':('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
+function pick(d){load(d)}
+function step(btn,n){var i=btn.parentNode.querySelector('.qty');i.value=Math.max(0,(parseInt(i.value)||0)+n);i.className='qty'}
+function likeLast(){ITEMS.forEach(function(it){var tr=document.querySelector('tr[data-id="'+it.id+'"] .qty');if(tr){tr.value=it.last_same?it.last_same.qty:(it.last?it.last.qty:0);tr.className='qty'}})}
+function other(){var w=$('otherwrap');w.style.display=w.style.display==='none'?'block':'none';$('othersel').onchange=function(){var id=+this.value;if(!id)return;var m=(D.other||[]).filter(function(x){return x.id===id})[0];if(!m)return;ITEMS.push({id:m.id,name:m.name,last:null,last_same:null,suggest:0,avg:null,weeks:0});D.other=D.other.filter(function(x){return x.id!==id});var keep={};document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){keep[tr.getAttribute('data-id')]=[tr.querySelector('.qty').value,tr.querySelector('.left').value]});render();Object.keys(keep).forEach(function(k){var tr=document.querySelector('tr[data-id="'+k+'"]');if(tr){tr.querySelector('.qty').value=keep[k][0];tr.querySelector('.qty').className='qty';tr.querySelector('.left').value=keep[k][1]}});w.style.display='none'}}
+function send(){var rows=[],left={},n=0;document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){var id=+tr.getAttribute('data-id'),q=parseInt(tr.querySelector('.qty').value)||0,l=tr.querySelector('.left').value;rows.push({id:id,qty:q});if(q>0)n++;if(l!=='')left[id]=parseInt(l)||0});
+if(!n){if(!confirm('Заявката е с 0 от всичко. Да я пратя така (няма да получите нищо за '+dm(SEL)+')?'))return}else if(!confirm('Пращаш заявка за '+dowOf(SEL).toUpperCase()+' '+dm(SEL)+' — '+n+' артикула. Потвърди.'))return;
+$('send').disabled=true;msg('Пращам…','info');api({action:'shop_form_send',for_date:SEL,rows:rows,left:left}).then(function(j){$('send').disabled=false;if(j.ok){msg('✓ Пратено в '+hhmm(j.sent_at)+' за '+dm(j.for_date)+'. Благодарим!','ok');D.existing={for_date:j.for_date,rows:j.rows,left_qty:j.left,sent_at:j.sent_at}}else msg('Не е пратено: '+(j.message||j.error||''),'err')}).catch(function(){$('send').disabled=false;msg('Няма връзка. Опитай пак.','err')})}
+load(null);
+</script></body></html>`;
+}
+
 
 async function scheduleSeed(dateIso, user, pass) {
   const dow = new Date(dateIso + "T12:00:00Z").getUTCDay();
@@ -1811,7 +1985,7 @@ h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.
 <span id="tokwrap"><input id="tok" type="password" placeholder="токен" size="16"></span>
 <span class="grp"><label>Зареди</label><input id="date" type="date" lang="bg-BG"><b class="dlab" id="dlab"></b><button class="alt" onclick="loadRazos()" title="Зарежда РАЗНОСА за деня = отворените сметки (направени в навечерието/сутринта), без вчерашните затворени. За ③ Стокова.">Отворени сметки</button><button class="alt" onclick="loadByLot()" title="Зарежда сметките от партида L.[деня от Зареди] (±2 дни), през реалните движения. За референтен минал ден или преди ③ Стокова.">↻ По партида</button></span>
 <span class="grp"><button class="alt" onclick="loadSug()" title="Средно изпратено в същия ден от седмицата (последните 4) минус % връщане. Датата е от „Партида". Не пише в Barsy.">Предложение</button><button class="alt" onclick="fillSug()" title="Слага предложението в полетата на ТИКНАТИТЕ магазини">Попълни</button></span>
-<span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="openPicker()" title="Добави магазин, който днешният разнос не е заредил">+ Магазин</button><button class="alt" onclick="sendTg()" title="Праща плана от последното Изчисли (датата в Партида) в Telegram групата на цеха. Пак натиснато = само разликата.">📤 Прати на цеха</button></span>
+<span class="grp"><button class="alt" onclick="openReq()" title="Заявките, пратени от магазините през формата (линк на телефона)">📥 Заявки</button></span><span class="grp"><button class="alt" onclick="calc()">Изчисли</button><button class="alt" onclick="openPicker()" title="Добави магазин, който днешният разнос не е заредил">+ Магазин</button><button class="alt" onclick="sendTg()" title="Праща плана от последното Изчисли (датата в Партида) в Telegram групата на цеха. Пак натиснато = само разликата.">📤 Прати на цеха</button></span>
 <span class="grp"><label>Партида</label><input id="pdate" type="date" lang="bg-BG" title="Партида L.<тази дата>, срок +3 дни"><b class="dlab" id="plab"></b><button class="alt" onclick="openDay()" title="Отваря записаното за датата в „Партида" (магазини и заявки) — от всяко устройство.">📂 Отвори деня</button><b class="dlab" id="daysav"></b></span>
 <span class="grp"><button class="prod" onclick="doZagotovki()">① Заготовки</button><button class="prod" onclick="doArticles()">② Артикули</button><button class="acc" onclick="doAccounts()">③ Генерирай сметки</button><button class="acc" onclick="doStokova()">④ Генерирай стокова</button></span></header>
 <div class="wrap"><div id="msg" class="msg"></div><div class="scroll"><table id="grid"></table></div><div id="planbox"></div></div>
@@ -1871,6 +2045,22 @@ function doStokova(){var sel=selShops().filter(function(s){return s.account_id})
 function nextStok(){if(i>=sel.length){msg('✓ Стокови: '+okc+'/'+sel.length+' готови'+(errs.length?(' · грешки: '+errs.join(' | ')):''),errs.length?'err':'ok');return}var s=sel[i];msg('Правя стокова '+(i+1)+'/'+sel.length+' ('+shortName(s.client,s.rep)+')…');api({action:'create_stokova',account_id:s.account_id,date:pd}).then(function(j){if(j.ok)okc++;else errs.push('#'+s.account_id+': '+(j.error||''));i++;nextStok()}).catch(function(e){errs.push('#'+s.account_id+': мрежа');i++;nextStok()})}
 nextStok()}
 var OBJECTS=[];
+// ── ★ S32 — заявки от формата на магазините → решетката ──
+function openReq(){var d=$('pdate').value||$('date').value||new Date().toISOString().slice(0,10);msg('Чета заявките за '+d+'…');api({action:'shop_requests',date:d}).then(function(j){if(!j.ok){msg('Грешка: '+(j.message||j.error||''),'err');return}renderReq(j);$('msg').className='msg'}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
+function hhmm(s){var x=new Date(s);return isNaN(x)?'':('0'+x.getHours()).slice(-2)+':'+('0'+x.getMinutes()).slice(-2)}
+function renderReq(j){var h='<div class="pickwrap" id="reqwrap" onclick="if(event.target===this)closeReq()"><div class="pickbox"><div style="padding:12px 14px;border-bottom:1px solid #e2e4e8;display:flex;justify-content:space-between;align-items:center"><b>📥 Заявки от формата за '+j.date.split('-').reverse().join('.')+'</b><button class="alt" onclick="closeReq()">✕</button></div><div style="overflow:auto;padding:10px 14px;font-size:13px">';
+if(!j.requests.length)h+='<p style="color:#777">Още няма пратени заявки за този ден.</p>';
+j.requests.forEach(function(r,i){var rows=r.rows.map(function(x){return x.name.replace('НACHI','')+' <b>'+x.qty+'</b>'}).join(' · ')||'<i>0 от всичко</i>';var lf=Object.keys(r.left||{}).length?' · останало: '+Object.keys(r.left).map(function(k){var m=MENU.filter(function(z){return String(z.id)===String(k)})[0];return (m?m.name.replace('НACHI',''):k)+' '+r.left[k]}).join(', '):'';
+h+='<label style="display:block;padding:8px 0;border-bottom:1px solid #f0f1f3"><input type="checkbox" class="reqsel" data-i="'+i+'" '+(r.applied?'':'checked')+'> <b>'+esc(r.name)+'</b> <span style="color:#777">'+hhmm(r.sent_at)+(r.applied?' · ✓ приложена':(r.applied_at?' · ⚠ променена след прилагане':''))+'</span><br><span style="margin-left:22px">'+rows+'</span><span style="color:#777;margin-left:22px">'+lf+'</span></label>'});
+if(j.silent.length)h+='<p style="color:#9b1c1c;margin:10px 0 4px"><b>Мълчат:</b> '+j.silent.map(function(x){return esc(x.name)}).join(', ')+'</p>';
+h+='<details style="margin-top:10px"><summary style="cursor:pointer;color:#1565c0">Линкове за формата (прати на управителката във Viber)</summary>'+Object.keys(j.links).map(function(k){var n=(j.requests.filter(function(r){return r.obj_key===k})[0]||j.silent.filter(function(s){return s.obj_key===k})[0]||{name:k}).name;return '<div style="margin:6px 0"><b>'+esc(n)+'</b><br><input readonly value="'+esc(j.links[k])+'" style="width:100%;font-size:12px" onclick="this.select()"></div>'}).join('')+'</details>';
+h+='</div><div style="padding:10px 14px;border-top:1px solid #e2e4e8;display:flex;gap:8px;justify-content:flex-end"><button class="alt" onclick="closeReq()">Затвори</button><button class="prod" onclick="applyReq()">Приложи избраните в решетката</button></div></div></div>';
+var old=$('reqwrap');if(old)old.remove();document.body.insertAdjacentHTML('beforeend',h);REQ=j}
+var REQ=null;function closeReq(){var w=$('reqwrap');if(w)w.remove()}
+function applyReq(){if(!REQ)return;var sel=[];document.querySelectorAll('.reqsel').forEach(function(cb){if(cb.checked)sel.push(REQ.requests[+cb.getAttribute('data-i')])});if(!sel.length){msg('Не е избрана заявка.','err');return}collect();var added=0,upd=0;
+sel.forEach(function(r){var s=shops.filter(function(x){return String(x.client_id||'')===String(r.client_id||'')&&String(x.person_id||'')===String(r.person_id||'')})[0];if(!s){s={client:r.name,rep:'',client_id:r.client_id,person_id:r.person_id,order:{},scheduled:true};shops.push(s);added++}else upd++;s.order={};r.rows.forEach(function(x){if(x.qty>0)s.order[x.name]=x.qty});s.scheduled=true;api({action:'shop_request_applied',id:r.id,applied_rows:r.rows})});
+renderGrid();closeReq();msg('✓ Приложени '+sel.length+' заявки ('+upd+' обновени, '+added+' добавени). Провери решетката и натисни „Изчисли".','ok')}
+
 function openPicker(){msg('Зареждам магазините…');api({action:'list_objects'}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}OBJECTS=j.objects||[];$('pickfilter').value='';renderPick();$('picker').style.display='flex';$('pickfilter').focus();msg('')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function closePicker(){$('picker').style.display='none'}
 function pickLabel(o){return (o.client||'')+(o.rep?(' · '+o.rep):'')}
@@ -2093,10 +2283,27 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // ── ★ S32 — формата за заявка на магазин (без собственически токен; ключ по обект) ──
+  if (req.method === "GET" && view === "zayavka") {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    if (!formAuth(q.o, q.k)) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:17px system-ui;padding:24px'>Линкът не е валиден. Поискай нов от MOTAMO.</body>"); return; }
+    res.status(200).send(zayavkaPage(String(q.o), String(q.k)));
+    return;
+  }
+
   // 3) JSON изчисление (POST от страницата, или GET със seed_date). Токен-гейт.
   let body = req.body;
   if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = null; } }
   if (!body || typeof body !== "object") body = {};
+  // ★ S32 — публичните действия на формата: удостоверени с ключа на обекта, не с токен.
+  if (body.action === "shop_form_data" || body.action === "shop_form_send") {
+    if (!formAuth(body.o, body.k)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try {
+      const out = body.action === "shop_form_data" ? { ok: true, ...(await shopFormData(String(body.o), body.date)) } : await shopFormSend(String(body.o), body);
+      res.status(out.ok ? 200 : 400).json(out);
+    } catch (e) { res.status(502).json({ ok: false, error: "form_failed", message: String(e && e.message).slice(0, 200) }); }
+    return;
+  }
   const token = body.token != null ? body.token : q.token;
   // Пишещите действия искат силен токен; „stock" е само четене → и CEX_VIEW_TOKEN.
   const strong = [process.env.RECONCILE_TOKEN, process.env.PAY_HMAC_SECRET, process.env.PREVIEW_TOKEN];
@@ -2112,6 +2319,20 @@ module.exports = async function handler(req, res) {
   const allowed = isWrite ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+
+  // ── ★ S32 — заявките от формата за деня (таб „📥 Заявки" в инструмента) ──
+  if (body.action === "shop_requests") {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
+    try { res.status(200).json({ ok: true, ...(await shopRequestsFor(date, req.headers && req.headers.host)) }); }
+    catch (e) { res.status(502).json({ ok: false, error: "requests_failed", message: String(e && e.message).slice(0, 200) }); }
+    return;
+  }
+  if (body.action === "shop_request_applied") {
+    const id = Number(body.id); if (!id) { res.status(400).json({ ok: false, error: "no_id" }); return; }
+    try { await sbReq(`cex_shop_requests?id=eq.${id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ applied_at: new Date().toISOString(), applied_rows: Array.isArray(body.applied_rows) ? body.applied_rows : [] }) }); res.status(200).json({ ok: true }); }
+    catch (e) { res.status(502).json({ ok: false, error: "patch_failed", message: String(e && e.message).slice(0, 200) }); }
+    return;
+  }
 
   // ── ДИАГНОСТИК (само четене): записаната „Изчисли" снимка (за кухнята) ──
   if (body.action === "snapshot") {
