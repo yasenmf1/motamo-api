@@ -2677,7 +2677,7 @@ module.exports = async function handler(req, res) {
       // ★ Нов обект със стокова, който го няма в маршрута на буса (lib/route.js) → показва се като „нов, без адрес",
       // с име от сметките в Barsy. Собственикът го влачи в маршрут; навигация ще има, щом му се добави адрес в route.js.
       const known = new Set(RT.ROUTE.flatMap(s => s.keys));
-      const unknown = [...have].filter(k => !known.has(k));
+      const unknown = [...have].filter(k => !known.has(k) && !RT.NOT_BUS.has(k));
       if (unknown.length) {
         const names = {};
         try {
