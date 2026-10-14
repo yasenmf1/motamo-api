@@ -141,6 +141,7 @@ const live = async (body) => (await realFetch('https://motamo-api.vercel.app/api
   console.log('  данни ok', r.j.ok, '| обект', r.j.obj && r.j.obj.name, '| артикули:', JSON.stringify(it));
   r = await run({ token: undefined, action: 'shop_form_send', o: '2:4', k: okTok, for_date: TMR, rows: [{ id: 129, qty: 8 }, { id: 81, qty: 0 }, { id: 999, qty: 3 }], left: { 129: 2 } });
   console.log('  пращане ok', r.j.ok, '| записано:', JSON.stringify(Object.values(W.sreq).map(x => [x.for_date, x.obj_key, x.rows, x.left_qty])));
+  { const last = W.tg[W.tg.length - 1]; console.log('  Telegram до собственика:', last ? (String(last.chat) === '1153763325' && /Заявка от СИБИЕС 11/.test(last.text)) : false, '|', last ? last.text.split('\n')[0] : '-'); }
   r = await run({ token: undefined, action: 'shop_form_send', o: '2:4', k: 'wrong', for_date: TMR, rows: [{ id: 129, qty: 1 }] });
   console.log('  пращане с грешен ключ → ok', r.j.ok, 'статус', r.status, '(очаквано 403)');
   r = await run({ action: 'shop_requests', date: TMR });

@@ -908,6 +908,13 @@ async function shopFormSend(key, body) {
   const row = { for_date: forDate, obj_key: key, rows, left_qty: left, note: String(body.note || "").slice(0, 300) || null, source: "form", sent_at: now, updated_at: now };
   try { await sbReq(`cex_shop_requests?on_conflict=for_date,obj_key`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify([row]) }); }
   catch (e) { return { ok: false, error: "save_failed", message: "Заявката не се записа. Опитай пак след минута." }; }
+  // Известие на собственика в Telegram (личния чат) — да не трябва да отваря таба, за да разбере.
+  try {
+    const hm = new Intl.DateTimeFormat("bg-BG", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit" }).format(new Date());
+    const lines = rows.length ? rows.map(r => "• " + TG.escHtml(r.name.replace("НACHI", "NACHI")) + " <b>" + r.qty + "</b>").join("\n") : "• <i>0 от всичко</i>";
+    const text = `📥 <b>Заявка от ${TG.escHtml(formObjName(key))}</b>\nза ${dowBg(forDate)} ${forDate.slice(8, 10)}.${forDate.slice(5, 7)} · пратена ${hm}\n${lines}` + (row.note ? `\nБележка: ${TG.escHtml(row.note)}` : "") + `\n\nИнструмент → 📥 Заявки → „Приложи“.`;
+    await TG.tgSend(text, TG.OWNER_CHAT_ID);
+  } catch (e) { /* известието не бива да спира заявката */ }
   return { ok: true, for_date: forDate, rows, left, sent_at: now };
 }
 async function shopRequestsFor(dateIso, host) {
