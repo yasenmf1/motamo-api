@@ -780,10 +780,12 @@ const CEX_OBJECTS = {
   // Хасково — ХАЙ ЛЕВЕЛ ЛИМИТЕД (клиент 9, без под-обект)
   "9:": { group: "haskovo" },
   // Стара Загора и региона — СИБИЕС ООД (клиент 2)
-  "2:1": { group: "sibies" },  "2:2": { group: "sibies" },  "2:3": { group: "sibies" },
-  "2:4": { group: "sibies", form: true },  "2:5": { group: "sibies", form: true },  "2:6": { group: "sibies" },
-  "2:7": { group: "sibies" },  "2:8": { group: "sibies" },  "2:9": { group: "sibies" },
-  "2:10": { group: "sibies" }, "2:11": { group: "sibies", form: true }, "2:12": { group: "sibies" },
+  // label = номерът на магазина, както го знаят управителките (таблицата на собственика, 14.10);
+  // person_id в Barsy НЕ е този номер. Формата го показва най-отгоре.
+  "2:1": { group: "sibies", label: "СИБИЕС 4" },  "2:2": { group: "sibies", label: "СИБИЕС 13" },  "2:3": { group: "sibies", label: "СИБИЕС 7" },
+  "2:4": { group: "sibies", form: true, label: "СИБИЕС 11" },  "2:5": { group: "sibies", form: true, label: "СИБИЕС 12" },  "2:6": { group: "sibies" },
+  "2:7": { group: "sibies", label: "СИБИЕС 16" },  "2:8": { group: "sibies", label: "СИБИЕС 17" },  "2:9": { group: "sibies", label: "СИБИЕС 10" },
+  "2:10": { group: "sibies" }, "2:11": { group: "sibies", form: true, label: "СИБИЕС 3" }, "2:12": { group: "sibies" },
   "2:13": { group: "sibies" }, "2:14": { group: "sibies" }, "2:15": { group: "sibies" },
   // Сливен — Мерканто / АНТОНИЙ ЕООД (клиент 11)
   "11:23": { group: "merkanto" }, "11:25": { group: "merkanto" }, "11:26": { group: "merkanto" },
@@ -820,10 +822,16 @@ function formAuth(key, tok) {
   const a = Buffer.from(formToken(key)), b = Buffer.from(String(tok || ""));
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
-function formObjName(key) {
+function formObjName(key) {   // пълното име за собственика: „СИБИЕС 11 · СиБиЕс Граф Игнатиев 59 (Бедечка)"
   const o = CEX_OBJECTS[key] || {};
-  return ROUTE_NAMES[key] || [o.client, o.rep].filter(Boolean).join(" · ") || key;
+  const place = ROUTE_NAMES[key] || [o.client, o.rep].filter(Boolean).join(" · ") || key;
+  return o.label ? o.label + " · " + place : place;
 }
+function formObjLabel(key) {  // как го знае управителката: „СИБИЕС 11"; без label — мястото
+  const o = CEX_OBJECTS[key] || {};
+  return o.label || ROUTE_NAMES[key] || [o.client, o.rep].filter(Boolean).join(" · ") || key;
+}
+function formObjPlace(key) { return ROUTE_NAMES[key] || ""; }
 function formShops() { return Object.keys(CEX_OBJECTS).filter(k => CEX_OBJECTS[k].form); }
 function formLink(key, host) { return `https://${host || "motamo-api.vercel.app"}/api/cex-plan?view=zayavka&o=${encodeURIComponent(key)}&k=${formToken(key)}`; }
 function sofiaHM() { const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date()); const g = t => Number((p.find(x => x.type === t) || {}).value); return [g("hour"), g("minute")]; }
@@ -899,7 +907,7 @@ async function shopRequestsFor(dateIso, host) {
   return { date: dateIso, requests, silent, links };
 }
 function zayavkaPage(key, tok) {
-  const name = formObjName(key);
+  const name = formObjLabel(key), place = (CEX_OBJECTS[key] || {}).label ? formObjPlace(key) : "";
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
 <title>Заявка · ${esc(name)}</title><style>
@@ -926,7 +934,7 @@ td.l{text-align:center}td.l input{width:38px;min-width:0;height:34px;padding:0;t
 .msg{padding:10px 12px;border-radius:10px;margin-top:10px;display:none;font-size:14px}.msg.ok{display:block;background:#e8f5e9;color:#1b5e20}.msg.err{display:block;background:#fde8e8;color:#9b1c1c}.msg.info{display:block;background:#e9f0fb;color:#1a3d7a}
 select{width:100%;padding:10px;font-size:15px;border:1px solid #cfd3d8;border-radius:10px;background:#fff}
 </style></head><body>
-<header><h1>${esc(name)}</h1><div class="d" id="hd">Заявка към MOTAMO</div><div class="d" style="margin-top:6px"><span id="dd" style="font-size:18px;font-weight:800"></span> <a href="#" id="sw" onclick="swap();return false" style="color:#ffd6d6;font-size:12px;margin-left:8px">друг ден</a></div></header>
+<header><h1>${esc(name)}</h1>${place ? `<div class="d">${esc(place)}</div>` : ""}<div class="d" id="hd">Заявка към MOTAMO</div><div class="d" style="margin-top:6px"><span id="dd" style="font-size:18px;font-weight:800"></span> <a href="#" id="sw" onclick="swap();return false" style="color:#ffd6d6;font-size:12px;margin-left:8px">друг ден</a></div></header>
 <div class="wrap">
 <div class="card"><table id="t"><thead><tr><th class="c1" style="text-align:left">артикул</th><th class="c5">заявка</th></tr></thead><tbody id="tb"><tr><td colspan="2" style="text-align:center;color:#888">Зареждам…</td></tr></tbody></table>
 <div class="note">Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +.</div>
