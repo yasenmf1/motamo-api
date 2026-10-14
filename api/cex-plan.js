@@ -1320,65 +1320,92 @@ if(location.hash==='#shop')show('shop');if(location.hash==='#routes')show('route
 </body></html>`;
 }
 
-// ── HTML: МАРШРУТИ НА ШОФЬОРА (собственикът подрежда; ботът ползва записаното) ──
+// ── HTML: МАРШРУТИ НА ШОФЬОРА (собственикът влачи обектите в маршрути 1–5; ботът ползва записаното) ──
 function routesPage(k, date) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MOTAMO · Маршрути</title><style>
-*{box-sizing:border-box}body{margin:0;font:16px system-ui,Segoe UI,Roboto,sans-serif;background:#eef0f3;color:#14171a}
-.wrap{max-width:760px;margin:0 auto;padding:14px}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,Segoe UI,Roboto,sans-serif;background:#eef0f3;color:#14171a}
+.wrap{max-width:1100px;margin:0 auto;padding:14px}
 h1{font-size:20px;margin:0 0 4px}.sub{color:#666;font-size:14px;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-input[type=date]{font:16px system-ui;padding:6px 8px;border:1px solid #ccc;border-radius:8px}
-.route{background:#fff;border-radius:14px;padding:12px;margin:0 0 12px;box-shadow:0 2px 8px rgba(20,23,26,.08)}
-.route h2{font-size:17px;margin:0 0 8px;display:flex;gap:8px;align-items:center}
-.route h2 input{font:16px system-ui;font-weight:700;border:1px solid #ddd;border-radius:8px;padding:5px 8px;flex:1;min-width:0}
-.route h2 .cnt{color:#888;font-weight:400;font-size:14px}
-.stop{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid #f0f0f0}
-.stop .nm{flex:1;min-width:0}.stop .nm small{color:#888;display:block;font-size:12px}
-.stop .mv{display:flex;gap:4px}
-.stop .mv button{font:15px system-ui;font-weight:700;width:36px;height:36px;border:1px solid #ccc;background:#fafafa;border-radius:8px;cursor:pointer}
-.stop .mv button.on{background:#14171a;color:#fff;border-color:#14171a}
-.stop .ud button{font:13px system-ui;width:28px;height:28px;border:1px solid #ddd;background:#fff;border-radius:6px;cursor:pointer}
-.bar{position:sticky;bottom:0;background:#fff;padding:10px 12px;display:flex;gap:8px;box-shadow:0 -2px 10px rgba(0,0,0,.08);border-radius:12px}
-.bar button{font:16px system-ui;font-weight:800;padding:12px 16px;border-radius:10px;border:0;cursor:pointer}
-.bar .save{background:#c8151f;color:#fff;flex:1}.bar .auto{background:#eee}.bar .add{background:#eee}
-.msg{font-size:14px;color:#0a6b2e;margin:6px 0 0}.msg.err{color:#b3121b}
-.empty{background:#fff;border-radius:14px;padding:26px;text-align:center;color:#666}
+input[type=date]{font:15px system-ui;padding:5px 8px;border:1px solid #ccc;border-radius:8px}
+.cols{display:grid;grid-template-columns:1fr 1.3fr;gap:14px;align-items:start}
+@media (max-width:700px){.cols{grid-template-columns:1fr}}
+.col h3{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#777;margin:10px 0 6px}
+.pool,.route{background:#fff;border-radius:14px;padding:10px;margin:0 0 12px;box-shadow:0 2px 8px rgba(20,23,26,.08);min-height:54px}
+.route{border:2px dashed transparent;transition:border-color .12s,background .12s}
+.route.over,.pool.over{border-color:#c8151f;background:#fff5f5}
+.route h2{font-size:16px;margin:0 0 6px;display:flex;gap:8px;align-items:center}
+.route h2 .num{background:#14171a;color:#fff;border-radius:8px;padding:2px 9px;font-size:14px}
+.route h2 input{font:15px system-ui;font-weight:700;border:1px solid #e3e3e3;border-radius:8px;padding:5px 8px;flex:1;min-width:0}
+.route h2 .cnt{color:#888;font-weight:400;font-size:13px}
+.route h2 .x{border:0;background:none;color:#aaa;font-size:18px;cursor:pointer;padding:0 4px}
+.route h2 .x:hover{color:#c8151f}
+.city{font-weight:800;font-size:14px;margin:8px 0 4px;color:#333}
+.item{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e6e6e6;border-radius:10px;margin:4px 0;background:#fff;cursor:grab;user-select:none}
+.item:active{cursor:grabbing}.item.drag{opacity:.4}
+.item .h{color:#bbb;font-size:16px}.item .nm{flex:1;min-width:0;font-size:14px}.item .nm small{display:block;color:#999;font-size:11.5px}
+.item.sbs{border-left:4px solid #c8151f}
+.hint{color:#999;font-size:13px;text-align:center;padding:10px}
+.bar{position:sticky;bottom:0;background:#fff;padding:10px 12px;display:flex;gap:8px;box-shadow:0 -2px 10px rgba(0,0,0,.08);border-radius:12px;margin-top:6px;flex-wrap:wrap}
+.bar button{font:15px system-ui;font-weight:800;padding:11px 14px;border-radius:10px;border:0;cursor:pointer}
+.bar .save{background:#c8151f;color:#fff;flex:1}.bar .auto,.bar .add,.bar .clear{background:#eee}
+.bar button[disabled]{opacity:.45;cursor:not-allowed}
+.msg{font-size:14px;color:#0a6b2e;margin:6px 0 0}.msg.err{color:#b3121b}.msg.warn{color:#b06a00}
 </style></head><body><div class="wrap">
 <h1>🚚 Маршрути на шофьора</h1>
 <p class="sub">Обектите със <b>стокова</b> за <input type="date" id="date" value="${esc(date)}"> <span id="state"></span></p>
-<div id="routes"></div>
-<div class="bar"><button class="add" onclick="addRoute()">+ Маршрут</button><button class="auto" onclick="applyAuto()">Автоматично</button><button class="save" onclick="save()">Запиши за шофьора</button></div>
-<p class="msg" id="msg"></p>
+<div class="cols">
+  <div class="col"><h3>Обекти (влачи ги вдясно)</h3><div class="pool" id="pool" data-r="-1"></div></div>
+  <div class="col"><h3>Маршрути</h3><div id="routes"></div>
+    <div class="bar"><button class="add" id="addBtn" onclick="addRoute()">+ Маршрут</button><button class="auto" onclick="applyAuto()">Автоматично</button><button class="clear" onclick="clearAll()">Изчисти</button><button class="save" onclick="save()">Запиши за шофьора</button></div>
+    <p class="msg" id="msg"></p>
+  </div>
+</div>
 </div>
 <script>
-var K=${JSON.stringify(k || "")},API='/api/cex-plan',ST={stops:[],routes:[],auto:[]};
+var K=${JSON.stringify(k || "")},API='/api/cex-plan',MAXR=5,ST={stops:[],routes:[],auto:[]},DRAG=null;
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function post(b){b.token=K;return fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json()})}
+function cityOf(z){return z==='Сливен'||z==='Хасково'?z:'Стара Загора'}
+function stop(k){return ST.stops.filter(function(s){return s.key===k})[0]}
 function load(){var d=document.getElementById('date').value;document.getElementById('state').textContent='зарежда…';
   post({action:'route_plan',date:d}).then(function(j){if(!j.ok){document.getElementById('state').textContent='грешка: '+(j.error||'');return}
-    ST.stops=j.stops;ST.auto=j.auto;ST.routes=(j.saved&&j.saved.length)?j.saved.map(function(r){return {name:r.name,keys:r.keys.slice()}}):j.auto.map(function(r){return {name:r.name,keys:r.keys.slice()}});
-    // обекти със стокова, които не са в записания план → в последния маршрут
-    var inPlan={};ST.routes.forEach(function(r){r.keys.forEach(function(k){inPlan[k]=1})});
-    var missing=ST.stops.filter(function(s){return !inPlan[s.key]}).map(function(s){return s.key});
-    if(missing.length){if(!ST.routes.length)ST.routes.push({name:'Маршрут 1',keys:[]});ST.routes[ST.routes.length-1].keys=ST.routes[ST.routes.length-1].keys.concat(missing)}
-    ST.routes.forEach(function(r){r.keys=r.keys.filter(function(k){return ST.stops.some(function(s){return s.key===k})})});
-    document.getElementById('state').textContent=ST.stops.length+' обекта · '+(j.saved&&j.saved.length?'записан план ('+new Date(j.saved_at).toLocaleTimeString('bg-BG',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Sofia'})+')':'автоматично предложение');
+    ST.stops=j.stops;ST.auto=j.auto;
+    var src=(j.saved&&j.saved.length)?j.saved:[];
+    ST.routes=src.map(function(r){return {name:r.name,keys:r.keys.filter(function(k){return !!stop(k)})}}).slice(0,MAXR);
+    if(!ST.routes.length)ST.routes=[{name:'Маршрут 1',keys:[]}];
+    document.getElementById('state').textContent=ST.stops.length+' обекта · '+(src.length?'записан план ('+new Date(j.saved_at).toLocaleTimeString('bg-BG',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Sofia'})+')':'няма записан план — влачи или натисни „Автоматично“');
     render()})}
-function nameOf(k){var s=ST.stops.filter(function(x){return x.key===k})[0];return s?s.name:k}
-function zoneOf(k){var s=ST.stops.filter(function(x){return x.key===k})[0];return s?s.zone:''}
-function render(){var h='';if(!ST.stops.length){h='<div class="empty">Няма издадени стокови за този ден.</div>'}
-  ST.routes.forEach(function(r,ri){h+='<div class="route"><h2><span>'+(ri+1)+'.</span><input value="'+esc(r.name)+'" onchange="ST.routes['+ri+'].name=this.value"><span class="cnt">'+r.keys.length+' об.</span></h2>';
-    r.keys.forEach(function(k,ki){h+='<div class="stop"><div class="nm">'+esc(nameOf(k))+'<small>'+esc(zoneOf(k))+'</small></div><div class="ud"><button onclick="mv('+ri+','+ki+',-1)">▲</button><button onclick="mv('+ri+','+ki+',1)">▼</button></div><div class="mv">';
-      ST.routes.forEach(function(_,rj){h+='<button class="'+(rj===ri?'on':'')+'" onclick="to('+ri+','+ki+','+rj+')">'+(rj+1)+'</button>'});h+='</div></div>'});
-    h+='</div>'});
-  document.getElementById('routes').innerHTML=h}
-function to(ri,ki,rj){if(ri===rj)return;var k=ST.routes[ri].keys.splice(ki,1)[0];ST.routes[rj].keys.push(k);ST.routes=ST.routes.filter(function(r,i){return r.keys.length||i===rj});render()}
-function mv(ri,ki,d){var a=ST.routes[ri].keys,j=ki+d;if(j<0||j>=a.length)return;var t=a[ki];a[ki]=a[j];a[j]=t;render()}
-function addRoute(){ST.routes.push({name:'Маршрут '+(ST.routes.length+1),keys:[]});render()}
-function applyAuto(){ST.routes=ST.auto.map(function(r){return {name:r.name,keys:r.keys.slice()}});render()}
-function save(){var m=document.getElementById('msg');m.className='msg';m.textContent='записва…';
-  post({action:'route_plan_save',date:document.getElementById('date').value,routes:ST.routes.filter(function(r){return r.keys.length})}).then(function(j){
-    if(j.ok){m.textContent='✅ Записано — шофьорът ще види тези маршрути при „Тръгвам“.';load()}else{m.className='msg err';m.textContent='Грешка: '+(j.error||'')}})}
+function placed(){var m={};ST.routes.forEach(function(r){r.keys.forEach(function(k){m[k]=1})});return m}
+function itemHtml(k){var s=stop(k);if(!s)return '';return '<div class="item'+(/^СиБиЕс/.test(s.zone)?' sbs':'')+'" draggable="true" data-k="'+esc(k)+'"><span class="h">⋮⋮</span><span class="nm">'+esc(s.name)+'<small>'+esc(s.zone)+'</small></span></div>'}
+function render(){var p=placed();var pool='';['Стара Загора','Сливен','Хасково'].forEach(function(c){var ks=ST.stops.filter(function(s){return !p[s.key]&&cityOf(s.zone)===c});if(!ks.length)return;pool+='<div class="city">'+c+' <span style="color:#999;font-weight:400">('+ks.length+')</span></div>'+ks.map(function(s){return itemHtml(s.key)}).join('')});
+  if(!pool)pool='<div class="hint">'+(ST.stops.length?'Всички обекти са в маршрути ✓':'Няма издадени стокови за този ден.')+'</div>';
+  document.getElementById('pool').innerHTML=pool;
+  var h='';ST.routes.forEach(function(r,ri){h+='<div class="route" data-r="'+ri+'"><h2><span class="num">'+(ri+1)+'</span><input value="'+esc(r.name)+'" onchange="ST.routes['+ri+'].name=this.value"><span class="cnt">'+r.keys.length+' об.</span><button class="x" title="Махни маршрута" onclick="delRoute('+ri+')">×</button></h2>'+(r.keys.length?r.keys.map(itemHtml).join(''):'<div class="hint">пусни обекти тук</div>')+'</div>'});
+  document.getElementById('routes').innerHTML=h;
+  document.getElementById('addBtn').disabled=ST.routes.length>=MAXR;
+  wire()}
+function wire(){document.querySelectorAll('.item').forEach(function(el){
+    el.addEventListener('dragstart',function(e){DRAG=el.getAttribute('data-k');el.classList.add('drag');try{e.dataTransfer.setData('text/plain',DRAG);e.dataTransfer.effectAllowed='move'}catch(x){}});
+    el.addEventListener('dragend',function(){el.classList.remove('drag');document.querySelectorAll('.over').forEach(function(z){z.classList.remove('over')})})});
+  document.querySelectorAll('.route,.pool').forEach(function(z){
+    z.addEventListener('dragover',function(e){e.preventDefault();z.classList.add('over')});
+    z.addEventListener('dragleave',function(){z.classList.remove('over')});
+    z.addEventListener('drop',function(e){e.preventDefault();z.classList.remove('over');var k=DRAG||(e.dataTransfer&&e.dataTransfer.getData('text/plain'));if(!k)return;
+      var ri=Number(z.getAttribute('data-r'));var before=e.target.closest?e.target.closest('.item'):null;var bk=before?before.getAttribute('data-k'):null;
+      ST.routes.forEach(function(r){r.keys=r.keys.filter(function(x){return x!==k})});
+      if(ri>=0){var a=ST.routes[ri].keys;var i=bk?a.indexOf(bk):-1;if(i>=0)a.splice(i,0,k);else a.push(k)}
+      DRAG=null;render()})})}
+function addRoute(){if(ST.routes.length>=MAXR)return;ST.routes.push({name:'Маршрут '+(ST.routes.length+1),keys:[]});render()}
+function delRoute(ri){if(ST.routes.length<=1){ST.routes[0].keys=[];render();return}ST.routes.splice(ri,1);render()}
+function clearAll(){ST.routes=[{name:'Маршрут 1',keys:[]}];render()}
+function applyAuto(){ST.routes=ST.auto.slice(0,MAXR).map(function(r){return {name:r.name,keys:r.keys.slice()}});if(!ST.routes.length)ST.routes=[{name:'Маршрут 1',keys:[]}];render()}
+function save(){var m=document.getElementById('msg');var p=placed();var left=ST.stops.filter(function(s){return !p[s.key]}).length;
+  var routes=ST.routes.filter(function(r){return r.keys.length});
+  if(!routes.length){m.className='msg err';m.textContent='Няма обекти в маршрутите.';return}
+  m.className='msg';m.textContent='записва…';
+  post({action:'route_plan_save',date:document.getElementById('date').value,routes:routes}).then(function(j){
+    if(j.ok){m.className=left?'msg warn':'msg';m.textContent='✅ Записано — шофьорът ще види тези маршрути при „Тръгвам“.'+(left?' ⚠️ '+left+' обекта са извън маршрутите — ботът ще ги сложи в последния.':'');load()}else{m.className='msg err';m.textContent='Грешка: '+(j.error||'')}})}
 document.getElementById('date').addEventListener('change',load);load();
 </script></body></html>`;
 }
