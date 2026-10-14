@@ -26,5 +26,17 @@
       "path": "/api/transfer?cron=clean",
       "schedule": "5 21 * * *"
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/:slug([a-z0-9-]+)",
+      "has": [
+        {
+          "type": "host",
+          "value": "zayavka.motamo.bg"
+        }
+      ],
+      "destination": "/api/cex-plan?view=zayavka&s=:slug"
+    }
   ]
 }

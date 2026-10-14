@@ -833,7 +833,22 @@ function formObjLabel(key) {  // как го знае управителката
 }
 function formObjPlace(key) { return ROUTE_NAMES[key] || ""; }
 function formShops() { return Object.keys(CEX_OBJECTS).filter(k => CEX_OBJECTS[k].form); }
-function formLink(key, host) { return `https://${host || "motamo-api.vercel.app"}/api/cex-plan?view=zayavka&o=${encodeURIComponent(key)}&k=${formToken(key)}`; }
+// Кратък адрес: zayavka.motamo.bg/sibies-11-k7f3q2 (vercel.json пренаписва към ?view=zayavka&s=<slug>).
+// slug = латиница от label/името + първите 6 знака на ключа; проверява се пак с constant-time сравнение.
+const FORM_HOST = process.env.ZAYAVKA_HOST || "zayavka.motamo.bg", FORM_SLUG_KEY = 6;
+const TRANSLIT = { а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ж: "zh", з: "z", и: "i", й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f", х: "h", ц: "c", ч: "ch", ш: "sh", щ: "sht", ъ: "a", ь: "", ю: "yu", я: "ya" };
+function slugBase(key) { return formObjLabel(key).toLowerCase().split("").map(ch => TRANSLIT[ch] != null ? TRANSLIT[ch] : ch).join("").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
+function formSlug(key) { return slugBase(key) + "-" + formToken(key).slice(0, FORM_SLUG_KEY); }
+function formKeyFromSlug(slug) {   // „sibies-11-k7f3q2" → "2:4" (ако 6-те знака съвпадат с ключа на обекта)
+  const m = /^([a-z0-9-]+)-([0-9a-f]{6})$/.exec(String(slug || "")); if (!m) return null;
+  for (const key of formShops()) {
+    if (slugBase(key) !== m[1]) continue;
+    const a = Buffer.from(formToken(key).slice(0, FORM_SLUG_KEY)), b = Buffer.from(m[2]);
+    return (a.length === b.length && crypto.timingSafeEqual(a, b)) ? key : null;
+  }
+  return null;
+}
+function formLink(key, host) { return `https://${FORM_HOST}/${formSlug(key)}`; }
 function sofiaHM() { const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date()); const g = t => Number((p.find(x => x.type === t) || {}).value); return [g("hour"), g("minute")]; }
 function formDefaultDate() { const [h, m] = sofiaHM(); const today = sofiaToday(); return (h < FORM_SWITCH_HOUR || (h === FORM_SWITCH_HOUR && m <= FORM_SWITCH_MIN)) ? today : isoPlusDays(today, 1); }
 const DOW_BG = ["неделя", "понеделник", "вторник", "сряда", "четвъртък", "петък", "събота"];
@@ -2288,8 +2303,9 @@ module.exports = async function handler(req, res) {
   // ── ★ S32 — формата за заявка на магазин (без собственически токен; ключ по обект) ──
   if (req.method === "GET" && view === "zayavka") {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    if (!formAuth(q.o, q.k)) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:17px system-ui;padding:24px'>Линкът не е валиден. Поискай нов от MOTAMO.</body>"); return; }
-    res.status(200).send(zayavkaPage(String(q.o), String(q.k)));
+    const key = q.s ? formKeyFromSlug(q.s) : (formAuth(q.o, q.k) ? String(q.o) : null);   // кратък адрес (s) или пълен (o+k)
+    if (!key) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:17px system-ui;padding:24px'>Линкът не е валиден. Поискай нов от MOTAMO.</body>"); return; }
+    res.status(200).send(zayavkaPage(key, formToken(key)));
     return;
   }
 

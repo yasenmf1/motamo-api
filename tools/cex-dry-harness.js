@@ -144,7 +144,11 @@ const live = async (body) => (await realFetch('https://motamo-api.vercel.app/api
   r = await run({ token: undefined, action: 'shop_form_send', o: '2:4', k: 'wrong', for_date: TMR, rows: [{ id: 129, qty: 1 }] });
   console.log('  пращане с грешен ключ → ok', r.j.ok, 'статус', r.status, '(очаквано 403)');
   r = await run({ action: 'shop_requests', date: TMR });
-  console.log('  таб на собственика ok', r.j.ok, '| заявки:', JSON.stringify((r.j.requests || []).map(x => [x.obj_key, x.name, x.rows, x.applied])), '| мълчат:', JSON.stringify(r.j.silent), '| линк за 2:4 съдържа ключа:', String((r.j.links || {})['2:4'] || '').includes(okTok));
+  console.log('  таб на собственика ok', r.j.ok, '| заявки:', JSON.stringify((r.j.requests || []).map(x => [x.obj_key, x.name, x.rows, x.applied])), '| мълчат:', JSON.stringify(r.j.silent), '| линкът за 2:4 е кратък (zayavka.motamo.bg/sibies-11-<6>):', String((r.j.links || {})['2:4'] || '') === 'https://zayavka.motamo.bg/sibies-11-' + okTok.slice(0, 6));
+  r = await run({}, 'GET', { view: 'zayavka', s: 'sibies-11-' + okTok.slice(0, 6) });
+  console.log('  кратък адрес sibies-11-<6> → статус', r.status, '| име:', /СИБИЕС 11/.test(r.html || ''));
+  r = await run({}, 'GET', { view: 'zayavka', s: 'sibies-11-000000' });
+  console.log('  кратък адрес с грешен ключ → статус', r.status, '(очаквано 403)');
   r = await run({ action: 'shop_request_applied', id: 1, applied_rows: [{ id: 129, qty: 8 }] });
   console.log('  приложено ok', r.j.ok, '| applied_at записан:', !!Object.values(W.sreq)[0].applied_at);
 
