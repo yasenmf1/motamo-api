@@ -912,8 +912,11 @@ async function shopFormSend(key, body) {
 }
 async function shopRequestsFor(dateIso, host) {
   const list = await sbAll(`cex_shop_requests?select=id,for_date,obj_key,rows,left_qty,note,source,sent_at,updated_at,applied_at,applied_rows&for_date=eq.${dateIso}&order=sent_at.asc`);
-  const requests = list.map(x => { const o = CEX_OBJECTS[x.obj_key] || {}; const [c, p] = x.obj_key.split(":"); return {
+  let accs = {}; try { const day = await dayGet(dateIso); accs = (day.state && day.state.accounts) || {}; } catch (e) {}
+  const requests = list.map(x => { const o = CEX_OBJECTS[x.obj_key] || {}; const [c, p] = x.obj_key.split(":");
+    const acc = accs[dayKey({ client_id: Number(c), person_id: p ? Number(p) : null })]; return {
     id: x.id, obj_key: x.obj_key, name: formObjName(x.obj_key), client_id: Number(c), person_id: p ? Number(p) : null, group: o.group || "adhoc",
+    has_account: !!acc, account_id: (acc && acc.account_id) || null,
     rows: x.rows || [], left: x.left_qty || {}, note: x.note, source: x.source, sent_at: x.sent_at, applied_at: x.applied_at,
     applied: !!x.applied_at && JSON.stringify(x.applied_rows || []) === JSON.stringify(x.rows || []) }; });
   const got = new Set(requests.map(r => r.obj_key));
@@ -2069,7 +2072,7 @@ function hhmm(s){var x=new Date(s);return isNaN(x)?'':('0'+x.getHours()).slice(-
 function renderReq(j){var h='<div class="pickwrap" id="reqwrap" onclick="if(event.target===this)closeReq()"><div class="pickbox"><div style="padding:12px 14px;border-bottom:1px solid #e2e4e8;display:flex;justify-content:space-between;align-items:center"><b>📥 Заявки от формата за '+j.date.split('-').reverse().join('.')+'</b><button class="alt" onclick="closeReq()">✕</button></div><div style="overflow:auto;padding:10px 14px;font-size:13px">';
 if(!j.requests.length)h+='<p style="color:#777">Още няма пратени заявки за този ден.</p>';
 j.requests.forEach(function(r,i){var rows=r.rows.map(function(x){return x.name.replace('НACHI','')+' <b>'+x.qty+'</b>'}).join(' · ')||'<i>0 от всичко</i>';var lf=Object.keys(r.left||{}).length?' · останало: '+Object.keys(r.left).map(function(k){var m=MENU.filter(function(z){return String(z.id)===String(k)})[0];return (m?m.name.replace('НACHI',''):k)+' '+r.left[k]}).join(', '):'';
-h+='<label style="display:block;padding:8px 0;border-bottom:1px solid #f0f1f3"><input type="checkbox" class="reqsel" data-i="'+i+'" '+(r.applied?'':'checked')+'> <b>'+esc(r.name)+'</b> <span style="color:#777">'+hhmm(r.sent_at)+(r.applied?' · ✓ приложена':(r.applied_at?' · ⚠ променена след прилагане':''))+'</span><br><span style="margin-left:22px">'+rows+'</span><span style="color:#777;margin-left:22px">'+lf+'</span></label>'});
+h+='<label style="display:block;padding:8px 0;border-bottom:1px solid #f0f1f3"><input type="checkbox" class="reqsel" data-i="'+i+'" '+((r.applied||r.has_account)?'':'checked')+'> <b>'+esc(r.name)+'</b> <span style="color:#777">'+hhmm(r.sent_at)+(r.applied?' · ✓ приложена':(r.applied_at?' · ⚠ променена след прилагане':''))+(r.has_account?' · <b style="color:#9b1c1c">⚠ вече има сметка'+(r.account_id?' №'+r.account_id:'')+' за този ден — сравни ръчно</b>':'')+'</span><br><span style="margin-left:22px">'+rows+'</span><span style="color:#777;margin-left:22px">'+lf+'</span></label>'});
 if(j.silent.length)h+='<p style="color:#9b1c1c;margin:10px 0 4px"><b>Мълчат:</b> '+j.silent.map(function(x){return esc(x.name)}).join(', ')+'</p>';
 h+='<details style="margin-top:10px"><summary style="cursor:pointer;color:#1565c0">Линкове за формата (прати на управителката във Viber)</summary>'+Object.keys(j.links).map(function(k){var n=(j.requests.filter(function(r){return r.obj_key===k})[0]||j.silent.filter(function(s){return s.obj_key===k})[0]||{name:k}).name;return '<div style="margin:6px 0"><b>'+esc(n)+'</b><br><input readonly value="'+esc(j.links[k])+'" style="width:100%;font-size:12px" onclick="this.select()"></div>'}).join('')+'</details>';
 h+='</div><div style="padding:10px 14px;border-top:1px solid #e2e4e8;display:flex;gap:8px;justify-content:flex-end"><button class="alt" onclick="closeReq()">Затвори</button><button class="prod" onclick="applyReq()">Приложи избраните в решетката</button></div></div></div>';

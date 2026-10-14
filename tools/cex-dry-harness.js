@@ -149,6 +149,9 @@ const live = async (body) => (await realFetch('https://motamo-api.vercel.app/api
   console.log('  кратък адрес sibies-11-<6> → статус', r.status, '| име:', /СИБИЕС 11/.test(r.html || ''));
   r = await run({}, 'GET', { view: 'zayavka', s: 'sibies-11-000000' });
   console.log('  кратък адрес с грешен ключ → статус', r.status, '(очаквано 403)');
+  W.day[TMR] = { for_date: TMR, state: { accounts: { '2|4|': { account_id: 4444 } } } };
+  r = await run({ action: 'shop_requests', date: TMR });
+  console.log('  магазин със сметка за деня → has_account:', (r.j.requests || []).map(x => x.has_account + '/' + x.account_id).join(','), '(очаквано true/4444)');
   r = await run({ action: 'shop_request_applied', id: 1, applied_rows: [{ id: 129, qty: 8 }] });
   console.log('  приложено ok', r.j.ok, '| applied_at записан:', !!Object.values(W.sreq)[0].applied_at);
 
