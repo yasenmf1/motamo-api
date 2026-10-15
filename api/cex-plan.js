@@ -895,7 +895,7 @@ async function shopFormData(key, dateIso) {
       suggest: sg ? sg.n : (same ? h[same] : (last ? h[last] : 0)), avg: sg ? sg.avg : null, weeks: sg ? sg.weeks : 0 });
   }
   let existing = null;
-  try { const ex = await sbAll(`cex_shop_requests?select=id,for_date,rows,left_qty,swap_qty,note,sent_at,updated_at&for_date=eq.${target}&obj_key=eq.${encodeURIComponent(key)}`); existing = ex[0] || null; } catch (e) {}
+  try { const ex = await sbAll(`cex_shop_requests?select=id,for_date,rows,left_qty,swap_qty,note,sent_at,updated_at,applied_at&for_date=eq.${target}&obj_key=eq.${encodeURIComponent(key)}`); existing = ex[0] || null; } catch (e) {}
   return { obj: { key, name: formObjName(key) }, for_date: target, default_date: def, today, dow: dowBg(target), items, existing,
     other: MENU.filter(m => !items.some(i => i.id === m.id)).map(m => ({ id: m.id, name: m.name })) };
 }
@@ -993,7 +993,7 @@ b+='<tr data-id="'+it.id+'"><td class="n">'+esc(nm)+(sub?'<small>'+sub+'</small>
 +'<td class="l"><input type="number" inputmode="numeric" min="0" class="swap" value="'+(exs[it.id]!=null?exs[it.id]:'')+'" placeholder="–"></td>'
 +'<td><div class="q"><button onclick="step(this,-1)">−</button><input type="number" inputmode="numeric" min="0" class="qty '+cls+'" value="'+v+'" oninput="this.className=\\'qty\\'"><button onclick="step(this,1)">+</button></div></td></tr>'});
 $('tb').innerHTML=b||'<tr><td colspan="3" style="text-align:center;color:#888">Няма история за този магазин. Добави артикул от „+ Друг артикул".</td></tr>';
-if(ex){msg('Вече има пратена заявка за '+dm(SEL)+' ('+hhmm(ex.sent_at)+'). Промени я и натисни „Прати" пак, ако трябва.','ok');$('note').textContent='Черните числа са вашата пратена заявка за този ден. Ако искате промяна — поправете и натиснете „Прати заявката" пак. „За смяна" = колко броя връщате за подмяна (по желание).'}else{$('note').textContent='Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +. „За смяна" = колко броя връщате за подмяна (по желание).'}
+if(ex){if(ex.applied_at&&ex.applied_at>=ex.sent_at){msg('✓ ПРИЕТА от MOTAMO в '+hhmm(ex.applied_at)+' (пратена '+hhmm(ex.sent_at)+'). За промяна след това се обадете в цеха.','ok')}else{msg('Пратена в '+hhmm(ex.sent_at)+' — чака потвърждение от MOTAMO. Може да я промените и да натиснете „Прати" пак.','info')}$('note').textContent='Черните числа са вашата пратена заявка за този ден. Ако искате промяна — поправете и натиснете „Прати заявката" пак. „За смяна" = колко броя връщате за подмяна (по желание).'}else{$('note').textContent='Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +. „За смяна" = колко броя връщате за подмяна (по желание).'}
 var os='<option value="">— избери артикул —</option>';(D.other||[]).forEach(function(m){os+='<option value="'+m.id+'">'+esc(m.name.replace('НACHI','NACHI'))+'</option>'});$('othersel').innerHTML=os}
 function swap(){var t=D.today,tm=addDays(t,1);var o=SEL===t?tm:t;if(confirm('Да сменя деня на '+dowOf(o)+' '+dm(o)+'?'))load(o)}
 function addDays(iso,n){var d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
