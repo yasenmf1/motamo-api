@@ -793,7 +793,7 @@ const CEX_OBJECTS = {
   "11:27": { group: "merkanto" }, "11:28": { group: "merkanto" }, "11:29": { group: "merkanto" },
   "11:30": { group: "merkanto" }, "11:31": { group: "merkanto" }, "11:32": { group: "merkanto" },
   // Ад-хок / по заявка (показват се, но не се тикат)
-  "4:": { group: "adhoc", form: true, label: "A шоп" }, "8:": { group: "adhoc" }, "8:21": { group: "adhoc" }, "8:22": { group: "adhoc", form: true, label: "Athletic Fitness" },
+  "4:": { group: "adhoc", form: true, label: "A шоп", phone: "+359886403177" }, "8:": { group: "adhoc" }, "8:21": { group: "adhoc" }, "8:22": { group: "adhoc", form: true, label: "Athletic Fitness" },
   "5:": { group: "adhoc" }, "5:16": { group: "adhoc" }, "5:17": { group: "adhoc" }, "5:18": { group: "adhoc" },
   // нови представители (05.10) — без сметка досега; client/rep са нужни, за да се покажат в „+ Магазин"
   "5:19": { group: "adhoc", client: "Пламен Петров", rep: "кафе Винил" }, "5:20": { group: "adhoc", client: "Пламен Петров", rep: "лог. център Била" },
