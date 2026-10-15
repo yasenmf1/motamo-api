@@ -782,11 +782,12 @@ const CEX_OBJECTS = {
   // Стара Загора и региона — СИБИЕС ООД (клиент 2)
   // label = номерът на магазина, както го знаят управителките (таблицата на собственика, 14.10);
   // person_id в Barsy НЕ е този номер. Формата го показва най-отгоре.
-  "2:1": { group: "sibies", label: "СИБИЕС 4" },  "2:2": { group: "sibies", label: "СИБИЕС 13" },  "2:3": { group: "sibies", label: "СИБИЕС 7" },
-  "2:4": { group: "sibies", form: true, label: "СИБИЕС 11" },  "2:5": { group: "sibies", form: true, label: "СИБИЕС 12" },  "2:6": { group: "sibies" },
-  "2:7": { group: "sibies", label: "СИБИЕС 16" },  "2:8": { group: "sibies", label: "СИБИЕС 17" },  "2:9": { group: "sibies", label: "СИБИЕС 10" },
-  "2:10": { group: "sibies" }, "2:11": { group: "sibies", form: true, label: "СИБИЕС 3" }, "2:12": { group: "sibies" },
-  "2:13": { group: "sibies" }, "2:14": { group: "sibies" }, "2:15": { group: "sibies" },
+  // form: true = има линк за заявка (всички СиБиЕс от 15.10); addr = адресът под номера, когато маршрутът няма/греши.
+  "2:1": { group: "sibies", form: true, label: "СИБИЕС 4" },  "2:2": { group: "sibies", form: true, label: "СИБИЕС 13" },  "2:3": { group: "sibies", form: true, label: "СИБИЕС 7" },
+  "2:4": { group: "sibies", form: true, label: "СИБИЕС 11" },  "2:5": { group: "sibies", form: true, label: "СИБИЕС 12" },  "2:6": { group: "sibies", form: true, label: "СИБИЕС 6", addr: "ул. Боруйград 1А" },
+  "2:7": { group: "sibies", form: true, label: "СИБИЕС 16" },  "2:8": { group: "sibies", form: true, label: "СИБИЕС 17" },  "2:9": { group: "sibies", form: true, label: "СИБИЕС 10" },
+  "2:10": { group: "sibies", form: true, label: "СИБИЕС Юг", addr: "ж.к. Три чучура - Юг 103" }, "2:11": { group: "sibies", form: true, label: "СИБИЕС 3" }, "2:12": { group: "sibies", form: true, label: "СИБИЕС Нова Загора", addr: "ул. Патриарх Евтимий 31, Нова Загора" },
+  "2:13": { group: "sibies" }, "2:14": { group: "sibies", form: true, label: "СИБИЕС Раднево", addr: "ул. Г. Димитров 21, Раднево" }, "2:15": { group: "sibies", form: true, label: "СИБИЕС Чирпан", addr: "ул. Димитър Благоев 2, Чирпан" },
   // Сливен — Мерканто / АНТОНИЙ ЕООД (клиент 11)
   "11:23": { group: "merkanto" }, "11:25": { group: "merkanto" }, "11:26": { group: "merkanto" },
   "11:27": { group: "merkanto" }, "11:28": { group: "merkanto" }, "11:29": { group: "merkanto" },
@@ -833,6 +834,7 @@ function formObjLabel(key) {  // как го знае управителката
   return o.label || ROUTE_NAMES[key] || [o.client, o.rep].filter(Boolean).join(" · ") || key;
 }
 function formObjPlace(key) {   // под номера на магазина: САМО адресът (без града, без бележки в скоби)
+  if ((CEX_OBJECTS[key] || {}).addr) return CEX_OBJECTS[key].addr;
   const a = String(ROUTE_ADDRS[key] || "");
   if (a && !/^\s*-?\d+\.\d+\s*,/.test(a)) return a.replace(/,\s*Стара Загора\s*$/i, "").trim();
   return String(ROUTE_NAMES[key] || "").replace(/^СиБиЕс\s+/i, "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
