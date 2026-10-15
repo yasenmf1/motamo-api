@@ -969,7 +969,7 @@ select{width:100%;padding:10px;font-size:15px;border:1px solid #cfd3d8;border-ra
 <div class="wrap" style="padding-bottom:0"><div class="card" style="text-align:center;padding:14px 12px;border:3px solid #b3121b"><div style="font-size:13px;color:#777">Заявката е за</div><div id="dd" style="font-size:26px;font-weight:900;color:#b3121b;line-height:1.15;margin:4px 0"></div><div id="td" style="font-size:13px;color:#777"></div><a href="#" id="sw" onclick="swap();return false" style="display:inline-block;margin-top:6px;color:#1565c0;font-size:13px">Не е за този ден? Смени</a></div></div>
 <div class="wrap">
 <div class="card"><table id="t"><thead><tr><th class="c1" style="text-align:left">артикул</th><th class="c4">за смяна</th><th class="c5">заявка</th></tr></thead><tbody id="tb"><tr><td colspan="3" style="text-align:center;color:#888">Зареждам…</td></tr></tbody></table>
-<div class="note">Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +. „За смяна" = колко броя връщате за подмяна (по желание).</div>
+<div class="note" id="note">Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +. „За смяна" = колко броя връщате за подмяна (по желание).</div>
 <div class="btns"><button onclick="other()">+ Друг артикул</button></div>
 <div id="otherwrap" style="display:none;margin-top:8px"><select id="othersel"></select></div>
 <button class="send" id="send" onclick="send()">Прати заявката</button>
@@ -991,7 +991,7 @@ b+='<tr data-id="'+it.id+'"><td class="n">'+esc(nm)+(sub?'<small>'+sub+'</small>
 +'<td class="l"><input type="number" inputmode="numeric" min="0" class="swap" value="'+(exs[it.id]!=null?exs[it.id]:'')+'" placeholder="–"></td>'
 +'<td><div class="q"><button onclick="step(this,-1)">−</button><input type="number" inputmode="numeric" min="0" class="qty '+cls+'" value="'+v+'" oninput="this.className=\\'qty\\'"><button onclick="step(this,1)">+</button></div></td></tr>'});
 $('tb').innerHTML=b||'<tr><td colspan="3" style="text-align:center;color:#888">Няма история за този магазин. Добави артикул от „+ Друг артикул".</td></tr>';
-if(ex){msg('Вече има пратена заявка за '+dm(SEL)+' ('+hhmm(ex.sent_at)+'). Промени я и натисни „Прати" пак, ако трябва.','ok')}
+if(ex){msg('Вече има пратена заявка за '+dm(SEL)+' ('+hhmm(ex.sent_at)+'). Промени я и натисни „Прати" пак, ако трябва.','ok');$('note').textContent='Черните числа са вашата пратена заявка за този ден. Ако искате промяна — поправете и натиснете „Прати заявката" пак. „За смяна" = колко броя връщате за подмяна (по желание).'}else{$('note').textContent='Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +. „За смяна" = колко броя връщате за подмяна (по желание).'}
 var os='<option value="">— избери артикул —</option>';(D.other||[]).forEach(function(m){os+='<option value="'+m.id+'">'+esc(m.name.replace('НACHI','NACHI'))+'</option>'});$('othersel').innerHTML=os}
 function swap(){var t=D.today,tm=addDays(t,1);var o=SEL===t?tm:t;if(confirm('Да сменя деня на '+dowOf(o)+' '+dm(o)+'?'))load(o)}
 function addDays(iso,n){var d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
