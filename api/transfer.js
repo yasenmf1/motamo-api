@@ -1275,7 +1275,7 @@ load();
 // вдигнато от 4 на 8 кг; при промяна се сменя тук).
 const STANDING_REQUEST = [{ cex_id: 67, qty: 8 }];
 // Автоматичното изпълнение: cron ?cron=rice в 9:00; ако в цеха няма 8 кг „на хартия" — произвежда липсата.
-const STANDING_ENABLED = true; // 9:00 Пн–Пт (собственикът, 29.09: „произвеждаме и изпращаме всяка сутрин в 9.00")
+const STANDING_ENABLED = false;   // ★ 15.10 (собственикът): без автоматичен ориз сутрин — Йорданка/складът го праща от екрана „Прехвърляне" колкото трябва; cron=rice остава no-op // 9:00 Пн–Пт (собственикът, 29.09: „произвеждаме и изпращаме всяка сутрин в 9.00")
 async function createRequest(raw, note, tag, silent) {
   const want = new Map();
   for (const r of raw) {
@@ -1795,7 +1795,7 @@ module.exports = async function handler(req, res) {
       // поръчва/праща ДОПЪЛНИТЕЛНО (напр. точката е свършила ориза преди обяд).
       const standingIds = new Set(STANDING_REQUEST.map(x => x.cex_id));
       res.status(200).json({ ok: true, for_date: sofiaToday(), items: items.map(x => ({ ...x, zag: ZAG.includes(x.cex_id), tpl: TEMPLATE[x.cex_id] || null,
-        hint: standingIds.has(x.cex_id) ? "8 кг идват сутрин · тук поръчай ДОПЪЛНИТЕЛНО" : (x.hint || null) }))
+        hint: standingIds.has(x.cex_id) && STANDING_ENABLED ? "8 кг идват сутрин · тук поръчай ДОПЪЛНИТЕЛНО" : (x.hint || null) }))
         .sort((a, b) => (b.zag - a.zag) || ((b.tpl ? 1 : 0) - (a.tpl ? 1 : 0))) });
       return;
     }
