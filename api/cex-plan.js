@@ -810,7 +810,8 @@ function cexObj(a) { return CEX_OBJECTS[cexKey(a)] || null; }
 // магазина). Заявката се записва в Supabase `cex_shop_requests` (upsert по дата+обект, НЕ се
 // заключва по час — носи час). Нищо не пише в Barsy: собственикът я прилага в решетката.
 const FORM_VERSION = 1, FORM_SWITCH_HOUR = 9, FORM_SWITCH_MIN = 30;   // до 09:30 → за днес (разносът 09:00, късните до 09:30), после → за утре; за магазина това е „днес"
-const ROUTE_NAMES = (() => { const m = {}; try { for (const st of require("../lib/route.js").ROUTE) for (const k of (st.keys || [])) if (!m[k]) m[k] = st.name; } catch (e) {} return m; })();
+const ROUTE_NAMES = {}, ROUTE_ADDRS = {};
+try { for (const st of require("../lib/route.js").ROUTE) for (const k of (st.keys || [])) { if (!ROUTE_NAMES[k]) ROUTE_NAMES[k] = st.name; if (!ROUTE_ADDRS[k]) ROUTE_ADDRS[k] = st.addr; } } catch (e) {}
 function formSecret() { return process.env.SHOP_FORM_SECRET || process.env.PAY_HMAC_SECRET || ""; }
 function formToken(key) {
   const v = (CEX_OBJECTS[key] || {}).fv || FORM_VERSION;
@@ -831,7 +832,11 @@ function formObjLabel(key) {  // как го знае управителката
   const o = CEX_OBJECTS[key] || {};
   return o.label || ROUTE_NAMES[key] || [o.client, o.rep].filter(Boolean).join(" · ") || key;
 }
-function formObjPlace(key) { return ROUTE_NAMES[key] || ""; }
+function formObjPlace(key) {   // под номера на магазина: САМО адресът (без града, без бележки в скоби)
+  const a = String(ROUTE_ADDRS[key] || "");
+  if (a && !/^\s*-?\d+\.\d+\s*,/.test(a)) return a.replace(/,\s*Стара Загора\s*$/i, "").trim();
+  return String(ROUTE_NAMES[key] || "").replace(/^СиБиЕс\s+/i, "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
+}
 function formShops() { return Object.keys(CEX_OBJECTS).filter(k => CEX_OBJECTS[k].form); }
 // Кратък адрес: zayavka.motamo.bg/sibies-11-k7f3q2 (vercel.json пренаписва към ?view=zayavka&s=<slug>).
 // slug = латиница от label/името + първите 6 знака на ключа; проверява се пак с constant-time сравнение.
@@ -888,7 +893,7 @@ async function shopFormData(key, dateIso) {
       suggest: sg ? sg.n : (same ? h[same] : (last ? h[last] : 0)), avg: sg ? sg.avg : null, weeks: sg ? sg.weeks : 0 });
   }
   let existing = null;
-  try { const ex = await sbAll(`cex_shop_requests?select=id,for_date,rows,left_qty,note,sent_at,updated_at&for_date=eq.${target}&obj_key=eq.${encodeURIComponent(key)}`); existing = ex[0] || null; } catch (e) {}
+  try { const ex = await sbAll(`cex_shop_requests?select=id,for_date,rows,left_qty,swap_qty,note,sent_at,updated_at&for_date=eq.${target}&obj_key=eq.${encodeURIComponent(key)}`); existing = ex[0] || null; } catch (e) {}
   return { obj: { key, name: formObjName(key) }, for_date: target, default_date: def, today, dow: dowBg(target), items, existing,
     other: MENU.filter(m => !items.some(i => i.id === m.id)).map(m => ({ id: m.id, name: m.name })) };
 }
@@ -902,29 +907,30 @@ async function shopFormSend(key, body) {
     if (!MENU.some(m => m.id === id) || !(qty >= 0 && qty <= 300)) continue;
     if (qty > 0) rows.push({ id, name: byId(id).name, qty });
   }
-  const left = {};
-  for (const [id, v] of Object.entries(body.left && typeof body.left === "object" ? body.left : {})) { const q = Math.round(Number(v)); if (MENU.some(m => String(m.id) === String(id)) && q >= 0 && q <= 300) left[id] = q; }
+  const qmap = (obj) => { const out = {}; for (const [id, v] of Object.entries(obj && typeof obj === "object" ? obj : {})) { const q = Math.round(Number(v)); if (MENU.some(m => String(m.id) === String(id)) && q > 0 && q <= 300) out[id] = q; } return out; };
+  const left = qmap(body.left), swap = qmap(body.swap);
   const now = new Date().toISOString();
-  const row = { for_date: forDate, obj_key: key, rows, left_qty: left, note: String(body.note || "").slice(0, 300) || null, source: "form", sent_at: now, updated_at: now };
+  const row = { for_date: forDate, obj_key: key, rows, left_qty: left, swap_qty: swap, note: String(body.note || "").slice(0, 300) || null, source: "form", sent_at: now, updated_at: now };
   try { await sbReq(`cex_shop_requests?on_conflict=for_date,obj_key`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify([row]) }); }
   catch (e) { return { ok: false, error: "save_failed", message: "Заявката не се записа. Опитай пак след минута." }; }
   // Известие на собственика в Telegram (личния чат) — да не трябва да отваря таба, за да разбере.
   try {
     const hm = new Intl.DateTimeFormat("bg-BG", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit" }).format(new Date());
     const lines = rows.length ? rows.map(r => "• " + TG.escHtml(r.name.replace("НACHI", "NACHI")) + " <b>" + r.qty + "</b>").join("\n") : "• <i>0 от всичко</i>";
-    const text = `📥 <b>Заявка от ${TG.escHtml(formObjName(key))}</b>\nза ${dowBg(forDate)} ${forDate.slice(8, 10)}.${forDate.slice(5, 7)} · пратена ${hm}\n${lines}` + (row.note ? `\nБележка: ${TG.escHtml(row.note)}` : "") + `\n\nИнструмент → 📥 Заявки → „Приложи“.`;
+    const swapL = Object.keys(swap).length ? "\n🔁 За смяна: " + Object.entries(swap).map(([id, q]) => TG.escHtml((byId(id) || { name: id }).name.replace("НACHI", "NACHI")) + " " + q).join(", ") : "";
+    const text = `📥 <b>Заявка от ${TG.escHtml(formObjName(key))}</b>\nза ${dowBg(forDate)} ${forDate.slice(8, 10)}.${forDate.slice(5, 7)} · пратена ${hm}\n${lines}${swapL}` + (row.note ? `\nБележка: ${TG.escHtml(row.note)}` : "") + `\n\nИнструмент → 📥 Заявки → „Приложи“.`;
     await TG.tgSend(text, TG.OWNER_CHAT_ID);
   } catch (e) { /* известието не бива да спира заявката */ }
-  return { ok: true, for_date: forDate, rows, left, sent_at: now };
+  return { ok: true, for_date: forDate, rows, left, swap, sent_at: now };
 }
 async function shopRequestsFor(dateIso, host) {
-  const list = await sbAll(`cex_shop_requests?select=id,for_date,obj_key,rows,left_qty,note,source,sent_at,updated_at,applied_at,applied_rows&for_date=eq.${dateIso}&order=sent_at.asc`);
+  const list = await sbAll(`cex_shop_requests?select=id,for_date,obj_key,rows,left_qty,swap_qty,note,source,sent_at,updated_at,applied_at,applied_rows&for_date=eq.${dateIso}&order=sent_at.asc`);
   let accs = {}; try { const day = await dayGet(dateIso); accs = (day.state && day.state.accounts) || {}; } catch (e) {}
   const requests = list.map(x => { const o = CEX_OBJECTS[x.obj_key] || {}; const [c, p] = x.obj_key.split(":");
     const acc = accs[dayKey({ client_id: Number(c), person_id: p ? Number(p) : null })]; return {
     id: x.id, obj_key: x.obj_key, name: formObjName(x.obj_key), client_id: Number(c), person_id: p ? Number(p) : null, group: o.group || "adhoc",
     has_account: !!acc, account_id: (acc && acc.account_id) || null,
-    rows: x.rows || [], left: x.left_qty || {}, note: x.note, source: x.source, sent_at: x.sent_at, applied_at: x.applied_at,
+    rows: x.rows || [], left: x.left_qty || {}, swap: Object.fromEntries(Object.entries(x.swap_qty || {}).map(([id, q]) => [(byId(id) || { name: id }).name, q])), note: x.note, source: x.source, sent_at: x.sent_at, applied_at: x.applied_at,
     applied: !!x.applied_at && JSON.stringify(x.applied_rows || []) === JSON.stringify(x.rows || []) }; });
   const got = new Set(requests.map(r => r.obj_key));
   const silent = formShops().filter(k => !got.has(k)).map(k => ({ obj_key: k, name: formObjName(k) }));
@@ -945,7 +951,7 @@ header h1{margin:0;font-size:20px;font-weight:800}header .d{font-size:13px;opaci
 .days{display:flex;gap:8px}.days button{flex:1;padding:12px 8px;border:2px solid #d7dade;background:#fff;border-radius:12px;font-size:15px;font-weight:700;color:#444}
 .days button.on{border-color:#b3121b;background:#fdecec;color:#b3121b}
 .warn{background:#fff7e0;color:#7a4b00;border-radius:10px;padding:8px 10px;font-size:13px;margin-top:8px;display:none}
-table{width:100%;border-collapse:collapse;table-layout:fixed}th{font-size:10px;color:#777;font-weight:600;text-align:center;padding:4px 1px;white-space:nowrap;overflow:hidden}th.c1{width:58%}th.c5{width:42%}
+table{width:100%;border-collapse:collapse;table-layout:fixed}th{font-size:10px;color:#777;font-weight:600;text-align:center;padding:4px 1px;white-space:nowrap;overflow:hidden}th.c1{width:44%}th.c4{width:18%}th.c5{width:38%}
 td{padding:6px 1px;border-top:1px solid #f0f1f3;vertical-align:middle}td.n{font-weight:800;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:6px}td.n small{display:block;font-weight:500;color:#888;font-size:12px}
 td.h{text-align:center;color:#666;font-size:13px;white-space:nowrap;line-height:1.15}td.h small{font-size:10px;color:#999}
 .q{display:flex;align-items:center;justify-content:center;gap:2px}.q button{width:44px;min-width:44px;height:44px;padding:0;border:1px solid #cfd3d8;background:#fafbfc;border-radius:8px;font-size:20px;line-height:1;color:#333}
@@ -962,8 +968,8 @@ select{width:100%;padding:10px;font-size:15px;border:1px solid #cfd3d8;border-ra
 <header><h1>${esc(name)}</h1>${place ? `<div class="d">${esc(place)}</div>` : ""}<div class="d" id="hd">Заявка към MOTAMO</div></header>
 <div class="wrap" style="padding-bottom:0"><div class="card" style="text-align:center;padding:14px 12px;border:3px solid #b3121b"><div style="font-size:13px;color:#777">Заявката е за</div><div id="dd" style="font-size:26px;font-weight:900;color:#b3121b;line-height:1.15;margin:4px 0"></div><div id="td" style="font-size:13px;color:#777"></div><a href="#" id="sw" onclick="swap();return false" style="display:inline-block;margin-top:6px;color:#1565c0;font-size:13px">Не е за този ден? Смени</a></div></div>
 <div class="wrap">
-<div class="card"><table id="t"><thead><tr><th class="c1" style="text-align:left">артикул</th><th class="c5">заявка</th></tr></thead><tbody id="tb"><tr><td colspan="2" style="text-align:center;color:#888">Зареждам…</td></tr></tbody></table>
-<div class="note">Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +.</div>
+<div class="card"><table id="t"><thead><tr><th class="c1" style="text-align:left">артикул</th><th class="c4">за смяна</th><th class="c5">заявка</th></tr></thead><tbody id="tb"><tr><td colspan="3" style="text-align:center;color:#888">Зареждам…</td></tr></tbody></table>
+<div class="note">Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +. „За смяна" = колко броя връщате за подмяна (по желание).</div>
 <div class="btns"><button onclick="other()">+ Друг артикул</button></div>
 <div id="otherwrap" style="display:none;margin-top:8px"><select id="othersel"></select></div>
 <button class="send" id="send" onclick="send()">Прати заявката</button>
@@ -978,12 +984,13 @@ function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
 function api(b){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({o:O,k:K},b))}).then(function(r){return r.json()})}
 function dm(iso){var p=iso.split('-');return p[2]+'.'+p[1]}
 function load(date){msg('Зареждам…','info');api({action:'shop_form_data',date:date}).then(function(j){if(!j.ok){msg('Грешка: '+(j.message||j.error||''),'err');return}D=j;SEL=j.for_date;ITEMS=j.items;render();$('msg').className='msg'}).catch(function(e){msg('Няма връзка. Опитай пак.','err')})}
-function render(){var ex=D.existing&&D.existing.for_date===SEL?D.existing:null,exq={};if(ex){(ex.rows||[]).forEach(function(r){exq[r.id]=r.qty})}
+function render(){var ex=D.existing&&D.existing.for_date===SEL?D.existing:null,exq={},exs={};if(ex){(ex.rows||[]).forEach(function(r){exq[r.id]=r.qty});exs=ex.swap_qty||{}}
 $('dd').textContent=dowOf(SEL).toUpperCase()+' '+dm(SEL);$('td').textContent='днес е '+dowOf(D.today)+' '+dm(D.today)+(SEL===D.today?' — доставка днес сутринта':' — доставка утре сутринта');$('hd').textContent='Заявка към MOTAMO';
 var b='';ITEMS.forEach(function(it){var v=ex?(exq[it.id]||0):it.suggest;var cls=ex?'':'sug';var nm=it.name.replace('НACHI','NACHI');var sub=/NACHI/.test(nm)?'8 хапки':(/^CET/.test(nm)?'16 хапки':'');
 b+='<tr data-id="'+it.id+'"><td class="n">'+esc(nm)+(sub?'<small>'+sub+'</small>':'')+'</td>'
++'<td class="l"><input type="number" inputmode="numeric" min="0" class="swap" value="'+(exs[it.id]!=null?exs[it.id]:'')+'" placeholder="–"></td>'
 +'<td><div class="q"><button onclick="step(this,-1)">−</button><input type="number" inputmode="numeric" min="0" class="qty '+cls+'" value="'+v+'" oninput="this.className=\\'qty\\'"><button onclick="step(this,1)">+</button></div></td></tr>'});
-$('tb').innerHTML=b||'<tr><td colspan="2" style="text-align:center;color:#888">Няма история за този магазин. Добави артикул от „+ Друг артикул".</td></tr>';
+$('tb').innerHTML=b||'<tr><td colspan="3" style="text-align:center;color:#888">Няма история за този магазин. Добави артикул от „+ Друг артикул".</td></tr>';
 if(ex){msg('Вече има пратена заявка за '+dm(SEL)+' ('+hhmm(ex.sent_at)+'). Промени я и натисни „Прати" пак, ако трябва.','ok')}
 var os='<option value="">— избери артикул —</option>';(D.other||[]).forEach(function(m){os+='<option value="'+m.id+'">'+esc(m.name.replace('НACHI','NACHI'))+'</option>'});$('othersel').innerHTML=os}
 function swap(){var t=D.today,tm=addDays(t,1);var o=SEL===t?tm:t;if(confirm('Да сменя деня на '+dowOf(o)+' '+dm(o)+'?'))load(o)}
@@ -992,10 +999,10 @@ function dowOf(iso){return ['неделя','понеделник','вторни�
 function hhmm(s){var d=new Date(s);return isNaN(d)?'':('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
 function pick(d){load(d)}
 function step(btn,n){var i=btn.parentNode.querySelector('.qty');i.value=Math.max(0,(parseInt(i.value)||0)+n);i.className='qty'}
-function other(){var w=$('otherwrap');w.style.display=w.style.display==='none'?'block':'none';$('othersel').onchange=function(){var id=+this.value;if(!id)return;var m=(D.other||[]).filter(function(x){return x.id===id})[0];if(!m)return;ITEMS.push({id:m.id,name:m.name,last:null,last_same:null,suggest:0,avg:null,weeks:0});D.other=D.other.filter(function(x){return x.id!==id});var keep={};document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){keep[tr.getAttribute('data-id')]=tr.querySelector('.qty').value});render();Object.keys(keep).forEach(function(k){var tr=document.querySelector('tr[data-id="'+k+'"]');if(tr){tr.querySelector('.qty').value=keep[k];tr.querySelector('.qty').className='qty'}});w.style.display='none'}}
-function send(){var rows=[],left={},n=0;document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){var id=+tr.getAttribute('data-id'),q=parseInt(tr.querySelector('.qty').value)||0;rows.push({id:id,qty:q});if(q>0)n++});
+function other(){var w=$('otherwrap');w.style.display=w.style.display==='none'?'block':'none';$('othersel').onchange=function(){var id=+this.value;if(!id)return;var m=(D.other||[]).filter(function(x){return x.id===id})[0];if(!m)return;ITEMS.push({id:m.id,name:m.name,last:null,last_same:null,suggest:0,avg:null,weeks:0});D.other=D.other.filter(function(x){return x.id!==id});var keep={};document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){keep[tr.getAttribute('data-id')]=[tr.querySelector('.qty').value,tr.querySelector('.swap').value]});render();Object.keys(keep).forEach(function(k){var tr=document.querySelector('tr[data-id="'+k+'"]');if(tr){tr.querySelector('.qty').value=keep[k][0];tr.querySelector('.qty').className='qty';tr.querySelector('.swap').value=keep[k][1]}});w.style.display='none'}}
+function send(){var rows=[],left={},swap={},n=0;document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){var id=+tr.getAttribute('data-id'),q=parseInt(tr.querySelector('.qty').value)||0,sw=parseInt(tr.querySelector('.swap').value)||0;rows.push({id:id,qty:q});if(q>0)n++;if(sw>0)swap[id]=sw});
 if(!n){if(!confirm('Заявката е с 0 от всичко. Да я пратя така (няма да получите нищо за '+dm(SEL)+')?'))return}else if(!confirm('Пращаш заявка за '+dowOf(SEL).toUpperCase()+' '+dm(SEL)+' — '+n+' артикула. Потвърди.'))return;
-$('send').disabled=true;msg('Пращам…','info');api({action:'shop_form_send',for_date:SEL,rows:rows,left:left}).then(function(j){$('send').disabled=false;if(j.ok){msg('✓ Пратено в '+hhmm(j.sent_at)+' за '+dm(j.for_date)+'. Благодарим!','ok');D.existing={for_date:j.for_date,rows:j.rows,left_qty:j.left,sent_at:j.sent_at}}else msg('Не е пратено: '+(j.message||j.error||''),'err')}).catch(function(){$('send').disabled=false;msg('Няма връзка. Опитай пак.','err')})}
+$('send').disabled=true;msg('Пращам…','info');api({action:'shop_form_send',for_date:SEL,rows:rows,left:left,swap:swap}).then(function(j){$('send').disabled=false;if(j.ok){msg('✓ Пратено в '+hhmm(j.sent_at)+' за '+dm(j.for_date)+'. Благодарим!','ok');D.existing={for_date:j.for_date,rows:j.rows,left_qty:j.left,swap_qty:j.swap,sent_at:j.sent_at}}else msg('Не е пратено: '+(j.message||j.error||''),'err')}).catch(function(){$('send').disabled=false;msg('Няма връзка. Опитай пак.','err')})}
 load(null);
 </script></body></html>`;
 }
@@ -2042,7 +2049,7 @@ function schedSeed(){msg('Зареждам по график…');api({action:'s
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function shortName(client,rep){var r=(rep||client||'');r=r.replace(/[„“”"'']/g,'').replace(/^\\s*(ул\\.|бул\\.|ж\\.к\\.|жк|пл\\.)\\s*/i,'').replace(/\\s{2,}/g,' ').trim();return r||(client||'')}
 function renderGrid(){var h='<tr><th class="shop"><input type="checkbox" id="selall" checked title="Избери/махни всички"> Магазин</th>';MENU.forEach(function(m){h+='<th class="'+(m.is_set?'set':'')+'">'+m.name.replace('НACHI','')+'</th>'});h+='</tr>';
-shops.forEach(function(s,i){var full=(s.client||'')+(s.rep?(' · '+s.rep):'');var label=shortName(s.client,s.rep);var stok=s.has_stokova?' <span class="stok" title="Вече има издадена стокова">С</span>':'';h+='<tr><td class="shop" title="'+esc(full)+'"><input type="checkbox" class="selbox" data-i="'+i+'" '+(s.scheduled===false?'':'checked')+'> '+esc(label)+stok+'</td>';
+shops.forEach(function(s,i){var full=(s.client||'')+(s.rep?(' · '+s.rep):'');var label=shortName(s.client,s.rep);var stok=s.has_stokova?' <span class="stok" title="Вече има издадена стокова">С</span>':'';var sw=s.swap&&Object.keys(s.swap).length?'<div style="font-size:11px;color:#b06a00;font-weight:600;margin-left:23px;white-space:normal">🔁 смяна: '+esc(Object.keys(s.swap).map(function(k){return k.replace('НACHI','')+' '+s.swap[k]}).join(', '))+'</div>':'';h+='<tr><td class="shop" title="'+esc(full)+'"><input type="checkbox" class="selbox" data-i="'+i+'" '+(s.scheduled===false?'':'checked')+'> '+esc(label)+stok+sw+'</td>';
 var sg=sugFor(s);MENU.forEach(function(m){var v=(s.order&&s.order[m.name])||0;var p=sg?sg[m.name]:null;var ph=sg?'<small class="sug" title="'+(p?('средно '+p.avg+' за '+p.weeks+(p.same?' същи дни':' последни доставки')+(p.rate?(', връщане '+p.rate+'%'):'')):'не е взимал')+'">пр. '+(p?p.n:0)+'</small>':'';h+='<td class="'+(m.is_set?'set':'')+'"><input data-i="'+i+'" data-n="'+esc(m.name)+'" value="'+v+'" inputmode="numeric">'+ph+'</td>'});h+='</tr>'});$('grid').innerHTML=h;
 var sa=$('selall');if(sa){sa.addEventListener('change',function(){document.querySelectorAll('#grid .selbox').forEach(function(cb){cb.checked=sa.checked});syncRows()})}
 document.querySelectorAll('#grid .selbox').forEach(function(cb){cb.addEventListener('change',syncRows)});syncRows();saveGrid()}
@@ -2078,16 +2085,17 @@ function openReq(){var d=$('pdate').value||$('date').value||new Date().toISOStri
 function hhmm(s){var x=new Date(s);return isNaN(x)?'':('0'+x.getHours()).slice(-2)+':'+('0'+x.getMinutes()).slice(-2)}
 function renderReq(j){var h='<div class="pickwrap" id="reqwrap" onclick="if(event.target===this)closeReq()"><div class="pickbox"><div style="padding:12px 14px;border-bottom:1px solid #e2e4e8;display:flex;justify-content:space-between;align-items:center"><b>📥 Заявки от формата за '+j.date.split('-').reverse().join('.')+'</b><button class="alt" onclick="closeReq()">✕</button></div><div style="overflow:auto;padding:10px 14px;font-size:13px">';
 if(!j.requests.length)h+='<p style="color:#777">Още няма пратени заявки за този ден.</p>';
-j.requests.forEach(function(r,i){var rows=r.rows.map(function(x){return x.name.replace('НACHI','')+' <b>'+x.qty+'</b>'}).join(' · ')||'<i>0 от всичко</i>';var lf=Object.keys(r.left||{}).length?' · останало: '+Object.keys(r.left).map(function(k){var m=MENU.filter(function(z){return String(z.id)===String(k)})[0];return (m?m.name.replace('НACHI',''):k)+' '+r.left[k]}).join(', '):'';
+j.requests.forEach(function(r,i){var rows=r.rows.map(function(x){return x.name.replace('НACHI','')+' <b>'+x.qty+'</b>'}).join(' · ')||'<i>0 от всичко</i>';var lf=Object.keys(r.left||{}).length?' · останало: '+Object.keys(r.left).map(function(k){var m=MENU.filter(function(z){return String(z.id)===String(k)})[0];return (m?m.name.replace('НACHI',''):k)+' '+r.left[k]}).join(', '):'';if(Object.keys(r.swap||{}).length)lf+=' · <b style="color:#b06a00">🔁 за смяна: '+Object.keys(r.swap).map(function(k){return k.replace('НACHI','')+' '+r.swap[k]}).join(', ')+'</b>';
 h+='<label style="display:block;padding:8px 0;border-bottom:1px solid #f0f1f3"><input type="checkbox" class="reqsel" data-i="'+i+'" '+((r.applied||r.has_account)?'':'checked')+'> <b>'+esc(r.name)+'</b> <span style="color:#777">'+hhmm(r.sent_at)+(r.applied?' · ✓ приложена':(r.applied_at?' · ⚠ променена след прилагане':''))+(r.has_account?' · <b style="color:#9b1c1c">⚠ вече има сметка'+(r.account_id?' №'+r.account_id:'')+' за този ден — сравни ръчно</b>':'')+'</span><br><span style="margin-left:22px">'+rows+'</span><span style="color:#777;margin-left:22px">'+lf+'</span></label>'});
 if(j.silent.length)h+='<p style="color:#9b1c1c;margin:10px 0 4px"><b>Мълчат:</b> '+j.silent.map(function(x){return esc(x.name)}).join(', ')+'</p>';
 h+='<details style="margin-top:10px"><summary style="cursor:pointer;color:#1565c0">Линкове за формата (прати на управителката във Viber)</summary>'+Object.keys(j.links).map(function(k){var n=(j.requests.filter(function(r){return r.obj_key===k})[0]||j.silent.filter(function(s){return s.obj_key===k})[0]||{name:k}).name;return '<div style="margin:6px 0"><b>'+esc(n)+'</b><br><input readonly value="'+esc(j.links[k])+'" style="width:100%;font-size:12px" onclick="this.select()"></div>'}).join('')+'</details>';
 h+='</div><div style="padding:10px 14px;border-top:1px solid #e2e4e8;display:flex;gap:8px;justify-content:flex-end"><button class="alt" onclick="closeReq()">Затвори</button><button class="prod" onclick="applyReq()">Приложи избраните в решетката</button></div></div></div>';
 var old=$('reqwrap');if(old)old.remove();document.body.insertAdjacentHTML('beforeend',h);REQ=j}
 var REQ=null;function closeReq(){var w=$('reqwrap');if(w)w.remove()}
-function applyReq(){if(!REQ)return;var sel=[];document.querySelectorAll('.reqsel').forEach(function(cb){if(cb.checked)sel.push(REQ.requests[+cb.getAttribute('data-i')])});if(!sel.length){msg('Не е избрана заявка.','err');return}collect();var added=0,upd=0;
-sel.forEach(function(r){var s=shops.filter(function(x){return String(x.client_id||'')===String(r.client_id||'')&&String(x.person_id||'')===String(r.person_id||'')})[0];if(!s){s={client:r.name,rep:'',client_id:r.client_id,person_id:r.person_id,order:{},scheduled:true};shops.push(s);added++}else upd++;s.order={};r.rows.forEach(function(x){if(x.qty>0)s.order[x.name]=x.qty});s.scheduled=true;api({action:'shop_request_applied',id:r.id,applied_rows:r.rows})});
-renderGrid();closeReq();msg('✓ Приложени '+sel.length+' заявки ('+upd+' обновени, '+added+' добавени). Провери решетката и натисни „Изчисли".','ok')}
+function applyReq(){if(!REQ)return;var sel=[];document.querySelectorAll('.reqsel').forEach(function(cb){if(cb.checked)sel.push(REQ.requests[+cb.getAttribute('data-i')])});if(!sel.length){msg('Не е избрана заявка.','err');return}collect();
+var ticks=[];document.querySelectorAll('#grid .selbox').forEach(function(cb){ticks[+cb.getAttribute('data-i')]=cb.checked});var added=0,upd=0;
+sel.forEach(function(r){var i=-1;shops.forEach(function(x,k){if(i<0&&String(x.client_id||'')===String(r.client_id||'')&&String(x.person_id||'')===String(r.person_id||''))i=k});var s;if(i<0){s={client:r.name,rep:'',client_id:r.client_id,person_id:r.person_id,order:{},scheduled:true};shops.push(s);ticks[shops.length-1]=true;added++}else{s=shops[i];ticks[i]=true;upd++}s.order={};r.rows.forEach(function(x){if(x.qty>0)s.order[x.name]=x.qty});s.swap=Object.keys(r.swap||{}).length?r.swap:null;api({action:'shop_request_applied',id:r.id,applied_rows:r.rows})});
+renderGrid();document.querySelectorAll('#grid .selbox').forEach(function(cb){var i=+cb.getAttribute('data-i');if(ticks[i]===true)cb.checked=true;else if(ticks[i]===false)cb.checked=false});syncRows();saveGrid();closeReq();msg('✓ Приложени '+sel.length+' заявки ('+upd+' обновени, '+added+' добавени). Твоите отметки са запазени. Провери решетката и натисни „Изчисли".','ok')}
 
 function openPicker(){msg('Зареждам магазините…');api({action:'list_objects'}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}OBJECTS=j.objects||[];$('pickfilter').value='';renderPick();$('picker').style.display='flex';$('pickfilter').focus();msg('')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function closePicker(){$('picker').style.display='none'}
