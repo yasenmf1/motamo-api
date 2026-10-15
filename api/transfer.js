@@ -59,10 +59,25 @@ const PACK = {
 // Алекс Фиш 240 г („Суши еби 240 гр Minh phu", партидата = сертификатът VN…). Коя е в склада
 // се вижда от ПЪРВАТА партида по FIFO (lotsByArticle) → size/подсказка се сменят сами.
 const EBI_TRAY = { fish: { size: 0.18, who: "Фиш Експрес" }, alex: { size: 0.24, who: "Алекс Фиш" } };
-function ebiTrayOfLot(lotValue) { return /^\s*VN/i.test(String(lotValue || "")) ? EBI_TRAY.alex : EBI_TRAY.fish; }
+// Доставчикът се познава по ДОКУМЕНТА НА ЗАРЕЖДАНЕ (партидният регистър: ред LD → ref_id =
+// store_load_id → Storeloads_get → supplier_name), не по номера на партидата (15.10: партидите
+// LIO/…, LTHP-… са на Фиш; сертификатът VN… е на Алекс, но Алекс често влиза без партида).
 async function ebiTray() {
-  try { const lots = (await lotsByArticle([51]))[51] || []; const l = lots[0]; const t = ebiTrayOfLot(l && l.lot_value); return { ...t, lot: l ? String(l.lot_value) : null }; }
-  catch (e) { return { ...EBI_TRAY.fish, lot: null }; }
+  try {
+    const lots = (await lotsByArticle([51]))[51] || []; const l = lots[0];
+    if (!l) return { ...EBI_TRAY.fish, lot: null };
+    const lot = String(l.lot_value);
+    let who = "";
+    for (let pg = 1; pg <= 6 && !who; pg++) {
+      const r = await cexCall("Reports_lot_list_details", { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { lot_value: lot } }).catch(() => null);
+      const rows = r && r.data && Array.isArray(r.data.rows) ? r.data.rows : [];
+      const ld = rows.find(x => String(x.article_id) === "51" && x.operation_ref_type === "LD" && x.ref_id);
+      if (ld) { const g = await cexCall("Storeloads_get", { id: ld.ref_id, store_load_id: ld.ref_id }).catch(() => null); who = String((g && g.data && (g.data.supplier_name || g.data.client_name)) || ""); }
+      if (rows.length < 50) break;
+    }
+    const t = /АЛЕКС|ALEX/i.test(who) ? EBI_TRAY.alex : (/VN/i.test(lot) ? EBI_TRAY.alex : EBI_TRAY.fish);
+    return { ...t, lot, who: who || t.who };
+  } catch (e) { return { ...EBI_TRAY.fish, lot: null }; }
 }
 
 
