@@ -53,8 +53,17 @@ const MAP = {
 // документите влиза винаги базовата единица, за да не се разминава със склада.
 // `size` = колко базови единици е ЕДНА опаковка.
 const PACK = {
-  51: { name: "тарелка", plural: "тарелки", size: 0.18 } // Бланширани скариди Маки Еби
+  51: { name: "тарелка", plural: "тарелки", size: 0.18 } // Бланширани скариди Маки Еби (Фиш Експрес 180 г; Алекс 240 г — виж ebiTray)
 };
+// ★ 15.10 (собственикът): тарелката на Маки Еби е различна по доставчик — Фиш Експрес 180 г,
+// Алекс Фиш 240 г („Суши еби 240 гр Minh phu", партидата = сертификатът VN…). Коя е в склада
+// се вижда от ПЪРВАТА партида по FIFO (lotsByArticle) → size/подсказка се сменят сами.
+const EBI_TRAY = { fish: { size: 0.18, who: "Фиш Експрес" }, alex: { size: 0.24, who: "Алекс Фиш" } };
+function ebiTrayOfLot(lotValue) { return /^\s*VN/i.test(String(lotValue || "")) ? EBI_TRAY.alex : EBI_TRAY.fish; }
+async function ebiTray() {
+  try { const lots = (await lotsByArticle([51]))[51] || []; const l = lots[0]; const t = ebiTrayOfLot(l && l.lot_value); return { ...t, lot: l ? String(l.lot_value) : null }; }
+  catch (e) { return { ...EBI_TRAY.fish, lot: null }; }
+}
 
 
 // ★ S25 — ШАБЛОН на точката (собственикът, 29.09): при тези продукти вместо свободно поле
@@ -86,6 +95,8 @@ const HINT = {
   52: "1 торба = 1 кг",           // Авокадо половинки (собственикът, 15.10)
   87: "1 торба = 1 кг",           // Уакаме (собственикът, 15.10)
   127: "1 пакет = 0,5 кг",        // Пиле панирано (собственикът, 15.10)
+  123: "1 плик = 1 кг",           // Сладка царевица (собственикът, 15.10)
+  60: "1 плик = 0,5 кг",          // Сурими / рулца от раци (собственикът, 15.10)
   86: "пакет 500 г",              // Едамаме зърна
   64: "1 кг = 40 бр × 25 г"       // Пържена скарида Торпедо
 };
@@ -1793,12 +1804,14 @@ module.exports = async function handler(req, res) {
 
     // ── списъкът с 35-те продукта + наличности (за формата на точката) ──
     if (body.action === "list") {
-      const items = await buildList();
+      const [items, ebi] = await Promise.all([buildList(), ebiTray()]);
       // Постоянните (дневния ориз, 8 кг сутрин) СЕ показват — но с бележка, че тук се
       // поръчва/праща ДОПЪЛНИТЕЛНО (напр. точката е свършила ориза преди обяд).
       const standingIds = new Set(STANDING_REQUEST.map(x => x.cex_id));
-      res.status(200).json({ ok: true, for_date: sofiaToday(), items: items.map(x => ({ ...x, zag: ZAG.includes(x.cex_id), tpl: TEMPLATE[x.cex_id] || null,
-        hint: standingIds.has(x.cex_id) && STANDING_ENABLED ? "8 кг идват сутрин · тук поръчай ДОПЪЛНИТЕЛНО" : (x.hint || null) }))
+      res.status(200).json({ ok: true, for_date: sofiaToday(), items: items.map(x => ({ ...x, zag: ZAG.includes(x.cex_id),
+        tpl: x.cex_id === 51 && TEMPLATE[51] ? { ...TEMPLATE[51], size: ebi.size } : (TEMPLATE[x.cex_id] || null),
+        pack: x.cex_id === 51 && x.pack ? { ...x.pack, size: ebi.size } : x.pack,
+        hint: x.cex_id === 51 ? ("тарелка " + Math.round(ebi.size * 1000) + " г · " + ebi.who + (ebi.lot ? " · партида " + ebi.lot : "")) : (standingIds.has(x.cex_id) && STANDING_ENABLED ? "8 кг идват сутрин · тук поръчай ДОПЪЛНИТЕЛНО" : (x.hint || null)) }))
         .sort((a, b) => (b.zag - a.zag) || ((b.tpl ? 1 : 0) - (a.tpl ? 1 : 0))) });
       return;
     }
