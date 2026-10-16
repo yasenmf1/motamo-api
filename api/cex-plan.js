@@ -1562,7 +1562,7 @@ input[type=date]{font:15px system-ui;padding:5px 8px;border:1px solid #ccc;borde
 .route h2 .cnt{color:#888;font-weight:400;font-size:13px}
 .route h2 .x{border:0;background:none;color:#aaa;font-size:18px;cursor:pointer;padding:0 4px}
 .route h2 .x:hover{color:#c8151f}
-.city{font-weight:800;font-size:14px;margin:8px 0 4px;color:#333}
+.city{font-weight:800;font-size:14px;margin:8px 0 4px;color:#333}.city[data-city]{cursor:pointer}.city[data-city]:hover{color:#c8151f}
 .item{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e6e6e6;border-radius:10px;margin:4px 0;background:#fff;cursor:grab;user-select:none}
 .item:active{cursor:grabbing}.item.drag{opacity:.4}
 .item .h{color:#bbb;font-size:16px}.item .nm{flex:1;min-width:0;font-size:14px}.item .nm small{display:block;color:#999;font-size:11.5px}
@@ -1601,15 +1601,23 @@ function load(){var d=document.getElementById('date').value;document.getElementB
     render()})}
 function placed(){var m={};ST.routes.forEach(function(r){r.keys.forEach(function(k){m[k]=1})});return m}
 function itemHtml(k){var s=stop(k);if(!s)return '';return '<div class="item'+(/^СиБиЕс/.test(s.zone)?' sbs':'')+(s.isNew?' nw':'')+'" draggable="true" data-k="'+esc(k)+'"><span class="h">⋮⋮</span><span class="nm">'+esc(s.name)+'<small>'+(s.isNew?'🆕 нов обект — без адрес за навигация (кажи на Claude да го добави)':esc(s.zone))+'</small></span></div>'}
-function render(){var p=placed();var pool='';['Стара Загора','Сливен','Хасково'].forEach(function(c){var all=ST.stops.filter(function(s){return cityOf(s.zone)===c}),ks=all.filter(function(s){return !p[s.key]});
-    pool+='<div class="city">'+c+' <span style="color:#999;font-weight:400">('+(all.length?(ks.length+' от '+all.length):'няма стокова днес')+')</span></div>'+(ks.length?ks.map(function(s){return itemHtml(s.key)}).join(''):(all.length?'<div class="hint" style="padding:4px 10px;text-align:left">всички са в маршрути ✓</div>':''))});
+function routeCity(r){var cs={};r.keys.forEach(function(k){var s=stop(k);if(s)cs[cityOf(s.zone)]=1});var a=Object.keys(cs);return a.length===1&&a[0]!=='Стара Загора'?a[0]:null}
+function autoName(){ST.routes.forEach(function(r){var c=routeCity(r);if(c&&/^Маршрут [0-9]+$/.test(String(r.name).trim()))r.name=c})}
+function cityRoute(c){var m=document.getElementById('msg');var p=placed();var keys=ST.stops.filter(function(s){return cityOf(s.zone)===c&&!p[s.key]}).map(function(s){return s.key});if(!keys.length)return;
+  var r=ST.routes.filter(function(x){return x.name===c})[0]||ST.routes.filter(function(x){return !x.keys.length})[0];
+  if(!r){if(ST.routes.length>=MAXR){m.className='msg err';m.textContent='Няма свободен маршрут (макс. '+MAXR+').';return}r={name:c,keys:[]};ST.routes.push(r)}
+  r.name=c;r.keys=r.keys.concat(keys);m.className='msg';m.textContent='Готов маршрут „'+c+'“ ('+r.keys.length+' об.) — натисни „Запиши за шофьора“.';render()}
+function render(){autoName();var p=placed();var pool='';['Стара Загора','Сливен','Хасково'].forEach(function(c){var all=ST.stops.filter(function(s){return cityOf(s.zone)===c}),ks=all.filter(function(s){return !p[s.key]});
+    var canRoute=c!=='Стара Загора'&&ks.length>0;
+    pool+='<div class="city"'+(canRoute?' data-city="'+c+'" title="Натисни — готов маршрут"':'')+'>'+c+' <span style="color:#999;font-weight:400">('+(all.length?(ks.length+' от '+all.length):'няма стокова днес')+')</span>'+(canRoute?' <span style="color:#c8151f;font-weight:700;font-size:12px">· натисни → готов маршрут</span>':'')+'</div>'+(ks.length?ks.map(function(s){return itemHtml(s.key)}).join(''):(all.length?'<div class="hint" style="padding:4px 10px;text-align:left">всички са в маршрути ✓</div>':''))});
   if(!ST.stops.length)pool='<div class="hint">Няма издадени стокови за този ден.</div>';
   document.getElementById('pool').innerHTML=pool;
   var h='';ST.routes.forEach(function(r,ri){h+='<div class="route" data-r="'+ri+'"><h2><span class="num">'+(ri+1)+'</span><input value="'+esc(r.name)+'" onchange="ST.routes['+ri+'].name=this.value"><span class="cnt">'+r.keys.length+' об.</span><button class="x" title="Махни маршрута" onclick="delRoute('+ri+')">×</button></h2>'+(r.keys.length?r.keys.map(itemHtml).join(''):'<div class="hint">пусни обекти тук</div>')+'</div>'});
   document.getElementById('routes').innerHTML=h;
   document.getElementById('addBtn').disabled=ST.routes.length>=MAXR;
   wire()}
-function wire(){document.querySelectorAll('.item').forEach(function(el){
+function wire(){document.querySelectorAll('.city[data-city]').forEach(function(el){el.addEventListener('click',function(){cityRoute(el.getAttribute('data-city'))})});
+  document.querySelectorAll('.item').forEach(function(el){
     el.addEventListener('dragstart',function(e){DRAG=el.getAttribute('data-k');el.classList.add('drag');try{e.dataTransfer.setData('text/plain',DRAG);e.dataTransfer.effectAllowed='move'}catch(x){}});
     el.addEventListener('dragend',function(){el.classList.remove('drag');document.querySelectorAll('.over').forEach(function(z){z.classList.remove('over')})})});
   document.querySelectorAll('.route,.pool').forEach(function(z){
@@ -1624,7 +1632,7 @@ function addRoute(){if(ST.routes.length>=MAXR)return;ST.routes.push({name:'Ма�
 function delRoute(ri){if(ST.routes.length<=1){ST.routes[0].keys=[];render();return}ST.routes.splice(ri,1);render()}
 function clearAll(){ST.routes=[{name:'Маршрут 1',keys:[]}];render()}
 function applyAuto(){ST.routes=ST.auto.slice(0,MAXR).map(function(r){return {name:r.name,keys:r.keys.slice()}});if(!ST.routes.length)ST.routes=[{name:'Маршрут 1',keys:[]}];render()}
-function save(){var m=document.getElementById('msg');var p=placed();var left=ST.stops.filter(function(s){return !p[s.key]}).length;
+function save(){autoName();var m=document.getElementById('msg');var p=placed();var left=ST.stops.filter(function(s){return !p[s.key]}).length;
   var routes=ST.routes.filter(function(r){return r.keys.length}).map(function(r){var labels={};r.keys.forEach(function(k){if(isNew(k))labels[k]=stop(k).name});return {name:r.name,keys:r.keys,labels:labels}});
   if(!routes.length){m.className='msg err';m.textContent='Няма обекти в маршрутите.';return}
   m.className='msg';m.textContent='записва…';
