@@ -41,6 +41,10 @@
     {
       "path": "/api/transfer?cron=qc_check&t=15",
       "schedule": "30 15 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=tc_report",
+      "schedule": "0 6 * * *"
     }
   ],
   "rewrites": [

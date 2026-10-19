@@ -326,6 +326,7 @@ const CEXDATA = require("../lib/_cexdata.js");
 const TG = require("../lib/telegram.js");
 const DRV = require("../lib/driver.js");
 const QC = require("../lib/quality.js");
+const TC = require("../lib/timeclock.js");
 
 // Дни до следващата доставка от този доставчик (0 не се връща — днешният ден е
 // изпуснат). Доставчик без седмичен график чака фиксиран срок.
@@ -1507,6 +1508,15 @@ module.exports = async function handler(req, res) {
     res.status(200).json(await TG.tgCleanup());
     return;
   }
+  // ★ S34 — Часове за заплата: сутрешен отчет за вчера към собственика (cron, UTC → часът се проверява в кода).
+  if (req.method === "GET" && q.cron === "tc_report") {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try { res.status(200).json(await TC.cronReport()); } catch (e) { res.status(502).json({ ok: false, error: "tc_report_failed", message: String(e && e.message).slice(0, 160) }); }
+    return;
+  }
   // ★ S33 — Контрол на качеството в цеха: 16:00 бутон към формата, 17:30 сигнал при непопълнен (Vercel cron, UTC → часът се проверява в кода).
   if (req.method === "GET" && (q.cron === "qc_prompt" || q.cron === "qc_check")) {
     const auth = String(req.headers && (req.headers.authorization || "") || "");
@@ -1582,6 +1592,11 @@ module.exports = async function handler(req, res) {
     const skladBtn = () => ({ inline_keyboard: [[{ text: "🏠 Начало (склад)", url: `${base}?view=home&k=${TG.skladKey()}` }], [{ text: "📥 Заявки от точката", url: `${base}?view=cex&k=${TG.skladKey()}` }, { text: "📤 Изпрати към точката", url: `${base}?view=push&k=${TG.skladKey()}` }], [{ text: "🏭 Производство", url: `${base}?view=produce&k=${TG.skladKey()}` }, { text: "🛒 Поръчка", url: `${base}?view=order&k=${TG.skladKey()}` }], [{ text: "🧾 Склад", url: `${base}?view=stock&k=${staffKey()}` }]] });
     const ROLE_BG = { tochka: "Точка", sklad: "Склад (цех)", shofior: "Шофьор", owner: "Собственик", none: "без роля" };
     try {
+      // ★ S34 — часове за заплата: бутони „Отмени" и „Кой отбелязва часове" (екип)
+      if (up.callback_query && /^(tc|ts):/.test(String(up.callback_query.data || ""))) {
+        await TC.handleCallback(up.callback_query, String((up.callback_query.from || {}).id) === TG.OWNER_CHAT_ID, (req.headers && req.headers.host) || "motamo-api.vercel.app");
+        res.status(200).json({ ok: true }); return;
+      }
       // собственикът натиска бутон за роля
       if (up.callback_query && /^(st|ok|pb|pr):/.test(String(up.callback_query.data || ""))) {
         const cu = await TG.userGet(Number((up.callback_query.from || {}).id));
@@ -1617,12 +1632,14 @@ module.exports = async function handler(req, res) {
         if (!u) {
           await TG.userUpsert({ user_id: uid, name, username: from.username || null, role: null });
           await TG.tgSend(`👤 Нов човек при бота: <b>${TG.escHtml(name)}</b>${from.username ? " (@" + TG.escHtml(from.username) + ")" : ""}\nКаква роля да има?`, TG.OWNER_CHAT_ID, null,
-            { inline_keyboard: [[{ text: "🏪 Точка", callback_data: `role:${uid}:tochka` }, { text: "📦 Склад (цех)", callback_data: `role:${uid}:sklad` }], [{ text: "🚚 Шофьор", callback_data: `role:${uid}:shofior` }, { text: "✖ Нищо", callback_data: `role:${uid}:none` }]] });
+            { inline_keyboard: [[{ text: "🏪 Точка", callback_data: `role:${uid}:tochka` }, { text: "📦 Склад (цех)", callback_data: `role:${uid}:sklad` }], [{ text: "🚚 Шофьор", callback_data: `role:${uid}:shofior` }, { text: "✖ Нищо", callback_data: `role:${uid}:none` }], [{ text: "⏱ Часове · Цех", callback_data: `ts:${uid}:cex` }, { text: "⏱ Часове · Точка", callback_data: `ts:${uid}:shop` }]] });
           await TG.tgSend("Здравей! 👋 Аз съм ботът на MOTAMO. Изчакай собственикът да те одобри.", String(uid));
           res.status(200).json({ ok: true }); return;
         }
         const role = u.role;
         const hostD = (req.headers && req.headers.host) || "motamo-api.vercel.app";
+        // ★ S34 — „Започнах / Приключих" и командите за часове (преди ролите: важи за всички в екипа)
+        if (text && await TC.handleMessage(uid, text, u, String(uid) === TG.OWNER_CHAT_ID, hostD)) { res.status(200).json({ ok: true }); return; }
         if (role === "shofior" || (role === "owner" && (msgU.location || /маршрут/i.test(text)))) {
           if (msgU.location) await DRV.handleLocation(uid, msgU.location, hostD);
           else if (msgU.photo) await DRV.handlePhoto(uid, msgU);
@@ -1676,6 +1693,16 @@ module.exports = async function handler(req, res) {
     if (!viewTokens.some(t => q.k === t) && !isStaff(q.k) && q.k !== TG.skladKey() && q.k !== TG.pointKey()) { res.status(403).json({ error: "forbidden" }); return; }
     res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
     res.status(200).json(manifest(q.k, isOwner(q.k)));
+    return;
+  }
+
+  // ★ S34 — таблица „Часове за заплата" (само собственик): ?view=hours&k=<hoursKey>&m=YYYY-MM[&fmt=csv]
+  if (req.method === "GET" && q.view === "hours") {
+    if (!((TC.hoursKey() && q.k === TC.hoursKey()) || isOwner(q.k))) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп.</body>"); return; }
+    try {
+      if (q.fmt === "csv") { res.setHeader("Content-Type", "text/csv; charset=utf-8"); res.setHeader("Content-Disposition", `attachment; filename="chasove-${String(q.m || "").replace(/[^0-9-]/g, "") || "mesec"}.csv"`); res.status(200).send(await TC.hoursCsv(q.m)); return; }
+      res.setHeader("Content-Type", "text/html; charset=utf-8"); res.status(200).send(await TC.hoursPage(q.k, q.m));
+    } catch (e) { res.status(502).send("Грешка при четене на часовете."); }
     return;
   }
 
