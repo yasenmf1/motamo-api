@@ -787,7 +787,7 @@ const CEX_OBJECTS = {
   "2:4": { group: "sibies", form: true, label: "СИБИЕС 11", phone: "+359895764570" },  "2:5": { group: "sibies", form: true, label: "СИБИЕС 12", phone: "+359894470927" },  "2:6": { group: "sibies", form: true, label: "СИБИЕС 6", addr: "ул. Боруйград 1А", phone: "+359887244793" },
   "2:7": { group: "sibies", form: true, label: "СИБИЕС 16", phone: "+359884000773" },  "2:8": { group: "sibies", form: true, label: "СИБИЕС 17", phone: "+359896872663" },  "2:9": { group: "sibies", form: true, label: "СИБИЕС 10", phone: "+359886199888" },
   "2:10": { group: "sibies", form: true, label: "СИБИЕС Юг", addr: "ж.к. Три чучура - Юг 103" }, "2:11": { group: "sibies", form: true, label: "СИБИЕС 3", phone: "+359895412588" }, "2:12": { group: "sibies", form: true, label: "СИБИЕС Нова Загора", addr: "ул. Патриарх Евтимий 31, Нова Загора", phone: "+359885121612" },
-  "2:13": { group: "sibies" }, "2:14": { group: "sibies", form: true, label: "СИБИЕС Раднево", addr: "ул. Г. Димитров 21, Раднево", phone: "+359887761618" }, "2:15": { group: "sibies", form: true, label: "СИБИЕС Чирпан", addr: "ул. Димитър Благоев 2, Чирпан" },
+  "2:13": { group: "sibies" }, "2:14": { group: "sibies", form: true, label: "СИБИЕС Раднево", addr: "ул. Г. Димитров 21, Раднево", phone: "+359887761618" }, "2:15": { group: "sibies", form: true, label: "СИБИЕС Чирпан", addr: "ул. Димитър Благоев 2, Чирпан", phone: "+359899333568" },
   // Сливен — Мерканто / АНТОНИЙ ЕООД (клиент 11)
   "11:23": { group: "merkanto" }, "11:25": { group: "merkanto" }, "11:26": { group: "merkanto" },
   "11:27": { group: "merkanto" }, "11:28": { group: "merkanto" }, "11:29": { group: "merkanto" },
