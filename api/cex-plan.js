@@ -899,6 +899,11 @@ async function shopFormData(key, dateIso) {
   return { obj: { key, name: formObjName(key) }, for_date: target, default_date: def, today, dow: dowBg(target), items, existing,
     other: MENU.filter(m => !items.some(i => i.id === m.id)).map(m => ({ id: m.id, name: m.name })) };
 }
+function normPhone(v) {   // „0899 333 568" / „+359 899…" / „00359…" → „+359899333568"; невалиден → ""
+  let d = String(v || "").replace(/[^0-9]/g, "");
+  if (d.startsWith("00359")) d = d.slice(2); else if (d.startsWith("0")) d = "359" + d.slice(1);
+  return /^359[0-9]{8,9}$/.test(d) ? "+" + d : "";
+}
 async function shopFormSend(key, body) {
   const today = sofiaToday();
   const forDate = String(body.for_date || "");
@@ -911,8 +916,10 @@ async function shopFormSend(key, body) {
   }
   const qmap = (obj) => { const out = {}; for (const [id, v] of Object.entries(obj && typeof obj === "object" ? obj : {})) { const q = Math.round(Number(v)); if (MENU.some(m => String(m.id) === String(id)) && q > 0 && q <= 300) out[id] = q; } return out; };
   const left = qmap(body.left), swap = qmap(body.swap);
+  const phone = normPhone(body.phone);
+  if (!phone) return { ok: false, error: "bad_phone", message: "Напиши телефона си (например 0899 123 456), за да ти потвърдим заявката във Viber." };
   const now = new Date().toISOString();
-  const row = { for_date: forDate, obj_key: key, rows, left_qty: left, swap_qty: swap, note: String(body.note || "").slice(0, 300) || null, source: "form", sent_at: now, updated_at: now };
+  const row = { phone, for_date: forDate, obj_key: key, rows, left_qty: left, swap_qty: swap, note: String(body.note || "").slice(0, 300) || null, source: "form", sent_at: now, updated_at: now };
   try { await sbReq(`cex_shop_requests?on_conflict=for_date,obj_key`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify([row]) }); }
   catch (e) { return { ok: false, error: "save_failed", message: "Заявката не се записа. Опитай пак след минута." }; }
   // Известие на собственика в Telegram (личния чат) — да не трябва да отваря таба, за да разбере.
@@ -920,18 +927,18 @@ async function shopFormSend(key, body) {
     const hm = new Intl.DateTimeFormat("bg-BG", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit" }).format(new Date());
     const lines = rows.length ? rows.map(r => "• " + TG.escHtml(r.name.replace("НACHI", "NACHI")) + " <b>" + r.qty + "</b>").join("\n") : "• <i>0 от всичко</i>";
     const swapL = Object.keys(swap).length ? "\n🔁 За смяна: " + Object.entries(swap).map(([id, q]) => TG.escHtml((byId(id) || { name: id }).name.replace("НACHI", "NACHI")) + " " + q).join(", ") : "";
-    const text = `📥 <b>Заявка от ${TG.escHtml(formObjName(key))}</b>\nза ${dowBg(forDate)} ${forDate.slice(8, 10)}.${forDate.slice(5, 7)} · пратена ${hm}\n${lines}${swapL}` + (row.note ? `\nБележка: ${TG.escHtml(row.note)}` : "") + `\n\nИнструмент → 📥 Заявки → „Приложи“.`;
+    const text = `📥 <b>Заявка от ${TG.escHtml(formObjName(key))}</b>\nза ${dowBg(forDate)} ${forDate.slice(8, 10)}.${forDate.slice(5, 7)} · пратена ${hm} · ☎ ${TG.escHtml(phone)}\n${lines}${swapL}` + (row.note ? `\nБележка: ${TG.escHtml(row.note)}` : "") + `\n\nИнструмент → 📥 Заявки → „Приложи“.`;
     await TG.tgSend(text, TG.OWNER_CHAT_ID);
   } catch (e) { /* известието не бива да спира заявката */ }
   return { ok: true, for_date: forDate, rows, left, swap, sent_at: now };
 }
 async function shopRequestsFor(dateIso, host) {
-  const list = await sbAll(`cex_shop_requests?select=id,for_date,obj_key,rows,left_qty,swap_qty,note,source,sent_at,updated_at,applied_at,applied_rows&for_date=eq.${dateIso}&order=sent_at.asc`);
+  const list = await sbAll(`cex_shop_requests?select=id,for_date,obj_key,rows,left_qty,swap_qty,note,source,phone,sent_at,updated_at,applied_at,applied_rows&for_date=eq.${dateIso}&order=sent_at.asc`);
   let accs = {}; try { const day = await dayGet(dateIso); accs = (day.state && day.state.accounts) || {}; } catch (e) {}
   const requests = list.map(x => { const o = CEX_OBJECTS[x.obj_key] || {}; const [c, p] = x.obj_key.split(":");
     const acc = accs[dayKey({ client_id: Number(c), person_id: p ? Number(p) : null })]; return {
     id: x.id, obj_key: x.obj_key, name: formObjName(x.obj_key), client_id: Number(c), person_id: p ? Number(p) : null, group: o.group || "adhoc",
-    has_account: !!acc, account_id: (acc && acc.account_id) || null, phone: o.phone || null,
+    has_account: !!acc, account_id: (acc && acc.account_id) || null, phone: x.phone || o.phone || null,
     rows: x.rows || [], left: x.left_qty || {}, swap: Object.fromEntries(Object.entries(x.swap_qty || {}).map(([id, q]) => [(byId(id) || { name: id }).name, q])), note: x.note, source: x.source, sent_at: x.sent_at, applied_at: x.applied_at,
     applied: !!x.applied_at && JSON.stringify(x.applied_rows || []) === JSON.stringify(x.rows || []) }; });
   const got = new Set(requests.map(r => r.obj_key));
@@ -974,6 +981,7 @@ select{width:100%;padding:10px;font-size:15px;border:1px solid #cfd3d8;border-ra
 <div class="note" id="note">Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +. „За смяна" = колко броя връщате за подмяна (по желание).</div>
 <div class="btns"><button onclick="other()">+ Друг артикул</button></div>
 <div id="otherwrap" style="display:none;margin-top:8px"><select id="othersel"></select></div>
+<div class="card" style="margin-top:8px"><label for="phone" style="font-weight:700">Вашият телефон (за потвърждение във Viber)</label><input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0899 123 456" style="width:100%;font-size:18px;padding:10px;margin-top:6px;box-sizing:border-box"></div>
 <button class="send" id="send" onclick="send()">Прати заявката</button>
 <div class="msg" id="msg"></div></div>
 <div class="note" style="text-align:center">Заявката се записва с час. Може да я промениш и пратиш пак — важи последната.</div>
@@ -1004,7 +1012,8 @@ function step(btn,n){var i=btn.parentNode.querySelector('.qty');i.value=Math.max
 function other(){var w=$('otherwrap');w.style.display=w.style.display==='none'?'block':'none';$('othersel').onchange=function(){var id=+this.value;if(!id)return;var m=(D.other||[]).filter(function(x){return x.id===id})[0];if(!m)return;ITEMS.push({id:m.id,name:m.name,last:null,last_same:null,suggest:0,avg:null,weeks:0});D.other=D.other.filter(function(x){return x.id!==id});var keep={};document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){keep[tr.getAttribute('data-id')]=[tr.querySelector('.qty').value,tr.querySelector('.swap').value]});render();Object.keys(keep).forEach(function(k){var tr=document.querySelector('tr[data-id="'+k+'"]');if(tr){tr.querySelector('.qty').value=keep[k][0];tr.querySelector('.qty').className='qty';tr.querySelector('.swap').value=keep[k][1]}});w.style.display='none'}}
 function send(){var rows=[],left={},swap={},n=0;document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){var id=+tr.getAttribute('data-id'),q=parseInt(tr.querySelector('.qty').value)||0,sw=parseInt(tr.querySelector('.swap').value)||0;rows.push({id:id,qty:q});if(q>0)n++;if(sw>0)swap[id]=sw});
 if(!n){if(!confirm('Заявката е с 0 от всичко. Да я пратя така (няма да получите нищо за '+dm(SEL)+')?'))return}else if(!confirm('Пращаш заявка за '+dowOf(SEL).toUpperCase()+' '+dm(SEL)+' — '+n+' артикула. Потвърди.'))return;
-$('send').disabled=true;msg('Пращам…','info');api({action:'shop_form_send',for_date:SEL,rows:rows,left:left,swap:swap}).then(function(j){$('send').disabled=false;if(j.ok){msg('✓ Пратено в '+hhmm(j.sent_at)+' за '+dm(j.for_date)+'. Благодарим!','ok');D.existing={for_date:j.for_date,rows:j.rows,left_qty:j.left,swap_qty:j.swap,sent_at:j.sent_at}}else msg('Не е пратено: '+(j.message||j.error||''),'err')}).catch(function(){$('send').disabled=false;msg('Няма връзка. Опитай пак.','err')})}
+var ph=$('phone').value.trim();if(ph.replace(/[^0-9]/g,'').length<9){msg('Напиши телефона си, за да ти потвърдим заявката във Viber.','err');$('phone').focus();return}try{localStorage.setItem('zphone',ph)}catch(e){}$('send').disabled=true;msg('Пращам…','info');api({action:'shop_form_send',for_date:SEL,rows:rows,left:left,swap:swap,phone:ph}).then(function(j){$('send').disabled=false;if(j.ok){msg('✓ Пратено в '+hhmm(j.sent_at)+' за '+dm(j.for_date)+'. Благодарим!','ok');D.existing={for_date:j.for_date,rows:j.rows,left_qty:j.left,swap_qty:j.swap,sent_at:j.sent_at}}else msg('Не е пратено: '+(j.message||j.error||''),'err')}).catch(function(){$('send').disabled=false;msg('Няма връзка. Опитай пак.','err')})}
+try{$('phone').value=localStorage.getItem('zphone')||''}catch(e){}
 load(null);
 </script></body></html>`;
 }
