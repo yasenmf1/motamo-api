@@ -1542,6 +1542,22 @@ if(location.hash==='#shop')show('shop');if(location.hash==='#routes')show('route
 </body></html>`;
 }
 
+// ★ Стокова от предишен ден (до 3 дни назад), която още няма стокова днес: собственикът я е издал вчера за разноса днес.
+// Показва се в „Маршрути" като „стокова от ДД.ММ" — влачи се в маршрут ръчно и така влиза в бота. НЕ влиза в автоматичното деление.
+async function carryOver(date, have) {
+  const out = [], seen = new Set(have);
+  for (let k = 1; k <= 3; k++) {
+    const d = isoPlusDays(date, -k);
+    let docs; try { docs = await sbAll(`cex_docs?select=client_id,person_id&type_id=eq.11&is_anulate=eq.0&doc_date=eq.${d}`); } catch (e) { continue; }
+    for (const x of docs) {
+      const key = (x.client_id != null ? x.client_id : "") + ":" + (x.person_id != null ? x.person_id : "");
+      if (seen.has(key) || RT.NOT_BUS.has(key)) continue;
+      seen.add(key); out.push({ key, date: d });
+    }
+  }
+  return out;
+}
+
 // ── HTML: МАРШРУТИ НА ШОФЬОРА (собственикът влачи обектите в маршрути 1–5; ботът ползва записаното) ──
 function routesPage(k, date) {
   return `<!doctype html><html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1600,7 +1616,7 @@ function load(){var d=document.getElementById('date').value;document.getElementB
     document.getElementById('state').textContent=ST.stops.length+' обекта · '+(src.length?'записан план ('+new Date(j.saved_at).toLocaleTimeString('bg-BG',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Sofia'})+')':'няма записан план — влачи или натисни „Автоматично“');
     render()})}
 function placed(){var m={};ST.routes.forEach(function(r){r.keys.forEach(function(k){m[k]=1})});return m}
-function itemHtml(k){var s=stop(k);if(!s)return '';return '<div class="item'+(/^СиБиЕс/.test(s.zone)?' sbs':'')+(s.isNew?' nw':'')+'" draggable="true" data-k="'+esc(k)+'"><span class="h">⋮⋮</span><span class="nm">'+esc(s.name)+'<small>'+(s.isNew?'🆕 нов обект — без адрес за навигация (кажи на Claude да го добави)':esc(s.zone))+'</small></span></div>'}
+function itemHtml(k){var s=stop(k);if(!s)return '';return '<div class="item'+(/^СиБиЕс/.test(s.zone)?' sbs':'')+(s.isNew?' nw':'')+'" draggable="true" data-k="'+esc(k)+'"><span class="h">⋮⋮</span><span class="nm">'+esc(s.name)+'<small>'+(s.isNew?'🆕 нов обект — без адрес за навигация (кажи на Claude да го добави)':(s.carry?'🕒 стокова от '+esc(s.carry.slice(8,10)+'.'+s.carry.slice(5,7))+' · '+esc(s.zone):esc(s.zone)))+'</small></span></div>'}
 function routeCity(r){var cs={};r.keys.forEach(function(k){var s=stop(k);if(s)cs[cityOf(s.zone)]=1});var a=Object.keys(cs);return a.length===1&&a[0]!=='Стара Загора'?a[0]:null}
 function autoName(){ST.routes.forEach(function(r){var c=routeCity(r);if(c&&/^Маршрут [0-9]+$/.test(String(r.name).trim()))r.name=c})}
 function cityRoute(c){var m=document.getElementById('msg');var p=placed();var keys=ST.stops.filter(function(s){return cityOf(s.zone)===c&&!p[s.key]}).map(function(s){return s.key});if(!keys.length)return;
@@ -1632,7 +1648,7 @@ function addRoute(){if(ST.routes.length>=MAXR)return;ST.routes.push({name:'Ма�
 function delRoute(ri){if(ST.routes.length<=1){ST.routes[0].keys=[];render();return}ST.routes.splice(ri,1);render()}
 function clearAll(){ST.routes=[{name:'Маршрут 1',keys:[]}];render()}
 function applyAuto(){ST.routes=ST.auto.slice(0,MAXR).map(function(r){return {name:r.name,keys:r.keys.slice()}});if(!ST.routes.length)ST.routes=[{name:'Маршрут 1',keys:[]}];render()}
-function save(){autoName();var m=document.getElementById('msg');var p=placed();var left=ST.stops.filter(function(s){return !p[s.key]}).length;
+function save(){autoName();var m=document.getElementById('msg');var p=placed();var left=ST.stops.filter(function(s){return !p[s.key]&&!s.carry}).length;
   var routes=ST.routes.filter(function(r){return r.keys.length}).map(function(r){var labels={};r.keys.forEach(function(k){if(isNew(k))labels[k]=stop(k).name});return {name:r.name,keys:r.keys,labels:labels}});
   if(!routes.length){m.className='msg err';m.textContent='Няма обекти в маршрутите.';return}
   m.className='msg';m.textContent='записва…';
@@ -2960,6 +2976,13 @@ module.exports = async function handler(req, res) {
         for (const k of unknown) raw.push({ key: k, name: names[k] || ("Обект " + k), zone: "Нов обект", isNew: true });
       }
       const auto = RT.splitRoutes(raw.filter(s => !s.isNew)).map(g => ({ name: g.zone, keys: g.stops.map(s => s.key) }));
+      // ★ стокови от предишни дни (за известни спирки) — в списъка с бележка, извън автоматичното деление
+      try {
+        const carry = await carryOver(date, [...have]);
+        const cmap = {}; for (const c of carry) cmap[c.key] = c.date;
+        const used = new Set(raw.map(s => s.key));
+        for (const s of RT.ROUTE) { const ck = s.keys.find(k => cmap[k]); const sk = RT.stopKey(s); if (ck && !used.has(sk)) { used.add(sk); raw.push({ key: sk, name: s.name, zone: s.zone, carry: cmap[ck] }); } }
+      } catch (e) { /* без пренесени — само днешните */ }
       const saved = await sbReq(`cex_route_plan?for_date=eq.${date}&select=routes,updated_at&limit=1`).catch(() => null);
       res.status(200).json({ ok: true, date, stops: raw, auto, saved: saved && saved[0] ? saved[0].routes : null, saved_at: saved && saved[0] ? saved[0].updated_at : null });
     } catch (e) { res.status(502).json({ ok: false, error: String(e && e.message).slice(0, 200) }); }
@@ -2975,7 +2998,8 @@ module.exports = async function handler(req, res) {
     try {
       const docs = await sbAll(`cex_docs?select=inv_id,client_id,person_id&type_id=eq.11&is_anulate=eq.0&doc_date=eq.${date}`);
       const keys = [...new Set(docs.map(d => (d.client_id != null ? d.client_id : "") + ":" + (d.person_id != null ? d.person_id : "")))];
-      res.status(200).json({ ok: true, date, keys, docs: docs.length, sync });
+      const carry = await carryOver(date, keys).catch(() => []);   // стокови от последните 3 дни (влизат само ако са в записания план)
+      res.status(200).json({ ok: true, date, keys, carry, docs: docs.length, sync });
     } catch (e) { res.status(502).json({ ok: false, error: String(e && e.message).slice(0, 200), sync }); }
     return;
   }
