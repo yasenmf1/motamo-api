@@ -27,12 +27,20 @@
       "schedule": "5 21 * * *"
     },
     {
-      "path": "/api/transfer?cron=qc_prompt",
-      "schedule": "0 13,14 * * 1-6"
+      "path": "/api/transfer?cron=qc_prompt&t=13",
+      "schedule": "0 13 * * 1-6"
     },
     {
-      "path": "/api/transfer?cron=qc_check",
-      "schedule": "30 14,15 * * 1-6"
+      "path": "/api/transfer?cron=qc_prompt&t=14",
+      "schedule": "0 14 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=qc_check&t=14",
+      "schedule": "30 14 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=qc_check&t=15",
+      "schedule": "30 15 * * 1-6"
     }
   ],
   "rewrites": [
