@@ -325,6 +325,7 @@ const DELIVERY = {
 const CEXDATA = require("../lib/_cexdata.js");
 const TG = require("../lib/telegram.js");
 const DRV = require("../lib/driver.js");
+const QC = require("../lib/quality.js");
 
 // Дни до следващата доставка от този доставчик (0 не се връща — днешният ден е
 // изпуснат). Доставчик без седмичен график чака фиксиран срок.
@@ -1506,6 +1507,16 @@ module.exports = async function handler(req, res) {
     res.status(200).json(await TG.tgCleanup());
     return;
   }
+  // ★ S33 — Контрол на качеството в цеха: 16:00 бутон към формата, 17:30 сигнал при непопълнен (Vercel cron, UTC → часът се проверява в кода).
+  if (req.method === "GET" && (q.cron === "qc_prompt" || q.cron === "qc_check")) {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    const baseQ = "https://" + ((req.headers && req.headers.host) || "motamo-api.vercel.app") + "/api/transfer";
+    res.status(200).json(q.cron === "qc_prompt" ? await QC.cronPrompt(baseQ) : await QC.cronCheck());
+    return;
+  }
   const isCron = req.method === "GET" && q.cron === "stock";
   const manual = req.method === "POST" && req.body && (typeof req.body === "object" ? req.body : {}).action === "tg_stock_alert";
   if (isCron || manual) {
@@ -1668,13 +1679,14 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const VIEWS = ["shop", "cex", "stock", "hub", "order", "home", "push", "produce"];
+  const VIEWS = ["shop", "cex", "stock", "hub", "order", "home", "push", "produce", "qc"];
   if (req.method === "GET" && (VIEWS.includes(q.view) || (!q.view && q.k))) {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     const homeKey = (q.view === "home" || q.view === "push" || q.view === "produce") && ((TG.skladKey() && q.k === TG.skladKey()) || isStaff(q.k) || isOwner(q.k));
     const okTok = homeKey || viewTokens.some(t => q.k === t) || (q.view === "stock" && ((process.env.PEEK_TOKEN && q.k === process.env.PEEK_TOKEN) || isStaff(q.k)))
       || (q.view === "cex" && TG.skladKey() && q.k === TG.skladKey()) || (q.view === "shop" && TG.pointKey() && q.k === TG.pointKey())
-      || (q.view === "order" && ((TG.skladKey() && q.k === TG.skladKey()) || isStaff(q.k)));
+      || (q.view === "order" && ((TG.skladKey() && q.k === TG.skladKey()) || isStaff(q.k)))
+      || (q.view === "qc" && ((TG.skladKey() && q.k === TG.skladKey()) || isStaff(q.k)));
     if (!okTok) {
       res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп — липсва или грешен ключ (?k=).</body>");
       return;
@@ -1698,6 +1710,7 @@ module.exports = async function handler(req, res) {
       : view === "home" ? homePage(q.k)
       : view === "push" ? pushPage(q.k)
       : view === "produce" ? produceSkladPage(q.k)
+      : view === "qc" ? QC.page(q.k)
       : hubPage(q.k));
     return;
   }
@@ -1711,9 +1724,15 @@ module.exports = async function handler(req, res) {
   const readOnly = ["list", "list_requests", "inspect", "stock_report"].includes(body.action);
   const allowed = readOnly ? viewTokens.concat([process.env.PEEK_TOKEN].filter(Boolean)) : viewTokens;
   const staff = ["stock_report", "tg_supply"].includes(body.action) && isStaff(token);
-  const skladOk = TG.skladKey() && token === TG.skladKey() && ["list", "list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply", "stock_report", "push_to_shop", "list_zag"].includes(body.action);
+  const skladOk = TG.skladKey() && token === TG.skladKey() && ["list", "list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply", "stock_report", "push_to_shop", "list_zag", "qc_save"].includes(body.action);
   const pointOk = TG.pointKey() && token === TG.pointKey() && ["list", "create_request", "list_requests"].includes(body.action);
   if (!staff && !skladOk && !pointOk && !allowed.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+  // ★ S33 — запис на Контрола на качеството (цех): само добавя редове в `qc_log`, не пипа Barsy.
+  if (body.action === "qc_save") {
+    try { const r = await QC.save(body); res.status(r.ok ? 200 : 400).json(r); }
+    catch (e) { res.status(502).json({ ok: false, error: "qc_failed", message: String(e && e.message).slice(0, 200) }); }
+    return;
+  }
   if (!process.env.BARSY_CEX_USER || !process.env.BARSY_USER) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
 
   try {

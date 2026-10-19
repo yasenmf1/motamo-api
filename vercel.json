@@ -25,6 +25,14 @@
     {
       "path": "/api/transfer?cron=clean",
       "schedule": "5 21 * * *"
+    },
+    {
+      "path": "/api/transfer?cron=qc_prompt",
+      "schedule": "0 13,14 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=qc_check",
+      "schedule": "30 14,15 * * 1-6"
     }
   ],
   "rewrites": [
