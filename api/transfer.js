@@ -1523,7 +1523,8 @@ module.exports = async function handler(req, res) {
     const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
       || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
     if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
-    const baseQ = "https://" + ((req.headers && req.headers.host) || "motamo-api.vercel.app") + "/api/transfer";
+    // ВИНАГИ публичният адрес: cron се вика през адреса на конкретния деплой (защитен от Vercel — хората получаваха „Заявката е изпратена" вместо формата).
+    const baseQ = "https://motamo-api.vercel.app/api/transfer";
     res.status(200).json(q.cron === "qc_prompt" ? await QC.cronPrompt(baseQ) : await QC.cronCheck());
     return;
   }
