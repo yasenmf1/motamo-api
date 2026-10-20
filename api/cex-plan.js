@@ -796,7 +796,7 @@ const CEX_OBJECTS = {
   "4:": { group: "adhoc", form: true, label: "A шоп", phone: "+359886403177" }, "8:": { group: "adhoc" }, "8:21": { group: "adhoc" }, "8:22": { group: "adhoc", form: true, label: "Athletic Fitness" },
   "5:": { group: "adhoc" }, "5:16": { group: "adhoc", form: true, label: "Форум" }, "5:17": { group: "adhoc", form: true, label: "Академика" }, "5:18": { group: "adhoc", form: true, label: "Медицински" },   // Тракийски у-т — трите барчета (19.10)
   // нови представители (05.10) — без сметка досега; client/rep са нужни, за да се покажат в „+ Магазин"
-  "5:19": { group: "adhoc", client: "Пламен Петров", rep: "кафе Винил" }, "5:20": { group: "adhoc", client: "Пламен Петров", rep: "лог. център Била" },
+  "5:19": { group: "adhoc", form: true, label: "Кафе Винил", client: "Пламен Петров", rep: "кафе Винил" }, "5:20": { group: "adhoc", client: "Пламен Петров", rep: "лог. център Била" },
   "12:": { group: "adhoc" }, "7:": { group: "adhoc", form: true, label: "Сити" }, "10:": { group: "adhoc", form: true, label: "Тара Шуус" }, "13:": { group: "adhoc" }, "3:": { group: "adhoc" }
 };
 function cexKey(a) { return (a.client_id != null ? a.client_id : "") + ":" + (a.person_id != null ? a.person_id : ""); }
