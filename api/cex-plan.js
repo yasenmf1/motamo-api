@@ -2660,12 +2660,17 @@ module.exports = async function handler(req, res) {
       const dup = H.find(h => String(h.doc_num || "").trim() === docNum && Number(h.supplier_id) === supplierId);
       if (dup) { res.status(200).json({ ok: false, error: "already_loaded", store_load_id: dup.store_load_id }); return; }
     } catch (e) {}
-    const TAX = 20, TAX_ID = "2"; // 20% (Б)
-    let net = 0; const rows = [], bad = [];
+    // ДДС група: по подразбиране 20% (Б, tax_id 2). За доставка от ЕС без ДДС → body.tax_id=1 (0% А);
+    // може и по ред (r.tax_id). Barsy: 1=0% (А), 2=20% (Б), 3=20% (В), 4=9% (Г), 12=7%, 100=0% (Без ДДС).
+    const TAX_PCT = { 1: 0, 2: 20, 3: 20, 4: 9, 12: 7, 100: 0 };
+    const docTaxId = TAX_PCT[Number(body.tax_id)] != null ? Number(body.tax_id) : 2;
+    let net = 0, vatSum = 0; const rows = [], bad = [];
     for (const r of rowsIn) {
       const a = SHOP ? (Number(r.article_id) > 0 && r.name ? { id: Number(r.article_id), name: String(r.name) } : null) : byId(Number(r.article_id)); const q = Number(r.amount), pr = Number(r.price);
       if (!a || !(q > 0) || !(pr >= 0)) { bad.push(r); continue; }
       const tot = Math.round(q * pr * 100) / 100; net += tot;
+      const rTaxId = TAX_PCT[Number(r.tax_id)] != null ? Number(r.tax_id) : docTaxId, TAX = TAX_PCT[rTaxId], TAX_ID = String(rTaxId);
+      vatSum += Math.round(tot * TAX) / 100;
       rows.push({ store_load_row_id: "", article_id: String(a.id), original_article_name: a.name, amount: String(q),
         current_price: String(pr), delivery_price: String(pr), delivery_total: String(tot),
         delivery_tax_id: TAX_ID, actual_tax_id: TAX_ID, tax: String(TAX), tax_sum: String(Math.round(tot * TAX) / 100),
@@ -2681,7 +2686,7 @@ module.exports = async function handler(req, res) {
       currency_id: "1", currency_rate: "1", store_load_cat_id: "1", discount: "0", total_costs: 0,
       description: String(body.description || ("Заредено от снимка на документа (" + (supplierName || "") + " № " + docNum + ")"))
     }, rows } };
-    const summary = { host: SHOP ? "точка" : "цех", supplier: supplierName, supplier_id: supplierId, doc_num: docNum, doc_date: docDate, net, vat: Math.round(net * TAX) / 100, rows: rows.map(r => ({ name: r.original_article_name, amount: Number(r.amount), price: Number(r.delivery_price), total: Number(r.delivery_total) })) };
+    const summary = { host: SHOP ? "точка" : "цех", supplier: supplierName, supplier_id: supplierId, doc_num: docNum, doc_date: docDate, net, vat: Math.round(vatSum * 100) / 100, tax_id: docTaxId, rows: rows.map(r => ({ name: r.original_article_name, amount: Number(r.amount), price: Number(r.delivery_price), total: Number(r.delivery_total) })) };
     if (body.dry !== false) { res.status(200).json({ ok: true, dry: true, draft, ...summary }); return; }
     const sv = await cexCallRoot(payload, user, pass, BASE);
     let lid = null, status = null, total = null;
