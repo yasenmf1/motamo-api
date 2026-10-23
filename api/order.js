@@ -638,7 +638,7 @@ async function orderStatus(req, res, user, pass) {
 }
 
 module.exports = async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
+  { const o = String((req.headers && req.headers.origin) || ""); res.setHeader("Access-Control-Allow-Origin", (o === ALLOWED_ORIGIN || o === "https://www.motamo.bg") ? o : ALLOWED_ORIGIN); res.setHeader("Vary", "Origin"); } // www.motamo.bg се отваря без пренасочване → без това менюто не се зарежда там
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Cache-Control", "no-store");
