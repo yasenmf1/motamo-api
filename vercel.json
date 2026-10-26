@@ -51,6 +51,14 @@
       "schedule": "0 5 * * 1-5"
     },
     {
+      "path": "/api/transfer?cron=water",
+      "schedule": "0 8-15 * * 1-5"
+    },
+    {
+      "path": "/api/transfer?cron=weekend",
+      "schedule": "30 16,17 * * 5"
+    },
+    {
       "path": "/api/transfer?cron=tc_report",
       "schedule": "0 6 * * *"
     }

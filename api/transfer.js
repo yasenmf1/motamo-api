@@ -1509,6 +1509,25 @@ module.exports = async function handler(req, res) {
     return;
   }
   // ★ S34 — Часове за заплата: сутрешен отчет за вчера към собственика (cron, UTC → часът се проверява в кода).
+  // ★ S36 — петъчно „Добър уикенд“ с оборота за седмицата (само към собственика).
+  if (req.method === "GET" && q.cron === "weekend") {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const test = !!(process.env.PEEK_TOKEN && String(req.headers && req.headers["x-peek-token"] || "") === process.env.PEEK_TOKEN);
+    const ok = test || (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try { res.status(200).json(await require("../lib/weekend.js").run({ force: test })); } catch (e) { res.status(502).json({ ok: false, error: "weekend_failed", message: String(e && e.message).slice(0, 160) }); }
+    return;
+  }
+  // ★ S36 — „Пийте вода“ в групата на всеки 2 часа (Пн–Пт 11/13/15/17 ч София).
+  if (req.method === "GET" && q.cron === "water") {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try { res.status(200).json(await require("../lib/water.js").run({})); } catch (e) { res.status(502).json({ ok: false, error: "water_failed", message: String(e && e.message).slice(0, 160) }); }
+    return;
+  }
   // ★ S36 — сутрешно време + позитивна мисъл (7:00 София; Vercel cron е в UTC → две записи, run() праща само в 7 ч).
   if (req.method === "GET" && q.cron === "weather") {
     const auth = String(req.headers && (req.headers.authorization || "") || "");
