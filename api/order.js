@@ -84,6 +84,7 @@ function discountedCents(baseCents) {
 // Barsy accepts orders Mon–Fri 11:00–20:30 Europe/Sofia. Checked here rather
 // than in the browser: a visitor's clock is not evidence, and the static site
 // can sit in LiteSpeed's cache after the hours change.
+const SATURDAY_OPEN = process.env.SATURDAY_OPEN === "1";
 const OPEN_DAYS = new Set(["Mon", "Tue", "Wed", "Thu", "Fri"]);
 
 // Отделни неработни дни — обектът е затворен, макар да е делник. Датите са по
@@ -414,9 +415,11 @@ function sofiaNow() {
   };
 }
 
-function isOpen(toMin) {
+function isOpen(toMin, isDlv) {
   const now = sofiaNow();
   if (CLOSED_DAYS.has(now.date)) return false;
+  // Проба със събота (Вера сама): само вземане, 12:30–18:30 — включва се със SATURDAY_OPEN=1.
+  if (now.weekday === "Sat" && SATURDAY_OPEN) return !isDlv && now.minutes >= 12 * 60 + 30 && now.minutes <= 18 * 60 + 30;
   if (!OPEN_DAYS.has(now.weekday)) return false;
   return now.minutes >= OPEN_FROM_MIN && now.minutes <= (toMin || OPEN_TO_MIN);
 }
@@ -796,7 +799,7 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  if (!isOpen(dlv ? DELIVERY_CUTOFF_MIN : 0) && !previewing) {
+  if (!isOpen(dlv ? DELIVERY_CUTOFF_MIN : 0, !!dlv) && !previewing) {
     fail(res, 409, "closed", "Online ordering is closed right now");
     return;
   }
