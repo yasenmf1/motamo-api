@@ -65,7 +65,7 @@ const DELIVERY_FEE_EUR = 4.00;
 const DELIVERY_FREE_FROM_EUR = 30.00;
 const DELIVERY_FEE_ARTICLE_ID = Number(process.env.COURIER_FEE_ARTICLE_ID || process.env.WOLT_FEE_ARTICLE_ID) || 0;
 const DLV_LABEL = COURIER_MODE ? "ДОСТАВКА КУРИЕР" : "ДОСТАВКА WOLT";
-const DELIVERY_CUTOFF_MIN = 18 * 60 + 15;
+const DELIVERY_CUTOFF_MIN = 19 * 60 + 50;   // доставка се приема до 19:50 (вземане от място — до 18:50)
 
 // Kept in sync with the pricelist so the site can show the price the POS will
 // charge. Barsy rounds half-up at two decimals — verified against every computed
@@ -414,11 +414,11 @@ function sofiaNow() {
   };
 }
 
-function isOpen() {
+function isOpen(toMin) {
   const now = sofiaNow();
   if (CLOSED_DAYS.has(now.date)) return false;
   if (!OPEN_DAYS.has(now.weekday)) return false;
-  return now.minutes >= OPEN_FROM_MIN && now.minutes <= OPEN_TO_MIN;
+  return now.minutes >= OPEN_FROM_MIN && now.minutes <= (toMin || OPEN_TO_MIN);
 }
 
 // Bulgarians type their mobile every which way: 0888 123 456, +359 88 812 3456,
@@ -791,11 +791,11 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  if (!isOpen() && !previewing) {
+  if (!isOpen(dlv ? DELIVERY_CUTOFF_MIN : 0) && !previewing) {
     fail(res, 409, "closed", "Online ordering is closed right now");
     return;
   }
-  if (dlv && !previewing && sofiaNow().mins > DELIVERY_CUTOFF_MIN) {
+  if (dlv && !previewing && sofiaNow().minutes > DELIVERY_CUTOFF_MIN) {
     fail(res, 409, "delivery_cutoff", "Delivery orders are closed for today");
     return;
   }
