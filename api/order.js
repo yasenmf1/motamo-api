@@ -474,13 +474,18 @@ async function saveAttribution(ref, total, pay, attr) {
   finally { clearTimeout(timer); }
 }
 
-const REF_PATTERN = /^(W-[A-Z0-9]{4,8}|WEB-[A-Z0-9]{4,12}-[A-Z0-9]{2,8})$/;
+const REF_PATTERN = /^([WMD]-[A-Z0-9]{4,8}|WEB-[A-Z0-9]{4,12}-[A-Z0-9]{2,8})$/;
 
-function makeRef(clientRef) {
-  if (typeof clientRef === "string" && REF_PATTERN.test(clientRef)) return clientRef;
+// M-XXXXX = вземане от място, D-XXXXX = доставка (старите W- от кеширани страници минават).
+function makeRef(clientRef, isDelivery) {
+  const prefix = isDelivery ? "D" : "M";
+  if (typeof clientRef === "string" && REF_PATTERN.test(clientRef)) {
+    // Клиентът може да е пратил „W-“ или грешната буква — буквата следва режима.
+    return /^[WMD]-/.test(clientRef) ? prefix + clientRef.slice(1) : clientRef;
+  }
   const stamp = Math.floor(Date.now() / 60000).toString(36).toUpperCase().slice(-2);
   const rand = ("00" + Math.floor(Math.random() * 46656).toString(36).toUpperCase()).slice(-3);
-  return `W-${stamp}${rand}`;
+  return `${prefix}-${stamp}${rand}`;
 }
 
 // Barsy validates `uuid` as a real UUID — handing it our own reference earns
@@ -544,7 +549,7 @@ function buildPriceMap(tree) {
 // само ако нейната бележка/надпис носи същия код, така никой не може да разгледа
 // чужда сметка, като налучква номера ѝ. Гледаме само сметки от последното
 // денонощие (старите са без значение и само шумят).
-const REF_LOOKUP = /(W-[A-Z0-9]{4,8}|WEB-[A-Z0-9]{4,12}-[A-Z0-9]{2,8})/;
+const REF_LOOKUP = /([WMD]-[A-Z0-9]{4,8}|WEB-[A-Z0-9]{4,12}-[A-Z0-9]{2,8})/;
 const STATUS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function pickAccount(data, acct) {
@@ -727,7 +732,7 @@ module.exports = async function handler(req, res) {
       fail(res, 400, "delivery_quote_expired", "Address check missing or expired");
       return;
     }
-    dlv = { lat: coordsOk ? lat : null, lon: coordsOk ? lon : null, text: text, details: details,
+    dlv = { street: sanitizeText(a.street, 120), number: sanitizeText(a.number, 12), lat: coordsOk ? lat : null, lon: coordsOk ? lon : null, text: text, details: details,
             promise_id: typeof body.promise_id === "string" ? body.promise_id.slice(0, 80) : "" };
   }
 
@@ -918,13 +923,24 @@ module.exports = async function handler(req, res) {
   }
 
   // --- place it ------------------------------------------------------------
-  const ref = makeRef(body.ref);
+  const ref = makeRef(body.ref, !!dlv);
   const payLabel = pay === "card" ? "С КАРТА" : "В БРОЙ";
   // При доставка адресът стои ПЪРВИ в бележката на сметката — персоналът го вижда
   // в касата и без Wolt; после — каквото клиентът е написал.
   const orderNotes = dlv
     ? [`ДОСТАВКА: ${dlv.text}${dlv.details ? " · " + dlv.details : ""}`, note].filter(Boolean).join("\n")
     : note;
+
+  // Адресът отива и в полето „Адрес за доставка“ на Barsy (да може да се взима оттам).
+  function deliveryAddress() {
+    if (!dlv) return { delivery_type: "no" };
+    return {
+      delivery_type: "address",
+      address: dlv.street || dlv.text,
+      address_number: dlv.number || "",
+      address_floor: dlv.details || ""
+    };
+  }
 
   // ── Вариант 1: картовата поръчка като клиентска заявка (зад ONLINE_CARD_V2) ──
   // Само за карта; в брой продължава надолу като отворена сметка, платена на
@@ -947,7 +963,7 @@ module.exports = async function handler(req, res) {
       // Бележката на клиента — не се печата.
       public_notes: orderNotes,
       // Вземане от място, без доставка — както при отворената сметка.
-      delivery_address: { delivery_type: "no" }
+      delivery_address: deliveryAddress()
     };
 
     let zayavka;
@@ -1071,7 +1087,7 @@ module.exports = async function handler(req, res) {
       // Начинът на плащане вече стои в колона „Начин" на касата, затова „Плащане:
       // …" тук е излишно и цапа Бележката. Празно, ако няма забележка.
       notes: orderNotes,
-      delivery_address: { delivery_type: "no" }
+      delivery_address: deliveryAddress()
     },
     rows: rows
     // No payments: the customer pays on collection. Sending one settles and

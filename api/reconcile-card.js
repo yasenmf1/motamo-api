@@ -33,7 +33,7 @@ const DSK_API = "https://epg.dskbank.bg/payment/rest/";
 const PICKUP_CLIENT_ID = 7;      // „Онлайн" — каналът на сайта
 const CARD_PAYMETHOD_ID = 8;     // „Карта site"
 const CARD_ALIAS = /карта/i;     // само картовите (надписът е „… · С КАРТА")
-const REF_RE = /(W-[A-Z0-9]{4,8}|WEB-[A-Z0-9]{4,12}-[A-Z0-9]{2,8})/;
+const REF_RE = /([WMD]-[A-Z0-9]{4,8}|WEB-[A-Z0-9]{4,12}-[A-Z0-9]{2,8})/;
 
 async function withTimeout(run) {
   const controller = new AbortController();
