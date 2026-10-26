@@ -65,7 +65,7 @@ const DELIVERY_FEE_EUR = 4.00;
 const DELIVERY_FREE_FROM_EUR = 30.00;
 const DELIVERY_FEE_ARTICLE_ID = Number(process.env.COURIER_FEE_ARTICLE_ID || process.env.WOLT_FEE_ARTICLE_ID) || 0;
 const DLV_LABEL = COURIER_MODE ? "ДОСТАВКА КУРИЕР" : "ДОСТАВКА WOLT";
-const DELIVERY_CUTOFF_MIN = 19 * 60 + 50;   // доставка се приема до 19:50 (вземане от място — до 18:50)
+const DELIVERY_CUTOFF_MIN = 20 * 60 + 30;   // последна поръчка (доставка и вземане) до 20:30
 
 // Kept in sync with the pricelist so the site can show the price the POS will
 // charge. Barsy rounds half-up at two decimals — verified against every computed
@@ -81,7 +81,7 @@ function discountedCents(baseCents) {
   return Math.floor((baseCents * (100 - PICKUP_DISCOUNT_PCT) + 50) / 100);
 }
 
-// Barsy accepts orders Mon–Fri 11:00–18:50 Europe/Sofia. Checked here rather
+// Barsy accepts orders Mon–Fri 11:00–20:30 Europe/Sofia. Checked here rather
 // than in the browser: a visitor's clock is not evidence, and the static site
 // can sit in LiteSpeed's cache after the hours change.
 const OPEN_DAYS = new Set(["Mon", "Tue", "Wed", "Thu", "Fri"]);
@@ -93,7 +93,7 @@ const OPEN_DAYS = new Set(["Mon", "Tue", "Wed", "Thu", "Fri"]);
 // нея. 28.08.2026 беше първият такъв ден и е махнат оттук, след като мина.
 const CLOSED_DAYS = new Set([]);
 const OPEN_FROM_MIN = 11 * 60;
-const OPEN_TO_MIN = 18 * 60 + 50;
+const OPEN_TO_MIN = 20 * 60 + 30;
 
 // Caps stop fat-fingered quantity steppers and casual pranks from reaching the
 // kitchen. Not a security boundary — Barsy's own storefront is public with the
