@@ -54,11 +54,17 @@ const PICKUP_CLIENT_ID = 7;
 // DELIVERY_* в index.html. Виж docs/WOLT_DRIVE_API.md в motamo_site.
 const wolt = require("../lib/wolt");
 const woltOrder = require("../lib/wolt-order");
-const DELIVERY_ENABLED = process.env.WOLT_DELIVERY === "1";
-const DELIVERY_CASH = process.env.WOLT_CASH === "1";
+// Собствена куриерска фирма (S36): COURIER_DELIVERY=1 включва доставка БЕЗ Wolt —
+// без promise_id, наложен платеж на куриера позволен; поръчката влиза в Barsy с
+// адреса в бележката, а предаването на куриера става ръчно (бутон в инструмента).
+// Изключено по подразбиране — на живо доставка няма, докато не се включи.
+const COURIER_MODE = process.env.COURIER_DELIVERY === "1";
+const DELIVERY_ENABLED = COURIER_MODE || process.env.WOLT_DELIVERY === "1";
+const DELIVERY_CASH = COURIER_MODE || process.env.WOLT_CASH === "1";
 const DELIVERY_FEE_EUR = 4.00;
 const DELIVERY_FREE_FROM_EUR = 30.00;
-const DELIVERY_FEE_ARTICLE_ID = Number(process.env.WOLT_FEE_ARTICLE_ID) || 0;
+const DELIVERY_FEE_ARTICLE_ID = Number(process.env.COURIER_FEE_ARTICLE_ID || process.env.WOLT_FEE_ARTICLE_ID) || 0;
+const DLV_LABEL = COURIER_MODE ? "ДОСТАВКА КУРИЕР" : "ДОСТАВКА WOLT";
 const DELIVERY_CUTOFF_MIN = 18 * 60 + 15;
 
 // Kept in sync with the pricelist so the site can show the price the POS will
@@ -704,7 +710,7 @@ module.exports = async function handler(req, res) {
   const mode = body.mode === "delivery" ? "delivery" : "pickup";
   let dlv = null;
   if (mode === "delivery") {
-    if (!DELIVERY_ENABLED || !wolt.configured()) {
+    if (!DELIVERY_ENABLED || (!COURIER_MODE && !wolt.configured())) {
       fail(res, 409, "delivery_unavailable", "Delivery is not available");
       return;
     }
@@ -712,15 +718,17 @@ module.exports = async function handler(req, res) {
     const lat = Number(a.lat), lon = Number(a.lon);
     const text = sanitizeText(a.formatted || a.text, 160);
     const details = sanitizeText(a.details, 80);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180 || text.length < 5) {
+    const coordsOk = Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
+    if ((!coordsOk && !COURIER_MODE) || text.length < 5) {
       fail(res, 400, "delivery_invalid_address", "Invalid delivery address");
       return;
     }
-    if (typeof body.promise_id !== "string" || body.promise_id.length < 4) {
+    if (!COURIER_MODE && (typeof body.promise_id !== "string" || body.promise_id.length < 4)) {
       fail(res, 400, "delivery_quote_expired", "Address check missing or expired");
       return;
     }
-    dlv = { lat: lat, lon: lon, text: text, details: details, promise_id: body.promise_id.slice(0, 80) };
+    dlv = { lat: coordsOk ? lat : null, lon: coordsOk ? lon : null, text: text, details: details,
+            promise_id: typeof body.promise_id === "string" ? body.promise_id.slice(0, 80) : "" };
   }
 
   // Cash or card, both paid at the counter — nothing is charged online yet. The
@@ -935,7 +943,7 @@ module.exports = async function handler(req, res) {
       contact_name: name,
       client_tel: phone,
       // Печата се на фискалната бележка при превръщането в сметка.
-      description: `Поръчка ${ref} · ${dlv ? "ДОСТАВКА WOLT" : "ВЗЕМАНЕ ОТ МЯСТО"}`,
+      description: `Поръчка ${ref} · ${dlv ? DLV_LABEL : "ВЗЕМАНЕ ОТ МЯСТО"}`,
       // Бележката на клиента — не се печата.
       public_notes: orderNotes,
       // Вземане от място, без доставка — както при отворената сметка.
@@ -1058,7 +1066,7 @@ module.exports = async function handler(req, res) {
       // in the accounts list, and the first line of the notes.
       account_alias: `ОНЛАЙН ${name} · ${payLabel}${dlv ? " · ДОСТАВКА" : ""}`,
       // Prints on the fiscal receipt, so it is short and says what it is.
-      description: `Поръчка ${ref} · ${dlv ? "ДОСТАВКА WOLT" : "ВЗЕМАНЕ ОТ МЯСТО"}`,
+      description: `Поръчка ${ref} · ${dlv ? DLV_LABEL : "ВЗЕМАНЕ ОТ МЯСТО"}`,
       // Само това, което клиентът е написал в „Забележка" на сайта — нищо друго.
       // Начинът на плащане вече стои в колона „Начин" на касата, затова „Плащане:
       // …" тук е излишно и цапа Бележката. Празно, ако няма забележка.
@@ -1133,7 +1141,9 @@ module.exports = async function handler(req, res) {
   // след плащането. В брой (наложен платеж) — създаваме я веднага.
   let trackingUrl = null;
   let deliveryStatus = null;
-  if (dlv) {
+  if (dlv && COURIER_MODE) {
+    deliveryStatus = "courier_pending";   // предаването на куриера е ръчно (инструмента)
+  } else if (dlv) {
     await woltOrder.saveRow({
       ref: ref, account_id: accountId, status: pay === "card" ? "pending_payment" : "creating", pay: pay,
       name: name, phone: phone, address: dlv.text, details: dlv.details || null, lat: dlv.lat, lon: dlv.lon,
