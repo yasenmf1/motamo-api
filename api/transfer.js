@@ -1509,6 +1509,15 @@ module.exports = async function handler(req, res) {
     return;
   }
   // ★ S34 — Часове за заплата: сутрешен отчет за вчера към собственика (cron, UTC → часът се проверява в кода).
+  // ★ S36 — сутрешно време + позитивна мисъл (7:00 София; Vercel cron е в UTC → две записи, run() праща само в 7 ч).
+  if (req.method === "GET" && q.cron === "weather") {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try { res.status(200).json(await require("../lib/weather.js").run({})); } catch (e) { res.status(502).json({ ok: false, error: "weather_failed", message: String(e && e.message).slice(0, 160) }); }
+    return;
+  }
   if (req.method === "GET" && q.cron === "tc_report") {
     const auth = String(req.headers && (req.headers.authorization || "") || "");
     const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
