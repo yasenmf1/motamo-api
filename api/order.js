@@ -66,7 +66,7 @@ const DELIVERY_FREE_FROM_EUR = 30.00;
 const DELIVERY_MIN_EUR = 15.00;   // минимална поръчка за доставка, без таксата
 const DELIVERY_FEE_ARTICLE_ID = Number(process.env.COURIER_FEE_ARTICLE_ID || process.env.WOLT_FEE_ARTICLE_ID) || 0;
 const DLV_LABEL = COURIER_MODE ? "ДОСТАВКА КУРИЕР" : "ДОСТАВКА WOLT";
-const DELIVERY_CUTOFF_MIN = 20 * 60 + 30;   // последна поръчка (доставка и вземане) до 20:30
+const DELIVERY_CUTOFF_MIN = 18 * 60 + 50;   // последна поръчка (доставка и вземане) до 18:50 (20:30 е за ноември)
 
 // Kept in sync with the pricelist so the site can show the price the POS will
 // charge. Barsy rounds half-up at two decimals — verified against every computed
@@ -95,7 +95,7 @@ const OPEN_DAYS = new Set(["Mon", "Tue", "Wed", "Thu", "Fri"]);
 // нея. 28.08.2026 беше първият такъв ден и е махнат оттук, след като мина.
 const CLOSED_DAYS = new Set([]);
 const OPEN_FROM_MIN = 11 * 60;
-const OPEN_TO_MIN = 20 * 60 + 30;
+const OPEN_TO_MIN = 18 * 60 + 50;   // 20:30 е подготвено за ноември, не е пуснато
 
 // Caps stop fat-fingered quantity steppers and casual pranks from reaching the
 // kitchen. Not a security boundary — Barsy's own storefront is public with the
