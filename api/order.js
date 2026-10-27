@@ -61,8 +61,9 @@ const woltOrder = require("../lib/wolt-order");
 const COURIER_MODE = process.env.COURIER_DELIVERY === "1";
 const DELIVERY_ENABLED = COURIER_MODE || process.env.WOLT_DELIVERY === "1";
 const DELIVERY_CASH = COURIER_MODE || process.env.WOLT_CASH === "1";
-const DELIVERY_FEE_EUR = 4.00;
+const DELIVERY_FEE_EUR = 3.00;
 const DELIVERY_FREE_FROM_EUR = 30.00;
+const DELIVERY_MIN_EUR = 15.00;   // минимална поръчка за доставка, без таксата
 const DELIVERY_FEE_ARTICLE_ID = Number(process.env.COURIER_FEE_ARTICLE_ID || process.env.WOLT_FEE_ARTICLE_ID) || 0;
 const DLV_LABEL = COURIER_MODE ? "ДОСТАВКА КУРИЕР" : "ДОСТАВКА WOLT";
 const DELIVERY_CUTOFF_MIN = 20 * 60 + 30;   // последна поръчка (доставка и вземане) до 20:30
@@ -579,7 +580,8 @@ function isCardAccount(a) {
 }
 // S28 (06.10): статусите на Barsy (Accounts_servicestatusgetlist): 0 Нова · 1 Чака плащане ·
 // 2 Чака одобрение · 3 За обслужване · 4 Обслужена · 5 В куриер · 6 Доставена · 100 Отказана.
-// Таблетът „Модул каса“ ги мести; клиентът вижда: pending → preparing → ready → done / cancelled.
+// Таблетът „Модул каса“ ги мести; клиентът вижда: pending → preparing → ready → done / cancelled;
+// при доставка 5 „В куриер“ = courier (предадена на куриера), 6 „Доставена“ = done.
 function accountState(a) {
   const card = isCardAccount(a);
   const sid = a.service_status_id != null ? Number(a.service_status_id) : null;
@@ -587,7 +589,9 @@ function accountState(a) {
   if (sid === 100 || /отказ|анулир/i.test(svc)) return "cancelled";
   if (!card && a.close_date) return "done";
   if (sid === 3 || /за обслужване|готв|приготв/i.test(svc)) return "preparing";
-  if (sid === 4 || sid === 5 || sid === 6 || /обслужена|готов|изпълн|прикл|достав/i.test(svc)) return "ready";
+  if (sid === 6 || /достав/i.test(svc)) return "done";
+  if (sid === 5 || /куриер/i.test(svc)) return "courier";
+  if (sid === 4 || /обслужена|готов|изпълн|прикл/i.test(svc)) return "ready";
   if (sid === 0 || sid === 1 || sid === 2 || /одобр|чака|нов/i.test(svc)) return "pending";
   return a.close_date ? "ready" : "accepted";
 }
@@ -896,10 +900,14 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // Такса за доставка — сметната ТУК, не от браузъра: 4 € под 30 € храна, иначе 0.
-  // Ред с артикула „Доставка" (цена 4,00 в ценоразписа на Barsy, иначе Barsy отказва).
+  // Такса за доставка — сметната ТУК, не от браузъра: 3 € под 30 € храна, иначе 0.
+  // Ред с артикула „Доставка" (цена 3,00 в ценоразписа на Barsy, иначе Barsy отказва).
   let feeEur = 0;
   const foodDueTotal = Number((dueCentsTotal / 100).toFixed(2));
+  if (dlv && !previewing && foodDueTotal < DELIVERY_MIN_EUR) {
+    fail(res, 409, "delivery_min", "Delivery needs a minimum order of " + DELIVERY_MIN_EUR + " EUR");
+    return;
+  }
   if (dlv) {
     feeEur = foodDueTotal >= DELIVERY_FREE_FROM_EUR ? 0 : DELIVERY_FEE_EUR;
     if (feeEur > 0) {
