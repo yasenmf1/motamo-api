@@ -63,14 +63,13 @@ const COURIER_MODE = process.env.COURIER_DELIVERY === "1";
 const DELIVERY_ENABLED = COURIER_MODE || process.env.WOLT_DELIVERY === "1";
 const DELIVERY_CASH = COURIER_MODE || process.env.WOLT_CASH === "1";
 const DELIVERY_FEE_EUR = 3.00;
-// Квартали с особено правило (огледало на index.html): Лозенец — няма доставка; Зора — фиксирана такса 6 € (без безплатна доставка).
+// Кв. Зора е далечна дестинация (огледало на index.html): фиксирана такса 6 € (без безплатна доставка).
 const DELIVERY_FEE_ZORA_EUR = 6.00;
 const DLV_ZONES = [
-  { k: "lozenets", lat: 42.4304, lon: 25.6038, r: 700 },
   { k: "zora", lat: 42.4267, lon: 25.6867, r: 700 }
 ];
 function dlvZoneOf(hint, lat, lon) {
-  if (hint === "lozenets" || hint === "zora") return hint;
+  if (hint === "zora") return hint;
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return "";
   for (const z of DLV_ZONES) {
     const x = (lat - z.lat) * Math.PI / 180, y = (lon - z.lon) * Math.PI / 180 * Math.cos(z.lat * Math.PI / 180);
@@ -799,10 +798,6 @@ module.exports = async function handler(req, res) {
       return;
     }
     const zone = dlvZoneOf(String(a.zone || ""), coordsOk ? lat : NaN, coordsOk ? lon : NaN);
-    if (zone === "lozenets") {
-      fail(res, 409, "delivery_lozenets", "No delivery to the Lozenets district");
-      return;
-    }
     dlv = { zone: zone, street: sanitizeText(a.street, 120), number: sanitizeText(a.number, 12), lat: coordsOk ? lat : null, lon: coordsOk ? lon : null, text: text, details: details,
             promise_id: typeof body.promise_id === "string" ? body.promise_id.slice(0, 80) : "" };
   }
