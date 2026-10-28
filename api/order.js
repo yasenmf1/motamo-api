@@ -63,6 +63,21 @@ const COURIER_MODE = process.env.COURIER_DELIVERY === "1";
 const DELIVERY_ENABLED = COURIER_MODE || process.env.WOLT_DELIVERY === "1";
 const DELIVERY_CASH = COURIER_MODE || process.env.WOLT_CASH === "1";
 const DELIVERY_FEE_EUR = 3.00;
+// Квартали с особено правило (огледало на index.html): Лозенец — няма доставка; Зора — фиксирана такса 6 € (без безплатна доставка).
+const DELIVERY_FEE_ZORA_EUR = 6.00;
+const DLV_ZONES = [
+  { k: "lozenets", lat: 42.4304, lon: 25.6038, r: 700 },
+  { k: "zora", lat: 42.4267, lon: 25.6867, r: 700 }
+];
+function dlvZoneOf(hint, lat, lon) {
+  if (hint === "lozenets" || hint === "zora") return hint;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return "";
+  for (const z of DLV_ZONES) {
+    const x = (lat - z.lat) * Math.PI / 180, y = (lon - z.lon) * Math.PI / 180 * Math.cos(z.lat * Math.PI / 180);
+    if (Math.sqrt(x * x + y * y) * 6371000 <= z.r) return z.k;
+  }
+  return "";
+}
 const DELIVERY_FREE_FROM_EUR = 30.00;
 const DELIVERY_MIN_EUR = 15.00;   // минимална поръчка за доставка, без таксата
 const DELIVERY_FEE_ARTICLE_ID = Number(process.env.COURIER_FEE_ARTICLE_ID || process.env.WOLT_FEE_ARTICLE_ID) || 0;
@@ -783,7 +798,12 @@ module.exports = async function handler(req, res) {
       fail(res, 400, "delivery_quote_expired", "Address check missing or expired");
       return;
     }
-    dlv = { street: sanitizeText(a.street, 120), number: sanitizeText(a.number, 12), lat: coordsOk ? lat : null, lon: coordsOk ? lon : null, text: text, details: details,
+    const zone = dlvZoneOf(String(a.zone || ""), coordsOk ? lat : NaN, coordsOk ? lon : NaN);
+    if (zone === "lozenets") {
+      fail(res, 409, "delivery_lozenets", "No delivery to the Lozenets district");
+      return;
+    }
+    dlv = { zone: zone, street: sanitizeText(a.street, 120), number: sanitizeText(a.number, 12), lat: coordsOk ? lat : null, lon: coordsOk ? lon : null, text: text, details: details,
             promise_id: typeof body.promise_id === "string" ? body.promise_id.slice(0, 80) : "" };
   }
 
@@ -953,14 +973,15 @@ module.exports = async function handler(req, res) {
     return;
   }
   if (dlv) {
-    feeEur = foodDueTotal >= DELIVERY_FREE_FROM_EUR ? 0 : DELIVERY_FEE_EUR;
+    feeEur = dlv.zone === "zora" ? DELIVERY_FEE_ZORA_EUR : (foodDueTotal >= DELIVERY_FREE_FROM_EUR ? 0 : DELIVERY_FEE_EUR);
     if (feeEur > 0) {
       if (!DELIVERY_FEE_ARTICLE_ID) {
         console.error(JSON.stringify({ event: "delivery_fee_article_missing" }));
         fail(res, 503, "delivery_unavailable", "Delivery fee article is not configured");
         return;
       }
-      rows.push({ article_id: DELIVERY_FEE_ARTICLE_ID, amount: 1, original_current_price: feeEur });
+      // артикулът „Доставка“ е с цена 3,00 в Barsy — 6 € = 2 × 3,00
+      rows.push({ article_id: DELIVERY_FEE_ARTICLE_ID, amount: Math.max(1, Math.round(feeEur / DELIVERY_FEE_EUR)), original_current_price: DELIVERY_FEE_EUR });
       baseCentsTotal += Math.round(feeEur * 100);
       dueCentsTotal += Math.round(feeEur * 100);
     }
