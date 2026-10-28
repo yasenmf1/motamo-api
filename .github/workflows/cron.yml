@@ -3,7 +3,6 @@ on:
   schedule:
     - cron: '0 6 * * 1-5'
     - cron: '30 6 * * 1-5'
-    - cron: '*/10 6-17 * * 1-6'
   workflow_dispatch:
 jobs:
   rice:
@@ -24,9 +23,3 @@ jobs:
             "https://motamo-api.vercel.app/api/transfer?cron=remind" \
             -H "User-Agent: vercel-cron" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
-  dlvwatch:
-    if: github.event.schedule == '*/10 6-17 * * 1-6'
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          curl -fsS --retry 2 --retry-delay 10 -X GET             "https://motamo-api.vercel.app/api/transfer?cron=dlvwatch"             -H "User-Agent: vercel-cron"             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
