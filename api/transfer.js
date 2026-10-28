@@ -327,6 +327,7 @@ const TG = require("../lib/telegram.js");
 const DRV = require("../lib/driver.js");
 const QC = require("../lib/quality.js");
 const TC = require("../lib/timeclock.js");
+const SAL = require("../lib/salary.js");
 
 // Дни до следващата доставка от този доставчик (0 не се връща — днешният ден е
 // изпуснат). Доставчик без седмичен график чака фиксиран срок.
@@ -1732,6 +1733,14 @@ module.exports = async function handler(req, res) {
       if (q.fmt === "csv") { res.setHeader("Content-Type", "text/csv; charset=utf-8"); res.setHeader("Content-Disposition", `attachment; filename="chasove-${String(q.m || "").replace(/[^0-9-]/g, "") || "mesec"}.csv"`); res.status(200).send(await TC.hoursCsv(q.m)); return; }
       res.setHeader("Content-Type", "text/html; charset=utf-8"); res.status(200).send(await TC.hoursPage(q.k, q.m));
     } catch (e) { res.status(502).send("Грешка при четене на часовете."); }
+    return;
+  }
+
+  // ★ S37 — калкулатор за заплата (само собственик): ?view=salary&k=<salaryKey>
+  if (req.method === "GET" && q.view === "salary") {
+    if (!((SAL.salaryKey() && q.k === SAL.salaryKey()) || isOwner(q.k))) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп.</body>"); return; }
+    res.setHeader("Content-Type", "text/html; charset=utf-8"); res.setHeader("Cache-Control", "no-store");
+    res.status(200).send(SAL.salaryPage());
     return;
   }
 
