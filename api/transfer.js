@@ -1646,9 +1646,21 @@ module.exports = async function handler(req, res) {
         const who = String((cq.from || {}).first_name || (cq.from || {}).username || "").slice(0, 40);
         const hm = new Intl.DateTimeFormat("bg-BG", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
         const done = await GRP.handoffGet(ref);
+        // Проверява реда в Barsy и мести 11 → 12 САМО ако е „Очаква куриер“ (lib/handoff.js); без втори опит при грешка.
+        let hr = null;
+        if (!done) {
+          try { hr = await require("../lib/handoff.js").handoff(ref); }
+          catch (e) { hr = { ok: false, moved: [], skipped: [], text: "Не мога да се свържа с Barsy. Опитай пак след малко." }; }
+        }
+        const allHanded = !!hr && hr.ok && hr.moved.every(m => m.verified) && hr.skipped.every(s => /вече е предадена/.test(s.reason));
+        if (!done && !allHanded) {
+          // нищо не е променено докрай — бутонът остава, човекът получава обяснение
+          await TG.tgApi("answerCallbackQuery", { callback_query_id: cq.id, text: String((hr && hr.text) || "Не успях.").slice(0, 190), show_alert: true });
+          res.status(200).json({ ok: true }); return;
+        }
         if (!done) await GRP.handoffSave(ref, who);
         const by = done ? ((done.payload || {}).by || "") : who;
-        await TG.tgApi("answerCallbackQuery", { callback_query_id: cq.id, text: done ? "Вече е отбелязано." : "Отбелязано: предадена на куриера ✔" });
+        await TG.tgApi("answerCallbackQuery", { callback_query_id: cq.id, text: done ? "Вече е отбелязано." : "Предадена на куриера ✔ (отбелязано и в Barsy)" });
         if (cq.message) {
           const keep = ((cq.message.reply_markup && cq.message.reply_markup.inline_keyboard) || []).filter(r => r.some(b => b.url));
           await TG.tgApi("editMessageReplyMarkup", { chat_id: cq.message.chat.id, message_id: cq.message.message_id,
