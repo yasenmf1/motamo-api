@@ -635,19 +635,30 @@ async function orderStatus(req, res, user, pass) {
   if (!m || m[1].toUpperCase() !== ref) { fail(res, 404, "not_found", "No such order"); return; }
   const created = Date.parse(String(a.create_date || "").replace(" ", "T"));
   if (created && (Date.now() - created) > STATUS_MAX_AGE_MS) { fail(res, 404, "not_found", "No such order"); return; }
-  // Персоналът движи статуса от Каса → Сметки → Текущи поръчки (ред по ред „Поръчано“ → „Изпълнено“),
-  // не от статуса на цялата сметка. Когато ВСИЧКИ редове са изпълнени, храната е готова: за вземане
-  // „ready“, за доставка (D-…) „courier“ — предадена на куриера. Четенето е по възможност: при грешка
-  // остава статусът на сметката.
+  // Персоналът движи статуса от Каса → Сметки → Текущи поръчки, ред по ред. Ходът в Barsy на точката:
+  // Поръчано (1) → Приготвя се (10) → Очаква куриер (11) → Изпълнено. Клиентът вижда най-ранния етап
+  // от редовете (без реда „Доставка“ — таксата не е храна и персоналът не я движи).
+  // Приготвя се → „preparing“; Очаква куриер → „ready“ (за доставка: готова, чака куриера);
+  // Изпълнено → „courier“ при доставка (предадена на куриера) и „ready“ при вземане.
+  // Четенето е по възможност: при грешка остава статусът на сметката.
   let state = accountState(a), lines = null;
   try {
     const ol = await authedCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
-    const rows = ol.ok && Array.isArray(ol.data) ? ol.data : [];
+    const rows = (ol.ok && Array.isArray(ol.data) ? ol.data : []).filter(r => Number(r.article_id) !== DELIVERY_FEE_ARTICLE_ID);
     if (rows.length) {
-      const done = rows.filter(r => /изпълн|готов|обслужен|сервиран/i.test(String(r.order_status_title || ""))).length;
-      lines = { total: rows.length, done: done };
-      if (done === rows.length && (state === "pending" || state === "accepted" || state === "preparing")) {
-        state = /^D-/.test(ref) ? "courier" : "ready";
+      const stage = r => {
+        const t = String(r.order_status_title || "");
+        if (/изпълн|обслужен|сервиран/i.test(t)) return 4;
+        if (/очаква куриер|готов/i.test(t)) return 3;
+        if (/приготв/i.test(t)) return 2;
+        return 1;
+      };
+      const min = Math.min.apply(null, rows.map(stage));
+      lines = { total: rows.length, stage: min };
+      if (state === "pending" || state === "accepted" || state === "preparing") {
+        if (min === 4) state = /^D-/.test(ref) ? "courier" : "ready";
+        else if (min === 3) state = "ready";
+        else if (min === 2) state = "preparing";
       }
     }
   } catch (err) { /* остава статусът на сметката */ }
