@@ -93,6 +93,154 @@
     {
       "path": "/api/transfer?cron=weekend",
       "schedule": "30 17 * * 5"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "0 8 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "15 8 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "30 8 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "45 8 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "0 9 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "15 9 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "30 9 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "45 9 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "0 10 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "15 10 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "30 10 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "45 10 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "0 11 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "15 11 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "30 11 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "45 11 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "0 12 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "15 12 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "30 12 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "45 12 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "0 13 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "15 13 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "30 13 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "45 13 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "0 14 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "15 14 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "30 14 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "45 14 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "0 15 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "15 15 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "30 15 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "45 15 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "0 16 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "15 16 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "30 16 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "45 16 * * 1-6"
+    },
+    {
+      "path": "/api/transfer?cron=dlvwatch",
+      "schedule": "0 17 * * 1-6"
     }
   ],
   "rewrites": [
