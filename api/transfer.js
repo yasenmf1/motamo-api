@@ -1926,6 +1926,15 @@ module.exports = async function handler(req, res) {
     } catch (e) { res.status(200).json({ ok: false, error: String(e && e.message).slice(0, 120) }); }
     return;
   }
+  // ★ S37 — праща САМО на собственика съобщение с бутона „Предадена на куриера“ за дадена D- поръчка (за ръчна проба)
+  if (body.action === "dlv_btn") {
+    const ref = String(body.ref || "").toUpperCase();
+    if (!/^D-[A-Z0-9]{4,8}$/.test(ref)) { res.status(400).json({ ok: false, error: "bad_ref" }); return; }
+    const r = await TG.tgSend(`🛵 <b>Проба — поръчка ${TG.escHtml(ref)}</b>
+Натисни, за да я отбележиш „Предадена на куриера“ (и в Barsy).`, TG.OWNER_CHAT_ID, undefined,
+      { inline_keyboard: [[{ text: "🛵 Предадена на куриера", callback_data: "hd:" + ref }]] });
+    res.status(200).json({ ok: !!(r && r.ok) }); return;
+  }
   // ★ S37 — РЕАЛНО предаване на куриера от ръчен тест (пълен ключ, не PEEK): същата проверка като бутона в групата
   if (body.action === "dlv_handoff") {
     const ref = String(body.ref || "").toUpperCase();
