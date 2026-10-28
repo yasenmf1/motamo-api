@@ -1226,7 +1226,7 @@ module.exports = async function handler(req, res) {
         ? { g: `https://www.google.com/maps/search/?api=1&query=${dlv.lat},${dlv.lon}`, w: `https://waze.com/ul?ll=${dlv.lat},${dlv.lon}&navigate=yes` }
         : { g: `https://www.google.com/maps/search/?api=1&query=${q}`, w: `https://waze.com/ul?q=${q}&navigate=yes` };
       const E = TG.escHtml;
-      const text = `🛵 <b>ДОСТАВКА ${E(ref)}</b>\n`
+      const text = `🛵 <b>ДОСТАВКА ${E(ref)}</b>${accountId ? " · сметка №" + E(accountId) : ""}\n`
         + `📍 ${E(dlv.text)}${dlv.details ? "\n🚪 " + E(dlv.details) : ""}\n`
         + `📞 ${E(phone)} · ${E(name)}\n`
         + `💶 ${dueTotal.toFixed(2)} € · ${E(payLabel)}${pay === "cash" ? " (на куриера)" : ""}`
