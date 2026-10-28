@@ -649,7 +649,7 @@ async function orderStatus(req, res, user, pass) {
     if (rows.length) {
       const stage = r => {
         const t = String(r.order_status_title || "");
-        if (/изпълн|обслужен|сервиран/i.test(t)) return 4;
+        if (/изпълн|обслужен|сервиран|предадена/i.test(t)) return 4;   // „Предадена на Куриер“ (код 12) = предадена на куриера
         if (/очаква куриер|готов/i.test(t)) return 3;
         if (/приготв/i.test(t)) return 2;
         return 1;
