@@ -54,7 +54,7 @@ const PICKUP_CLIENT_ID = 7;
 // DELIVERY_* в index.html. Виж docs/WOLT_DRIVE_API.md в motamo_site.
 const wolt = require("../lib/wolt");
 const woltOrder = require("../lib/wolt-order");
-const TG = require("../lib/telegram.js");
+const GRP = require("../lib/orders-group.js");
 // Собствена куриерска фирма (S36): COURIER_DELIVERY=1 включва доставка БЕЗ Wolt —
 // без promise_id, наложен платеж на куриера позволен; поръчката влиза в Barsy с
 // адреса в бележката, а предаването на куриера става ръчно (бутон в инструмента).
@@ -1223,26 +1223,11 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  // Доставка със собствен куриер: адресът, телефонът и номерът отиват в Telegram групата „МОТАМО поръчки“,
-  // за да не се влиза в Barsy, когато се вика куриер. Не пречи на поръчката — грешка/бавен отговор се прескача.
-  if (dlv && COURIER_MODE && TG.ORDERS_CHAT_ID) {
-    try {
-      const q = encodeURIComponent(dlv.text);
-      const nav = (dlv.lat != null && dlv.lon != null)
-        ? { g: `https://www.google.com/maps/search/?api=1&query=${dlv.lat},${dlv.lon}`, w: `https://waze.com/ul?ll=${dlv.lat},${dlv.lon}&navigate=yes` }
-        : { g: `https://www.google.com/maps/search/?api=1&query=${q}`, w: `https://waze.com/ul?q=${q}&navigate=yes` };
-      const E = TG.escHtml;
-      const text = `🛵 <b>ДОСТАВКА ${E(ref)}</b>${accountId ? " · сметка №" + E(accountId) : ""}\n`
-        + `📍 ${E(dlv.text)}${dlv.details ? "\n🚪 " + E(dlv.details) : ""}\n`
-        + `📞 ${E(phone)} · ${E(name)}\n`
-        + `💶 ${dueTotal.toFixed(2)} € · ${E(payLabel)}${pay === "cash" ? " (на куриера)" : ""}`
-        + (note ? `\n📝 ${E(note)}` : "");
-      await Promise.race([
-        TG.tgSend(text, TG.ORDERS_CHAT_ID, null, { inline_keyboard: [[{ text: "🗺 Google Maps", url: nav.g }, { text: "🚗 Waze", url: nav.w }]] }),
-        new Promise(r => setTimeout(r, 2500))
-      ]);
-    } catch (err) { console.error(JSON.stringify({ event: "orders_group_notify_failed", ref: ref, message: String(err && err.message).slice(0, 120) })); }
-  }
+  // Доставка със собствен куриер: адресът, телефонът и номерът отиват в Telegram групата „МОТАМО поръчки“ (lib/orders-group.js).
+  // В БРОЙ — веднага. С КАРТА — чак след потвърдено плащане (api/pay-return.js); ако онлайн плащането не може да се стартира,
+  // съобщаваме по-долу, че картата се плаща при куриера.
+  const groupInfo = dlv && COURIER_MODE ? { ref: ref, accountId: accountId, address: dlv.text, details: dlv.details, lat: dlv.lat, lon: dlv.lon, phone: phone, name: name, total: dueTotal, pay: pay, note: note } : null;
+  if (groupInfo && pay !== "card") await GRP.notify(groupInfo);
 
   let paymentUrl = null;
   if (ONLINE_CARD && pay === "card" && accountId && DIRECT_DSK) {
@@ -1322,6 +1307,8 @@ module.exports = async function handler(req, res) {
     }
   }
 
+  // Картата не успя да тръгне онлайн → клиентът плаща с карта на куриера: групата трябва да знае.
+  if (groupInfo && pay === "card" && !paymentUrl) await GRP.notify(groupInfo);
   await saveAttribution(ref, dueTotal, pay, body.attr);
   res.status(200).json({
     ok: true,

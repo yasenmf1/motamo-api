@@ -24,6 +24,7 @@
 
 const crypto = require("crypto");
 const woltOrder = require("../lib/wolt-order");
+const GRP = require("../lib/orders-group.js");
 
 const BARSY_API = "https://motamoshop.barsy.online";
 const BARSY_ID = 1;
@@ -146,6 +147,17 @@ module.exports = async function handler(req, res) {
   // Поръчка без ред в wolt_deliveries (вземане от място) → not_found → нищо.
   // Провал тук НЕ спира потвърждението: храната се прави, персоналът звъни.
   const afterPaid = async () => {
+    // Доставка със собствен куриер, платена с карта: СЕГА (след потвърдено плащане) пращаме адреса в групата „МОТАМО поръчки“.
+    if (/^D-/.test(ref) && process.env.COURIER_DELIVERY === "1") {
+      try {
+        const g = await authedCall("Accounts_get", { account_id: Number(acct) }, process.env.BARSY_USER, process.env.BARSY_PASS);
+        const a = g.ok && g.data ? (Array.isArray(g.data) ? g.data[0] : g.data) : null;
+        if (a) await GRP.notify(GRP.fromAccount(a, ref, { paid: true, pay: "card" }));
+        else console.error(JSON.stringify({ event: "payreturn_group_no_account", ref: ref, acct: acct }));
+      } catch (err) {
+        console.error(JSON.stringify({ event: "payreturn_group_error", ref: ref, message: String(err && err.message).slice(0, 120) }));
+      }
+    }
     try {
       const made = await woltOrder.createDeliveryForRef(ref);
       if (!made.ok && made.code !== "not_found") console.error(JSON.stringify({ event: "payreturn_wolt_failed", ref: ref, code: made.code }));
