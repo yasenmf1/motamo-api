@@ -1622,6 +1622,11 @@ module.exports = async function handler(req, res) {
     const skladBtn = () => ({ inline_keyboard: [[{ text: "🏠 Начало (склад)", url: `${base}?view=home&k=${TG.skladKey()}` }], [{ text: "📥 Заявки от точката", url: `${base}?view=cex&k=${TG.skladKey()}` }, { text: "📤 Изпрати към точката", url: `${base}?view=push&k=${TG.skladKey()}` }], [{ text: "🏭 Производство", url: `${base}?view=produce&k=${TG.skladKey()}` }, { text: "🛒 Поръчка", url: `${base}?view=order&k=${TG.skladKey()}` }], [{ text: "🧾 Склад", url: `${base}?view=stock&k=${staffKey()}` }]] });
     const ROLE_BG = { tochka: "Точка", sklad: "Склад (цех)", shofior: "Шофьор", owner: "Собственик", none: "без роля" };
     try {
+      // /id — връща ID на чата (за да вържем нова група, напр. „МОТАМО поръчки“). Безвредно: ID на чат не е тайна.
+      if (up.message && /^\/id(@\w+)?$/i.test(String(up.message.text || "").trim()) && up.message.chat) {
+        await TG.tgApi("sendMessage", { chat_id: up.message.chat.id, text: "ID на този чат: " + up.message.chat.id });
+        res.status(200).json({ ok: true }); return;
+      }
       // ★ S34 — часове за заплата: бутони „Отмени" и „Кой отбелязва часове" (екип)
       if (up.callback_query && /^(tc|ts):/.test(String(up.callback_query.data || ""))) {
         await TC.handleCallback(up.callback_query, String((up.callback_query.from || {}).id) === TG.OWNER_CHAT_ID, (req.headers && req.headers.host) || "motamo-api.vercel.app");
