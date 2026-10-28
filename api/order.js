@@ -656,8 +656,14 @@ async function orderStatus(req, res, user, pass) {
       };
       const min = Math.min.apply(null, rows.map(stage));
       lines = { total: rows.length, stage: min };
-      if (state === "pending" || state === "accepted" || state === "preparing") {
-        if (min === 4) state = /^D-/.test(ref) ? "courier" : "ready";
+      if (/^D-/.test(ref)) {
+        // Доставка: редовете са единственият източник — затварянето на сметката (плащане/наложен платеж)
+        // не бива да изпреварва „Очаква куриер“. Изключение: отказана сметка и ръчно сложен статус 6.
+        if (state !== "cancelled" && !(Number(a.service_status_id) === 6)) {
+          state = min === 4 ? "courier" : min === 3 ? "ready" : min === 2 ? "preparing" : (state === "pending" ? "pending" : "accepted");
+        }
+      } else if (state === "pending" || state === "accepted" || state === "preparing") {
+        if (min === 4) state = "ready";
         else if (min === 3) state = "ready";
         else if (min === 2) state = "preparing";
       }
