@@ -635,10 +635,27 @@ async function orderStatus(req, res, user, pass) {
   if (!m || m[1].toUpperCase() !== ref) { fail(res, 404, "not_found", "No such order"); return; }
   const created = Date.parse(String(a.create_date || "").replace(" ", "T"));
   if (created && (Date.now() - created) > STATUS_MAX_AGE_MS) { fail(res, 404, "not_found", "No such order"); return; }
+  // Персоналът движи статуса от Каса → Сметки → Текущи поръчки (ред по ред „Поръчано“ → „Изпълнено“),
+  // не от статуса на цялата сметка. Когато ВСИЧКИ редове са изпълнени, храната е готова: за вземане
+  // „ready“, за доставка (D-…) „courier“ — предадена на куриера. Четенето е по възможност: при грешка
+  // остава статусът на сметката.
+  let state = accountState(a), lines = null;
+  try {
+    const ol = await authedCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
+    const rows = ol.ok && Array.isArray(ol.data) ? ol.data : [];
+    if (rows.length) {
+      const done = rows.filter(r => /изпълн|готов|обслужен|сервиран/i.test(String(r.order_status_title || ""))).length;
+      lines = { total: rows.length, done: done };
+      if (done === rows.length && (state === "pending" || state === "accepted" || state === "preparing")) {
+        state = /^D-/.test(ref) ? "courier" : "ready";
+      }
+    }
+  } catch (err) { /* остава статусът на сметката */ }
   res.status(200).json({
     ok: true,
     ref: ref,
-    state: accountState(a),
+    state: state,
+    lines: lines,
     closed: !!a.close_date,
     card: isCardAccount(a),
     service_status_id: a.service_status_id != null ? a.service_status_id : null,
