@@ -1636,6 +1636,26 @@ module.exports = async function handler(req, res) {
         await TG.tgApi("sendMessage", { chat_id: up.message.chat.id, text: "ID на този чат: " + up.message.chat.id });
         res.status(200).json({ ok: true }); return;
       }
+      // ★ S37 — бутон „🛵 Предадена на куриера“ в групата „МОТАМО поръчки“ (callback `hd:<D-номер>`).
+      if (up.callback_query && /^hd:/.test(String(up.callback_query.data || ""))) {
+        const cq = up.callback_query, GRP = require("../lib/orders-group.js");
+        const ref = String(cq.data).slice(3).trim().toUpperCase();
+        const fromChat = String((cq.message && cq.message.chat && cq.message.chat.id) || "");
+        const okChat = (TG.ORDERS_CHAT_ID && fromChat === TG.ORDERS_CHAT_ID) || String((cq.from || {}).id) === TG.OWNER_CHAT_ID;
+        if (!/^D-[A-Z0-9]{4,8}$/.test(ref) || !okChat) { await TG.tgApi("answerCallbackQuery", { callback_query_id: cq.id, text: "Няма достъп." }); res.status(200).json({ ok: true }); return; }
+        const who = String((cq.from || {}).first_name || (cq.from || {}).username || "").slice(0, 40);
+        const hm = new Intl.DateTimeFormat("bg-BG", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
+        const done = await GRP.handoffGet(ref);
+        if (!done) await GRP.handoffSave(ref, who);
+        const by = done ? ((done.payload || {}).by || "") : who;
+        await TG.tgApi("answerCallbackQuery", { callback_query_id: cq.id, text: done ? "Вече е отбелязано." : "Отбелязано: предадена на куриера ✔" });
+        if (cq.message) {
+          const keep = ((cq.message.reply_markup && cq.message.reply_markup.inline_keyboard) || []).filter(r => r.some(b => b.url));
+          await TG.tgApi("editMessageReplyMarkup", { chat_id: cq.message.chat.id, message_id: cq.message.message_id,
+            reply_markup: { inline_keyboard: [[{ text: `✅ Предадена на куриера · ${by}${done ? "" : " · " + hm}`, callback_data: "hd:done" }]].concat(keep) } });
+        }
+        res.status(200).json({ ok: true }); return;
+      }
       // ★ S34 — часове за заплата: бутони „Отмени" и „Кой отбелязва часове" (екип)
       if (up.callback_query && /^(tc|ts):/.test(String(up.callback_query.data || ""))) {
         await TC.handleCallback(up.callback_query, String((up.callback_query.from || {}).id) === TG.OWNER_CHAT_ID, (req.headers && req.headers.host) || "motamo-api.vercel.app");

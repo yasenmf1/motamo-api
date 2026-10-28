@@ -642,7 +642,7 @@ async function orderStatus(req, res, user, pass) {
   // Приготвя се → „preparing“; Очаква куриер → „ready“ (за доставка: готова, чака куриера);
   // Изпълнено → „courier“ при доставка (предадена на куриера) и „ready“ при вземане.
   // Четенето е по възможност: при грешка остава статусът на сметката.
-  let state = accountState(a), lines = null;
+  let state = accountState(a), lines = null, handoff = false;
   try {
     const ol = await authedCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
     const rows = (ol.ok && Array.isArray(ol.data) ? ol.data : []).filter(r => Number(r.article_id) !== DELIVERY_FEE_ARTICLE_ID);
@@ -669,6 +669,10 @@ async function orderStatus(req, res, user, pass) {
       }
     }
   } catch (err) { /* остава статусът на сметката */ }
+  // Бутонът „Предадена на куриера“ в групата „МОТАМО поръчки“ (записва се при нас, не в Barsy) — най-високият етап за доставка.
+  if (/^D-/.test(ref) && state !== "cancelled" && state !== "courier" && state !== "done") {
+    try { if (await GRP.handoffGet(ref)) { state = "courier"; handoff = true; } } catch (err) { /* без бутон — остава статусът от редовете */ }
+  }
   // Доставка: затварянето на сметката е вътрешно (плащане в брой/карта при куриера) и не значи „доставена“ —
   // не знаем кога куриерът е стигнал. Най-високото, което клиентът вижда, е „предадена на куриера“;
   // „Доставена“ само ако персоналът изрично е сложил статус 6.
@@ -678,6 +682,7 @@ async function orderStatus(req, res, user, pass) {
     ref: ref,
     state: state,
     lines: lines,
+    handoff: handoff || undefined,
     closed: !!a.close_date,
     card: isCardAccount(a),
     service_status_id: a.service_status_id != null ? a.service_status_id : null,
