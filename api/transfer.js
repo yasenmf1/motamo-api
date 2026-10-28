@@ -1773,8 +1773,9 @@ module.exports = async function handler(req, res) {
   // ★ S37 — калкулатор за заплата (само собственик): ?view=salary&k=<salaryKey>
   // ★ S37 — автоматично записване на калкулатора за заплати (load/save в Supabase; заключено с ключа на страницата)
   if (q.view === "salary" && (q.op === "load" || q.op === "save")) {
+    // ключ №2 (за счетоводителката Румяна): същите права като на собственика — вижда и променя; данните са общи в Supabase
     const salRo = !!(SAL.salaryRoKey() && q.k === SAL.salaryRoKey());
-    if (!((SAL.salaryKey() && q.k === SAL.salaryKey()) || isOwner(q.k) || (salRo && q.op === "load"))) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    if (!((SAL.salaryKey() && q.k === SAL.salaryKey()) || isOwner(q.k) || salRo)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
     res.setHeader("Cache-Control", "no-store");
     try {
       if (q.op === "load" && req.method === "GET") { res.status(200).json(await SAL.dbLoad()); return; }
@@ -1790,7 +1791,7 @@ module.exports = async function handler(req, res) {
     const salRo = !!(SAL.salaryRoKey() && q.k === SAL.salaryRoKey());
     if (!((SAL.salaryKey() && q.k === SAL.salaryKey()) || isOwner(q.k) || salRo)) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп.</body>"); return; }
     res.setHeader("Content-Type", "text/html; charset=utf-8"); res.setHeader("Cache-Control", "no-store");
-    res.status(200).send(SAL.salaryPage(salRo));
+    res.status(200).send(SAL.salaryPage(false));
     return;
   }
 
