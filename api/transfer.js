@@ -1889,7 +1889,7 @@ module.exports = async function handler(req, res) {
   const token = body.token != null ? body.token : q.token;
   // Четящите/диагностичните действия приемат и PEEK_TOKEN (read-only прозорецът за
   // разработка); всичко, което пише, иска пълния токен.
-  const readOnly = ["list", "list_requests", "inspect", "stock_report"].includes(body.action);
+  const readOnly = ["list", "list_requests", "inspect", "stock_report", "dlv_lines"].includes(body.action);
   const allowed = readOnly ? viewTokens.concat([process.env.PEEK_TOKEN].filter(Boolean)) : viewTokens;
   const staff = ["stock_report", "tg_supply"].includes(body.action) && isStaff(token);
   const skladOk = TG.skladKey() && token === TG.skladKey() && ["list", "list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply", "stock_report", "push_to_shop", "list_zag", "qc_save"].includes(body.action);
@@ -1899,6 +1899,19 @@ module.exports = async function handler(req, res) {
   if (body.action === "qc_save") {
     try { const r = await QC.save(body); res.status(r.ok ? 200 : 400).json(r); }
     catch (e) { res.status(502).json({ ok: false, error: "qc_failed", message: String(e && e.message).slice(0, 200) }); }
+    return;
+  }
+  // ★ S37 — само четене: редовете и статусите на една D- поръчка (и „сух“ резултат от бутона за предаване на куриера, без запис)
+  if (body.action === "dlv_lines") {
+    const H = require("../lib/handoff.js"), ref = String(body.ref || "").toUpperCase();
+    if (!/^D-[A-Z0-9]{4,8}$/.test(ref)) { res.status(400).json({ ok: false, error: "bad_ref" }); return; }
+    try {
+      const acc = await H.findAccount(ref);
+      if (!acc) { res.status(200).json({ ok: true, found: false }); return; }
+      const rows = await H.readLines(Number(acc.account_id));
+      const dry = await H.handoff(ref, { dry: true });
+      res.status(200).json({ ok: true, found: true, account_id: acc.account_id, fields: rows[0] ? Object.keys(rows[0]) : [], rows: rows.slice(0, 6), dry });
+    } catch (e) { res.status(200).json({ ok: false, error: String(e && e.message).slice(0, 120) }); }
     return;
   }
   if (!process.env.BARSY_CEX_USER || !process.env.BARSY_USER) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
