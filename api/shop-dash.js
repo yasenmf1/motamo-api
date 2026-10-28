@@ -520,4 +520,4 @@ module.exports = async function handler(req, res) {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.status(200).send(page(data, q.k));
 };
-
+module.exports.shopDashData = shopDashData;

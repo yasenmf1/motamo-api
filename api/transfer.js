@@ -1772,16 +1772,46 @@ module.exports = async function handler(req, res) {
 
   // ★ S37 — калкулатор за заплата (само собственик): ?view=salary&k=<salaryKey>
   // ★ S37 — автоматично записване на калкулатора за заплати (load/save в Supabase; заключено с ключа на страницата)
-  if (q.view === "salary" && (q.op === "load" || q.op === "save")) {
-    // ключ №2 (за счетоводителката Румяна): същите права като на собственика — вижда и променя; данните са общи в Supabase
-    const salRo = !!(SAL.salaryRoKey() && q.k === SAL.salaryRoKey());
-    if (!((SAL.salaryKey() && q.k === SAL.salaryKey()) || isOwner(q.k) || salRo)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+  if (q.view === "salary" && q.op) {
+    const salRo = !!(SAL.salaryRoKey() && q.k === SAL.salaryRoKey());   // ключ №2 (счетоводителката): същите права като собственика
+    const salFull = !!((SAL.salaryKey() && q.k === SAL.salaryKey()) || isOwner(q.k) || salRo);
+    const salSch = !!(SAL.salarySchKey() && q.k === SAL.salarySchKey());   // ключ №3: само присъствена форма, без пари
+    if (!(salFull || (salSch && q.op === "load"))) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
     res.setHeader("Cache-Control", "no-store");
     try {
-      if (q.op === "load" && req.method === "GET") { res.status(200).json(await SAL.dbLoad()); return; }
+      if (q.op === "load" && req.method === "GET") {
+        const r = await SAL.dbLoad();
+        if (salSch && r && r.ok && r.data) {
+          const out = {};
+          Object.keys(r.data).forEach(k => {
+            const pl = (r.data[k] && r.data[k].payload) || {}, v = pl.v;
+            if (k === "motamo-salary-team" && Array.isArray(v)) out[k] = { ...r.data[k], payload: { _t: pl._t, v: v.map(p => [p[0], 0, p[2], "gross", p[4], 0]) } };
+            else if (/^motamo-salary-[0-9]{4}-[0-9]{2}$/.test(k) && v && typeof v === "object") out[k] = { ...r.data[k], payload: { _t: pl._t, v: { ov: v.ov || {}, p: {}, s: v.s || {} } } };
+          });
+          res.status(200).json({ ...r, data: out }); return;
+        }
+        res.status(200).json(r); return;
+      }
       if (q.op === "save" && req.method === "POST") {
         let b = req.body; if (typeof b === "string") { try { b = JSON.parse(b); } catch (e) { b = null; } }
         res.status(200).json(await SAL.dbSave(b && b.key, b && b.payload)); return;
+      }
+      // часове от Telegram бота за месеца: { people:[{name, days:{"2026-10-05": часове}}] }
+      if (q.op === "hours" && req.method === "GET") {
+        const ym = /^[0-9]{4}-[0-9]{2}$/.test(q.ym || "") ? q.ym : null;
+        if (!ym) { res.status(400).json({ ok: false, error: "ym" }); return; }
+        const md = await require("../lib/timeclock.js").monthData(ym, new Date());
+        const by = {};
+        (md.sess || []).forEach(x => { if (!(x.min > 0)) return; const u = by[x.user_id] || (by[x.user_id] = { name: x.name, days: {} }); u.days[x.date] = (u.days[x.date] || 0) + x.min / 60; });
+        res.status(200).json({ ok: true, people: Object.values(by) }); return;
+      }
+      // оборот без ДДС на точката за месеца (Barsy) — за „труд към оборот“
+      if (q.op === "turnover" && req.method === "GET") {
+        const ym = /^[0-9]{4}-[0-9]{2}$/.test(q.ym || "") ? q.ym : null;
+        if (!ym) { res.status(400).json({ ok: false, error: "ym" }); return; }
+        const [yy, mm] = ym.split("-").map(Number), last = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+        const d = await require("./shop-dash.js").shopDashData(`${ym}-01`, `${ym}-${String(last).padStart(2, "0")}`, 0, process.env.BARSY_USER, process.env.BARSY_PASS);
+        res.status(200).json({ ok: !!(d && d.total_neto > 0), neto: d && d.total_neto || 0 }); return;
       }
       res.status(405).json({ ok: false, error: "method" });
     } catch (e) { res.status(200).json({ ok: false, error: "exception", message: String(e && e.message).slice(0, 100) }); }
@@ -1789,9 +1819,31 @@ module.exports = async function handler(req, res) {
   }
   if (req.method === "GET" && q.view === "salary") {
     const salRo = !!(SAL.salaryRoKey() && q.k === SAL.salaryRoKey());
-    if (!((SAL.salaryKey() && q.k === SAL.salaryKey()) || isOwner(q.k) || salRo)) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп.</body>"); return; }
+    const salSch = !!(SAL.salarySchKey() && q.k === SAL.salarySchKey());
+    if (!((SAL.salaryKey() && q.k === SAL.salaryKey()) || isOwner(q.k) || salRo || salSch)) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп.</body>"); return; }
     res.setHeader("Content-Type", "text/html; charset=utf-8"); res.setHeader("Cache-Control", "no-store");
-    res.status(200).send(SAL.salaryPage(false));
+    res.status(200).send(SAL.salaryPage(false, salSch));
+    return;
+  }
+
+  // ★ S37 — напомняния за присъствената форма/ведомостта (GitHub Actions, веднъж дневно): 25-о и последния ден на месеца
+  if (req.method === "GET" && q.cron === "salary_remind") {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try {
+      const TG = require("../lib/telegram.js"), today = TG.sofiaDate(), dd = Number(today.slice(8, 10));
+      const last = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0)).getUTCDate();
+      const force = q.force === "1";
+      let text = null;
+      if (dd === 25 || force) text = "📝 <b>Присъствена форма</b> — време е да я попълниш за този месец (около 25-о). Отвори калкулатора за заплати.";
+      else if (dd === last) text = "🧾 <b>Край на месеца</b> — провери присъствената форма и свали ведомостта (PDF/Excel) за счетоводителката, после затвори месеца.";
+      if (!text) { res.status(200).json({ ok: true, sent: false }); return; }
+      const key = SAL.salaryKey(), markup = key ? { inline_keyboard: [[{ text: "Отвори калкулатора", url: "https://motamo-api.vercel.app/api/transfer?view=salary&k=" + key }]] } : null;
+      const r = await TG.tgSend(text, TG.OWNER_CHAT_ID, today, markup);
+      res.status(200).json({ ok: !!(r && r.ok), sent: true });
+    } catch (e) { res.status(502).json({ ok: false, error: "remind_failed", message: String(e && e.message).slice(0, 120) }); }
     return;
   }
 

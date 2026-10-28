@@ -1,0 +1,16 @@
+# Напомняния за присъствената форма/ведомостта (api/transfer.js ?cron=salary_remind): 25-о и последния ден на месеца.
+# Минава всеки ден в 06:00 UTC (= 08–09 ч в София); сървърът решава дали днес е ден за съобщение.
+name: salary-remind
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS --retry 2 --retry-delay 10 -X GET \
+            "https://motamo-api.vercel.app/api/transfer?cron=salary_remind" \
+            -H "User-Agent: vercel-cron" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
