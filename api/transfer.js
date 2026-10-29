@@ -1648,12 +1648,11 @@ module.exports = async function handler(req, res) {
         const done = await GRP.handoffGet(ref);
         // Проверява реда в Barsy и мести 11 → 12 САМО ако е „Очаква куриер“ (lib/handoff.js); без втори опит при грешка.
         let hr = null;
-        if (!done) {
-          try { hr = await require("../lib/handoff.js").handoff(ref); }
-          catch (e) { hr = { ok: false, moved: [], skipped: [], text: "Не мога да се свържа с Barsy. Опитай пак след малко." }; }
-        }
-        const allHanded = !!hr && hr.ok && hr.moved.every(m => m.verified) && hr.skipped.every(s => /вече е предадена/.test(s.reason));
-        if (!done && !allHanded) {
+        // и при „вече е отбелязано“ пак проверяваме — мести се само ред, който още чака куриер (идемпотентно)
+        try { hr = await require("../lib/handoff.js").handoff(ref); }
+        catch (e) { hr = { ok: false, moved: [], skipped: [], text: "Не мога да се свържа с Barsy. Опитай пак след малко." }; }
+        const allHanded = !!hr && hr.ok && hr.moved.every(m => m.verified) && hr.skipped.every(s => /вече е предадена|вече е изпълнена/.test(s.reason));
+        if (!allHanded && !(done && !(hr && hr.ok))) {
           // нищо не е променено докрай — бутонът остава, човекът получава обяснение
           await TG.tgApi("answerCallbackQuery", { callback_query_id: cq.id, text: String((hr && hr.text) || "Не успях.").slice(0, 190), show_alert: true });
           res.status(200).json({ ok: true }); return;
