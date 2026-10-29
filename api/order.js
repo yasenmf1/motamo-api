@@ -773,6 +773,20 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // Чистене на пробните сметки от горното (само ако псевдонимът им е точно „ПРОБА — не е поръчка“). Маха се с пробата.
+  if (body.action === "promo_cleanup" && process.env.PEEK_TOKEN && body.token === process.env.PEEK_TOKEN) {
+    const out = [];
+    for (const id of (Array.isArray(body.ids) ? body.ids : []).slice(0, 5)) {
+      const g = await authedCall("Accounts_get", { account_id: Number(id) }, user, pass);
+      const alias = g.data && (g.data.account_alias || (g.data.account && g.data.account.account_alias));
+      if (alias !== "ПРОБА — не е поръчка") { out.push({ id, skipped: "alias=" + alias }); continue; }
+      const d = await authedCall(String(body.method || "Accounts_delete"), { account_id: Number(id) }, user, pass);
+      out.push({ id, ok: d.ok, status: d.status, raw: typeof d.raw === "string" ? d.raw.slice(0, 200) : null });
+    }
+    res.status(200).json({ ok: true, out: out });
+    return;
+  }
+
   // --- who is ordering -----------------------------------------------------
   const name = sanitizeText(body.name, MAX_NAME_LEN);
   if (name.length < 2 || !hasLetters(name)) {
