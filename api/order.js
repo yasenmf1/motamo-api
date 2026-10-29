@@ -97,6 +97,16 @@ function discountedCents(baseCents) {
   return Math.floor((baseCents * (100 - PICKUP_DISCOUNT_PCT) + 50) / 100);
 }
 
+// ИТТ (промо код, −30 %): същото правило като в брошурата — цяло евро нагоре (ceil(0,7×цена)), но не повече от
+// редовната цена; под 2,50 € (сосове, добавки, напитки) — точно −30 % до цент. Клиент 5 „ITT служител“ в Barsy.
+// Огледало на `cartTotals` в index.html — двете трябва да дават едно и също число.
+const ITT_CLIENT_ID = 5;
+function ittCents(baseCents, pct) {
+  const k = 100 - pct;
+  if (baseCents < 250) return Math.floor((baseCents * k + 50) / 100);
+  return Math.min(baseCents, Math.ceil(baseCents * k / 10000) * 100);
+}
+
 // Barsy accepts orders Mon–Fri 11:00–20:30 Europe/Sofia. Checked here rather
 // than in the browser: a visitor's clock is not evidence, and the static site
 // can sit in LiteSpeed's cache after the hours change.
@@ -760,33 +770,6 @@ module.exports = async function handler(req, res) {
     res.status(200).json({ ok: true, valid: pct > 0, pct: pct });
     return;
   }
-  // Служебна проба (само с PEEK_TOKEN): какво очаква Barsy за клиент ИТТ. Праща НАРОЧНО грешна цена (0,01) → Barsy
-  // отказва и показва очакваната; нищо не се създава. Маха се след като правилото е установено.
-  if (body.action === "promo_probe" && process.env.PEEK_TOKEN && body.token === process.env.PEEK_TOKEN) {
-    const aid = Number(body.article_id);
-    const r = await authedCall("Accounts_create", {
-      account: { uuid: refToUuid("PRB" + Date.now().toString(36).toUpperCase()), client_id: Number(body.client_id) || 5, contact_name: "ПРОБА", phone: "0000000000",
-        account_alias: "ПРОБА — не е поръчка", description: "ПРОБА", notes: "", delivery_address: { delivery_type: "no" } },
-      rows: [{ article_id: aid, amount: 1, original_current_price: 0.01 }]
-    }, user, pass);
-    res.status(200).json({ ok: r.ok, status: r.status, raw: typeof r.raw === "string" ? r.raw.slice(0, 500) : null });
-    return;
-  }
-
-  // Чистене на пробните сметки от горното (само ако псевдонимът им е точно „ПРОБА — не е поръчка“). Маха се с пробата.
-  if (body.action === "promo_cleanup" && process.env.PEEK_TOKEN && body.token === process.env.PEEK_TOKEN) {
-    const out = [];
-    for (const id of (Array.isArray(body.ids) ? body.ids : []).slice(0, 5)) {
-      const g = await authedCall("Accounts_get", { account_id: Number(id) }, user, pass);
-      const alias = g.data && (g.data.account_alias || (g.data.account && g.data.account.account_alias));
-      if (alias !== "ПРОБА — не е поръчка") { out.push({ id, skipped: "alias=" + alias }); continue; }
-      const d = await authedCall(String(body.method || "Accounts_delete"), { account_id: Number(id) }, user, pass);
-      out.push({ id, ok: d.ok, status: d.status, raw: typeof d.raw === "string" ? d.raw.slice(0, 200) : null });
-    }
-    res.status(200).json({ ok: true, out: out });
-    return;
-  }
-
   // --- who is ordering -----------------------------------------------------
   const name = sanitizeText(body.name, MAX_NAME_LEN);
   if (name.length < 2 || !hasLetters(name)) {
@@ -890,6 +873,14 @@ module.exports = async function handler(req, res) {
 
   const previewing = PREVIEW_TOKEN !== "" && body.preview === PREVIEW_TOKEN;
 
+  // Промо код ИТТ: непразен, но невалиден код → отказ (по-добре, отколкото тихо пълна цена).
+  const promoPct = body.promo ? require("../lib/promo.js").pctFor(body.promo) : 0;
+  if (body.promo && !promoPct) {
+    fail(res, 409, "promo_invalid", "Promo code is not valid");
+    return;
+  }
+  const CLIENT_ID = promoPct ? ITT_CLIENT_ID : PICKUP_CLIENT_ID;
+
   if (!ORDERS_OPEN && !previewing) {
     fail(res, 409, "not_launched", "Online ordering has not started yet");
     return;
@@ -950,7 +941,7 @@ module.exports = async function handler(req, res) {
       return;
     }
     const unitBaseCents = Math.round(article.price * 100);
-    const unitDueCents = discountedCents(unitBaseCents);
+    const unitDueCents = promoPct ? ittCents(unitBaseCents, promoPct) : discountedCents(unitBaseCents);
     baseCentsTotal += unitBaseCents * amount;
     dueCentsTotal += unitDueCents * amount;
 
@@ -1057,7 +1048,7 @@ module.exports = async function handler(req, res) {
       return { article_id: r.article_id, amount: r.amount, original_price: r.original_current_price };
     });
     const orderObj = {
-      client_id: PICKUP_CLIENT_ID,
+      client_id: CLIENT_ID,
       // Нашият W-XXXXX като външен номер на заявката.
       order_num: ref,
       contact_name: name,
@@ -1159,7 +1150,7 @@ module.exports = async function handler(req, res) {
       ref: ref,
       total: dueTotal,
       base_total: baseTotal,
-      discount_pct: PICKUP_DISCOUNT_PCT,
+      discount_pct: promoPct || PICKUP_DISCOUNT_PCT,
       payment: pay,
       client_order_id: clientOrderId,
       online_payment_url: paymentUrl
@@ -1173,7 +1164,7 @@ module.exports = async function handler(req, res) {
       // account, which is stronger than anything the browser can promise on a
       // dropped connection.
       uuid: refToUuid(ref),
-      client_id: PICKUP_CLIENT_ID,
+      client_id: CLIENT_ID,
       contact_name: name,
       phone: phone,
       // The title in the accounts list. It carries the customer's name so staff
@@ -1184,7 +1175,7 @@ module.exports = async function handler(req, res) {
       // one is the `payments` array, which settles and closes the account on
       // creation. So the choice is written where staff will read it — the title
       // in the accounts list, and the first line of the notes.
-      account_alias: `ОНЛАЙН ${name} · ${payLabel}${dlv ? " · ДОСТАВКА" : ""}`,
+      account_alias: `ОНЛАЙН${promoPct ? " ИТТ" : ""} ${name} · ${payLabel}${dlv ? " · ДОСТАВКА" : ""}`,
       // Prints on the fiscal receipt, so it is short and says what it is.
       description: `Поръчка ${ref} · ${dlv ? DLV_LABEL : "ВЗЕМАНЕ ОТ МЯСТО"}`,
       // Само това, което клиентът е написал в „Забележка" на сайта — нищо друго.
@@ -1223,7 +1214,7 @@ module.exports = async function handler(req, res) {
       event: "barsy_rejected",
       ref: ref,
       status: placed.status,
-      client_id: PICKUP_CLIENT_ID,
+      client_id: CLIENT_ID,
       due_total: dueTotal,
       rows: rows,
       barsy: typeof placed.raw === "string" ? placed.raw.slice(0, 600) : null
@@ -1369,7 +1360,7 @@ module.exports = async function handler(req, res) {
     ref: ref,
     total: dueTotal,
     base_total: baseTotal,
-    discount_pct: PICKUP_DISCOUNT_PCT,
+    discount_pct: promoPct || PICKUP_DISCOUNT_PCT,
     payment: pay,
     account_id: accountId,
     online_payment_url: paymentUrl,
