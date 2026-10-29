@@ -754,6 +754,25 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // --- промо код ИТТ: проверка (без поръчка) ---------------------------------
+  if (body.action === "promo") {
+    const pct = require("../lib/promo.js").pctFor(body.code);
+    res.status(200).json({ ok: true, valid: pct > 0, pct: pct });
+    return;
+  }
+  // Служебна проба (само с PEEK_TOKEN): какво очаква Barsy за клиент ИТТ. Праща НАРОЧНО грешна цена (0,01) → Barsy
+  // отказва и показва очакваната; нищо не се създава. Маха се след като правилото е установено.
+  if (body.action === "promo_probe" && process.env.PEEK_TOKEN && body.token === process.env.PEEK_TOKEN) {
+    const aid = Number(body.article_id);
+    const r = await authedCall("Accounts_create", {
+      account: { uuid: refToUuid("PRB" + Date.now().toString(36).toUpperCase()), client_id: Number(body.client_id) || 5, contact_name: "ПРОБА", phone: "0000000000",
+        account_alias: "ПРОБА — не е поръчка", description: "ПРОБА", notes: "", delivery_address: { delivery_type: "no" } },
+      rows: [{ article_id: aid, amount: 1, original_current_price: 0.01 }]
+    }, user, pass);
+    res.status(200).json({ ok: r.ok, status: r.status, raw: typeof r.raw === "string" ? r.raw.slice(0, 500) : null });
+    return;
+  }
+
   // --- who is ordering -----------------------------------------------------
   const name = sanitizeText(body.name, MAX_NAME_LEN);
   if (name.length < 2 || !hasLetters(name)) {
