@@ -1026,6 +1026,13 @@ module.exports = async function handler(req, res) {
     ? [`ДОСТАВКА: ${dlv.text}${dlv.details ? " · " + dlv.details : ""}`, note].filter(Boolean).join("\n")
     : note;
 
+  // Печата се на фискалния бон: при доставка и адрес + телефон, за да ги вижда куриерът. Номерът е ПЪРВИ (търсенето по него).
+  function receiptDesc() {
+    if (!dlv) return `Поръчка ${ref} · ВЗЕМАНЕ ОТ МЯСТО`;
+    const addr = [dlv.street ? dlv.street + (dlv.number ? " " + dlv.number : "") : dlv.text, dlv.details].filter(Boolean).join(", ");
+    return `Поръчка ${ref} · ${DLV_LABEL} · ${addr} · тел. ${phone}`.slice(0, 250);
+  }
+
   // Адресът отива и в полето „Адрес за доставка“ на Barsy (да може да се взима оттам).
   function deliveryAddress() {
     if (!dlv) return { delivery_type: "no" };
@@ -1054,7 +1061,7 @@ module.exports = async function handler(req, res) {
       contact_name: name,
       client_tel: phone,
       // Печата се на фискалната бележка при превръщането в сметка.
-      description: `Поръчка ${ref} · ${dlv ? DLV_LABEL : "ВЗЕМАНЕ ОТ МЯСТО"}`,
+      description: receiptDesc(),
       // Бележката на клиента — не се печата.
       public_notes: orderNotes,
       // Вземане от място, без доставка — както при отворената сметка.
@@ -1177,7 +1184,7 @@ module.exports = async function handler(req, res) {
       // in the accounts list, and the first line of the notes.
       account_alias: `ОНЛАЙН${promoPct ? " ИТТ" : ""} ${name} · ${payLabel}${dlv ? " · ДОСТАВКА" : ""}`,
       // Prints on the fiscal receipt, so it is short and says what it is.
-      description: `Поръчка ${ref} · ${dlv ? DLV_LABEL : "ВЗЕМАНЕ ОТ МЯСТО"}`,
+      description: receiptDesc(),
       // Само това, което клиентът е написал в „Забележка" на сайта — нищо друго.
       // Начинът на плащане вече стои в колона „Начин" на касата, затова „Плащане:
       // …" тук е излишно и цапа Бележката. Празно, ако няма забележка.
