@@ -29,6 +29,7 @@ const HIDDEN_CATEGORY = /алкохол|промоции/i;
 const { sortByProfit } = require("../lib/costs");
 const { allergensFor } = require("../lib/allergens");
 const { parseDescription } = require("../lib/describe");
+const { fetchTree } = require("../lib/barsy-tree");
 
 // Подредбата по печалба важи само за точката. Магазинният каталог е друг —
 // други article_id, друг ценоразпис, себестойности за него няма — така че там
@@ -328,39 +329,28 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  let barsyRes;
+  // Публичен хост → при грешка резервен удостоверен вход (lib/barsy-tree.js). Грешка само ако падат и двата.
+  let got;
   try {
-    barsyRes = await fetch(baseUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ Categories_getalltree: {} })
-    });
+    got = await fetchTree(source);
   } catch (err) {
-    res.status(502).json({ error: "Failed to reach Barsy", details: err.message });
+    res.status(502).json({ error: "Failed to reach Barsy", details: String(err && err.message).slice(0, 160) });
     return;
   }
+  // Резервният отговор се кешира само за минута, за да се върнем бързо към пълния, щом публичният хост се оправи.
+  const cacheHeader = got.via === "public"
+    ? `s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${STALE_SECONDS}`
+    : "s-maxage=60, stale-while-revalidate=0";
+  res.setHeader("X-Menu-Source", got.via);
 
-  if (!barsyRes.ok) {
-    res.status(502).json({ error: `Barsy responded with status ${barsyRes.status}` });
-    return;
-  }
-
-  let data;
-  try {
-    data = await barsyRes.json();
-  } catch (err) {
-    res.status(502).json({ error: "Invalid JSON from Barsy" });
-    return;
-  }
-
-  const tree = (data && data.Categories_getalltree) || {};
+  const tree = got.tree || {};
   const categories = tree.categories || [];
   const rootArticles = tree.articles || [];
 
   // „Учи менюто" — интерактивна обучителна страница (сет → ролки → състав/сосове).
   if (req.query.view === "learn") {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Cache-Control", `s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${STALE_SECONDS}`);
+    res.setHeader("Cache-Control", cacheHeader);
     res.status(200).send(learnPage(buildLearn(categories, rootArticles, source)));
     return;
   }
@@ -417,6 +407,6 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  res.setHeader("Cache-Control", `s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${STALE_SECONDS}`);
+  res.setHeader("Cache-Control", cacheHeader);
   res.status(200).json(menu);
 };

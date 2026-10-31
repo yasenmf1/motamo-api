@@ -1,0 +1,16 @@
+# Проверка на час дали Barsy отговаря (lib/barsy-watch.js → /api/transfer?cron=barsywatch). Telegram само при проблем.
+# 05–18 UTC = 07/08–20/21 ч в София (сървърът сам не буди нощем). Отделен файл — като dlvwatch (Vercel cron е най-много 1×/ден).
+name: barsywatch
+on:
+  schedule:
+    - cron: '7 5-18 * * *'
+  workflow_dispatch:
+jobs:
+  barsywatch:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS --retry 2 --retry-delay 10 -X GET \
+            "https://motamo-api.vercel.app/api/transfer?cron=barsywatch" \
+            -H "User-Agent: vercel-cron" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

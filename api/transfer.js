@@ -1538,6 +1538,15 @@ module.exports = async function handler(req, res) {
     try { res.status(200).json(await require("../lib/dlv-watch.js").run({})); } catch (e) { res.status(502).json({ ok: false, error: "dlvwatch_failed", message: String(e && e.message).slice(0, 160) }); }
     return;
   }
+  // ★ S38 — на час: Barsy отговаря ли (публичен + резервен вход); Telegram само при проблем. GitHub Actions barsywatch.yml.
+  if (req.method === "GET" && q.cron === "barsywatch") {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try { res.status(200).json(await require("../lib/barsy-watch.js").run({})); } catch (e) { res.status(502).json({ ok: false, error: "barsywatch_failed", message: String(e && e.message).slice(0, 160) }); }
+    return;
+  }
   // ★ S36 — сутрешно време + позитивна мисъл (7:00 София; Vercel cron е в UTC → две записи, run() праща само в 7 ч).
   if (req.method === "GET" && q.cron === "weather") {
     const auth = String(req.headers && (req.headers.authorization || "") || "");
