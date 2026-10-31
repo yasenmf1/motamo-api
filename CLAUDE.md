@@ -6,6 +6,7 @@
 
 ## Структура
 - `api/menu.js`, `api/order.js` — сайтът (меню, поръчки → Barsy `Accounts_create`).
+- `lib/barsy-tree.js` — менюто с РЕЗЕРВА (публичен хост → удостоверен вход; заглавие `X-Menu-Source`); `lib/barsy-watch.js` + `.github/workflows/barsywatch.yml` — на час проверка, Telegram само при проблем. Сух тест: `node tools/menu-fallback-test.js`.
 - `api/cex-plan.js` — цех: калкулатор на деня, заявки от магазините, дашборд, Telegram. Най-големият файл.
 - `api/transfer.js` — прехвърляния, часове, заплати (`lib/salary.js`), бот на шофьора.
 - `api/shop-dash.js`, `api/peek.js` (само четене от Barsy), `api/wolt-drive.js`, `api/pay-return.js`, `api/order-settle.js`, `api/reconcile-card.js`.
