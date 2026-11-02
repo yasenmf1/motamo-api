@@ -1756,8 +1756,8 @@ module.exports = async function handler(req, res) {
           const people = rr.ok ? await rr.json() : [];
           const joke = JOKES[Math.floor(Date.parse(TG.sofiaDate() + "T12:00:00Z") / 86400000) % JOKES.length];
           if (!people.length) await TG.tgSend("Няма никой с роля Точка.", String(uid));
-          else if (!/\s+да$/i.test(text)) await TG.tgSend(`😄 Шега за деня:\n\n${joke}\n\nЩе я получат: ${people.map(p => TG.escHtml(p.name || p.user_id)).join(", ")}.\nЗа да я пратя, напиши <b>шега да</b>.`, String(uid));
-          else { for (const p of people) await TG.tgSend(joke, String(p.user_id)); await TG.tgSend(`✅ Шегата е пратена на ${people.length} души.`, String(uid)); }
+          else if (!/\s+да$/i.test(text)) await TG.tgSend(`😄 Шега за деня:\n\n${joke}\n\nЩе я получат: ${people.map(p => TG.escHtml(p.name || p.user_id)).join(", ")} и групата „МОТАМО".\nЗа да я пратя, напиши <b>шега да</b>.`, String(uid));
+          else { for (const p of people) await TG.tgSend(joke, String(p.user_id)); await TG.tgSend(joke, TG.CEX_CHAT_ID); await TG.tgSend(`✅ Шегата е пратена на ${people.length} души и в групата „МОТАМО".`, String(uid)); }
           res.status(200).json({ ok: true }); return;
         }
         if (role === "shofior" || (role === "owner" && (msgU.location || /маршрут/i.test(text)))) {
