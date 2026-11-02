@@ -3381,7 +3381,7 @@ module.exports = async function handler(req, res) {
     const user = SHOP ? process.env.BARSY_USER : process.env.BARSY_CEX_USER, pass = SHOP ? process.env.BARSY_PASS : process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
     const method = String(body.method || "");
-    if (!/^(Reports_[A-Za-z_]+|Store(loads|moves|outs|productions)_(get|getlist)|Articles_(getlist|getlistobject|get|getavailability)|articles_recipe|Depots_getlist)$/.test(method)) { res.status(400).json({ ok: false, error: "method_not_allowed" }); return; }
+    if (!/^(Reports_[A-Za-z_]+|Store(loads|moves|outs|productions)_(get|getlist)|Articles_(getlist|getlistobject|get|getavailability)|articles_recipe|storeloads_edit|storemoves_edit|Depots_getlist)$/.test(method)) { res.status(400).json({ ok: false, error: "method_not_allowed" }); return; }
     try {
       const r = await cexCall(method, body.params || {}, user, pass, SHOP ? "https://motamoshop.barsy.online" : CEX_API);
       res.status(200).json({ ok: r.ok, status: r.status, data: r.data, raw: r.data ? undefined : String(r.raw || "").slice(0, 400) });
