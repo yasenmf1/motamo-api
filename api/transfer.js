@@ -2010,11 +2010,11 @@ module.exports = async function handler(req, res) {
   const token = body.token != null ? body.token : q.token;
   // Четящите/диагностичните действия приемат и PEEK_TOKEN (read-only прозорецът за
   // разработка); всичко, което пише, иска пълния токен.
-  const readOnly = ["list", "list_requests", "inspect", "stock_report", "dlv_lines"].includes(body.action);
+  const readOnly = ["list", "list_requests", "inspect", "stock_report", "dlv_lines", "suggest_request"].includes(body.action);
   const allowed = readOnly ? viewTokens.concat([process.env.PEEK_TOKEN].filter(Boolean)) : viewTokens;
   const staff = ["stock_report", "tg_supply"].includes(body.action) && isStaff(token);
   const skladOk = TG.skladKey() && token === TG.skladKey() && ["list", "list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply", "stock_report", "push_to_shop", "list_zag", "qc_save"].includes(body.action);
-  const pointOk = TG.pointKey() && token === TG.pointKey() && ["list", "create_request", "list_requests"].includes(body.action);
+  const pointOk = TG.pointKey() && token === TG.pointKey() && ["list", "create_request", "list_requests", "suggest_request", "brak_save"].includes(body.action);
   if (!staff && !skladOk && !pointOk && !allowed.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
   // ★ S33 — запис на Контрола на качеството (цех): само добавя редове в `qc_log`, не пипа Barsy.
   if (body.action === "qc_save") {
