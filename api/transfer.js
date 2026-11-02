@@ -210,6 +210,7 @@ function formValues(node) {
   return values;
 }
 
+let SUGG_CACHE = { key: "", at: 0, units: null };   // продажбите за „Предложение" се пазят 10 мин (топъл инстанс)
 function isoMinusDays(n) { const d = new Date(Date.parse(sofiaToday() + "T12:00:00Z") - n * 864e5); return d.toISOString().slice(0, 10); }
 function sofiaToday() {
   const f = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Sofia", year: "numeric", month: "2-digit", day: "2-digit" });
@@ -672,7 +673,7 @@ ${homeBtn(k)}<span class="tabs"><button id="t1" class="on" onclick="tab(1)">Но
 <div class="wrap">
   ${navBar(k, "shop")}
   <div id="msg" class="msg info">Зареждам наличностите…</div>
-  <div id="p1"><table id="tbl"></table></div>
+  <div id="p1"><div style="margin:0 0 8px"><button class="ghost" onclick="suggest()">💡 Предложение</button></div><table id="tbl"></table></div>
   <div id="p2" style="display:none"><div id="days" class="days"></div><div id="hist"></div></div>
   <div id="p3" style="display:none"><p style="margin:6px 0 12px;color:var(--dim);font-size:14px">Вечер: напиши колко е останало от пресните заготовки (кг). Това се записва като брак и утре започваме от 0. Ако не е останало нищо, натисни „Няма брак".</p><table id="brt"></table><div style="display:flex;gap:8px;margin-top:12px"><button id="brsend" onclick="brakSend(false)">Запиши брака</button><button class="ghost" onclick="brakSend(true)">Няма брак</button></div></div>
 </div>
@@ -700,6 +701,11 @@ h+='<tr><td>'+esc(it.name)+(p&&!it.tpl?' <span class="pk">по '+esc(p.name)+' '
 '<td class="num">'+(it.tpl?tplSel(it,d[it.cex_id]):'<input class="q" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-size="'+(p?p.size:'')+'" value="'+(d[it.cex_id]||'')+'" oninput="saveDraft()">'+
 (p?'<div class="conv" id="cv'+it.cex_id+'"></div>':''))+'</td></tr>'});
 $('tbl').innerHTML=h;conv();count()}
+/* 03.11 — „💡 Предложение": попълва полетата (НЕ праща); до всяко пише средната дневна нужда и колко има. Момичетата променят и натискат „Изпрати". */
+function suggest(){msg('Смятам предложение…','info');api({action:'suggest_request'}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}
+var d=draft();(j.suggestions||[]).forEach(function(s){d[s.cex_id]=String(s.input)});try{localStorage.setItem(DRAFT,JSON.stringify(d))}catch(e){}
+render();(j.suggestions||[]).forEach(function(s){var i=document.querySelector('.q[data-id="'+s.cex_id+'"]');if(!i)return;var td=i.parentNode;var n=document.createElement('div');n.className='conv';n.textContent='средно '+String(s.per_day).replace('.',',')+'/ден · има '+String(s.stock).replace('.',',');td.appendChild(n)});
+msg('💡 Предложение за утре: средно на ден за последните '+j.days+' дни ('+j.from+' – '+j.to+') минус наличното, '+j.count+' продукта. Провери, промени и натисни „Изпрати".','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 /* Шаблон: меню с разрешените бройки опаковки; до всяка — колко прави в кг/л/бр. */
 function tplSel(it,cur){var t=it.tpl,h='<select class="q tpl" data-id="'+it.cex_id+'" data-size="'+t.size+'" onchange="saveDraft()"><option value="">—</option>';
 t.choices.forEach(function(c){var base=Math.round(c*t.size*1000)/1000;var lbl=(t.name==='кг'?(String(base).replace('.',',')+' '+esc(it.unit)):(c+' '+esc(c===1?t.name:t.plural)+' · '+String(base).replace('.',',')+' '+esc(it.unit)));h+='<option value="'+c+'"'+(String(cur)===String(c)?' selected':'')+'>'+lbl+'</option>'});
@@ -2160,6 +2166,56 @@ module.exports = async function handler(req, res) {
         pack: x.cex_id === 51 && x.pack ? { ...x.pack, size: ebi.size } : x.pack,
         hint: x.cex_id === 51 ? ("тарелка " + Math.round(ebi.size * 1000) + " г · " + ebi.who + (ebi.lot ? " · партида " + ebi.lot : "")) : (standingIds.has(x.cex_id) && STANDING_ENABLED ? "8 кг идват сутрин · тук поръчай ДОПЪЛНИТЕЛНО" : (x.hint || null)) }))
         .sort((a, b) => (b.zag - a.zag) || ((b.tpl ? 1 : 0) - (a.tpl ? 1 : 0))) });
+      return;
+    }
+
+    // ── 03.11 — „💡 Предложение": колко да поискат за утре = средна дневна нужда от последните 7 пълни дни (продажби × рецепти) − наличното в точката.
+    // Само предлага (попълва полетата); нищо не се праща без „Изпрати". Рецептите са в lib/shop-recipes.js (генерирани от Barsy), продажбите — Reports_sales_by_articles.
+    if (body.action === "suggest_request") {
+      const R = require("../lib/shop-recipes.js").units, DAYS = 7, from = isoMinusDays(DAYS), to = isoMinusDays(1);
+      let units = null;
+      if (SUGG_CACHE.key === from + to && Date.now() - SUGG_CACHE.at < 10 * 60 * 1000) units = SUGG_CACHE.units;
+      const [items, ebi, rep] = await Promise.all([
+        buildList(), ebiTray().catch(() => null),
+        units ? Promise.resolve(null) : (async () => {
+          const by = {};
+          for (let pg = 1; pg <= 6; pg++) {
+            const r = await shopCall("Reports_sales_by_articles", { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { ref_date: [from, to] } });
+            const rows = (r && r.ok && r.data && Array.isArray(r.data.rows)) ? r.data.rows : null;
+            if (!rows) throw new Error("справката за продажби не се прочете");
+            for (const x of rows) by[String(x.article_id)] = (by[String(x.article_id)] || 0) + (Number(x.cnt) || 0);
+            if (rows.length < 50) break;
+          }
+          return by;
+        })().catch(e => ({ __err: String(e && e.message || e) }))
+      ]);
+      if (rep && rep.__err) { res.status(200).json({ ok: false, error: rep.__err }); return; }
+      if (rep) { units = rep; SUGG_CACHE = { key: from + to, at: Date.now(), units }; }
+      const perDay = {};   // точково id → средно на ден
+      for (const [aid, cnt] of Object.entries(units)) {
+        const rc = R[aid]; if (!rc) continue;
+        for (const [sid, q] of Object.entries(rc.leaves)) perDay[sid] = (perDay[sid] || 0) + cnt * q / DAYS;
+      }
+      const suggestions = [];
+      for (const it of items) {
+        if (it.missing || !it.shop_id) continue;
+        const pd = perDay[String(it.shop_id)] || 0, stock = Math.max(it.shop_stock, 0), need = pd - stock;
+        if (!(pd > 0) || need <= 0) continue;
+        const tpl = it.cex_id === 51 && TEMPLATE[51] && ebi ? { ...TEMPLATE[51], size: ebi.size } : (TEMPLATE[it.cex_id] || null);
+        const pack = it.cex_id === 51 && it.pack && ebi ? { ...it.pack, size: ebi.size } : it.pack;
+        let input, qty;
+        if (tpl) {
+          if (need < 0.3 * tpl.size) continue;                                   // наличното почти стига
+          const c = tpl.choices.find(x => x * tpl.size >= need - 1e-9) || tpl.choices[tpl.choices.length - 1];
+          input = c; qty = Math.round(c * tpl.size * 1000) / 1000;
+        } else if (pack) {
+          const n = Math.ceil(need / pack.size - 1e-9); input = n; qty = Math.round(n * pack.size * 1000) / 1000;
+        } else if (it.unit === "бр") { input = Math.ceil(need - 1e-9); qty = input; }
+        else { input = Math.ceil(need * 10 - 1e-9) / 10; qty = input; }
+        if (!(input > 0)) continue;
+        suggestions.push({ cex_id: it.cex_id, name: it.name, input, qty, unit: it.unit, per_day: Math.round(pd * 100) / 100, stock: Math.round(stock * 100) / 100 });
+      }
+      res.status(200).json({ ok: true, from, to, days: DAYS, for_date: sofiaToday(), count: suggestions.length, suggestions });
       return;
     }
 
