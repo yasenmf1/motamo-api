@@ -1490,6 +1490,23 @@ load();
 }
 
 // ── HANDLER ──────────────────────────────────────────────────────────────────
+// ★ 02.11 — хуморът на бота към девойките: лека, добронамерена закачка + какво да напишат.
+const BANTER = {
+  hi: ["Здравей, {n}! 👋 Тук съм, будно съм и без кафе.", "О, {n}! Токмо те чаках. Е, не чак, но почти. 😄", "Хей, {n}! Днес сме по-усмихнати от касовия апарат."],
+  thanks: ["Моля, моля! Работя за комплименти и за много малко ток. 🔌", "Няма за какво! Но ако искаш — запиши ме в заплатата. 😄", "Винаги! Само не казвай на шефа, че се радвам."],
+  mood: ["Дръж се, {n}! Щом ботът не се оплаква, не се оплаквай и ти. 💪", "Кафе, усмивка и пак напред. Аз пия само ток, но препоръчвам кафето. ☕", "Ти ще се справиш. Аз само натискам бутони и се правя на важен. 😎"],
+  any: ["Хм, това не е в менюто ми, {n}. 🤔 Аз разбирам само „заявка“ и малко от шеги.", "Много интересно! Нищо не разбрах, но звучи важно. 😄", "{n}, аз съм бот, не гадател. 🔮 Кажи ми „заявка“ и ще се разберем.", "Закачаш ме, а? 😏 Добре, ще ти го върна: аз поне не закъснявам за работа!", "Не мога да отговоря на това, но мога да направя заявка за цеха. Тя поне не се обижда. 📝", "Ей, {n}, не ме разсейвай — пресмятам колко суши ти трябва! 🍣"],
+  tail: { tochka: "\n\nАко ти трябва цехът — напиши <b>заявка</b>.", sklad: "\n\nЗа заявките от точката — напиши <b>склад</b>." }
+};
+function banter(text, role, first) {
+  const t = String(text || "").toLowerCase();
+  const pool = /здрав|здрас|добро утро|добър ден|добър вечер|привет|хей|здр\b/.test(t) ? BANTER.hi
+    : /благодар|мерси|мерсй|thanks/.test(t) ? BANTER.thanks
+    : /уморе|скуч|тежк|боли|писна|не ми се/.test(t) ? BANTER.mood : BANTER.any;
+  const s = pool[Math.floor(Math.random() * pool.length)].replace(/\{n\}/g, first || "ти");
+  return s + (BANTER.tail[role] || "");
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   const q = (req.query && typeof req.query === "object") ? req.query : {};
@@ -1738,7 +1755,8 @@ module.exports = async function handler(req, res) {
           if (wantsReq || /^\/start/.test(text) || /склад/i.test(text)) { await TG.tgSend("📦 Заявките от точката и складът:", String(uid), null, skladBtn()); res.status(200).json({ ok: true }); return; }
         }
         if (role == null) { await TG.tgSend("Изчакай собственикът да те одобри. 🙏", String(uid)); res.status(200).json({ ok: true }); return; }
-        if (role === "tochka") { await TG.tgSend("Напиши <b>заявка</b>, за да отвориш формата за цеха.", String(uid)); }
+        // 02.11: девойките се закачат с бота → отговаря с лека, добронамерена закачка + подсказка какво да напише
+        if (role === "tochka" || role === "sklad") { await TG.tgSend(banter(text, role, from.first_name), String(uid)); }
       }
     } catch (e) { console.error(JSON.stringify({ event: "tg_hook_error", message: String(e && e.message) })); }
     res.status(200).json({ ok: true }); // Telegram иска 200, иначе преповтаря
