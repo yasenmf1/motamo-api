@@ -1751,6 +1751,16 @@ module.exports = async function handler(req, res) {
         // ★ S34 — „Започнах / Приключих" и командите за часове (преди ролите: важи за всички в екипа)
         if (text && await TC.handleMessage(uid, text, u, String(uid) === TG.OWNER_CHAT_ID, hostD)) { res.status(200).json({ ok: true }); return; }
         // 02.11 — само собственикът: „шега" = показва шегата за деня и получателите; „шега да" = праща я на всички с роля „Точка"
+        // „шега: текст" = показва ТВОЯ шега; „шега да: текст" = праща я (текстът се взема от самата команда, без запомняне)
+        const mj = role === "owner" && text.match(/^шега(\s+да)?\s*:\s*([\s\S]+)$/i);
+        if (mj) {
+          const rr = await fetch(`${TG.SB_URL}/rest/v1/cex_tg_users?select=user_id,name&role=eq.tochka&order=name`, { headers: TG.sbH });
+          const people = rr.ok ? await rr.json() : [], joke = mj[2].trim();
+          if (!people.length) await TG.tgSend("Няма никой с роля Точка.", String(uid));
+          else if (!mj[1]) await TG.tgSend(`😄 Твоята шега:\n\n${TG.escHtml(joke)}\n\nЩе я получат: ${people.map(p => TG.escHtml(p.name || p.user_id)).join(", ")} и групата „МОТАМО".\nЗа да я пратя, напиши <b>шега да: </b> и после същия текст.`, String(uid));
+          else { const out = TG.escHtml(joke); for (const p of people) await TG.tgSend(out, String(p.user_id)); await TG.tgSend(out, TG.CEX_CHAT_ID); await TG.tgSend(`✅ Шегата е пратена на ${people.length} души и в групата „МОТАМО".`, String(uid)); }
+          res.status(200).json({ ok: true }); return;
+        }
         if (role === "owner" && /^шега(\s+да)?$/i.test(text)) {
           const rr = await fetch(`${TG.SB_URL}/rest/v1/cex_tg_users?select=user_id,name&role=eq.tochka&order=name`, { headers: TG.sbH });
           const people = rr.ok ? await rr.json() : [];
