@@ -1028,9 +1028,11 @@ module.exports = async function handler(req, res) {
 
   // Печата се на фискалния бон: при доставка и адрес + телефон, за да ги вижда куриерът. Номерът е ПЪРВИ (търсенето по него).
   function receiptDesc() {
-    if (!dlv) return `Поръчка ${ref} · ВЗЕМАНЕ ОТ МЯСТО`;
+    // 02.11: името, което клиентът е попълнил в сайта, се печата и на бона — иначе всички ИТТ поръчки са „ITT служител" и се бъркат
+    const who = String(name || "").trim().slice(0, 24);
+    if (!dlv) return `Поръчка ${ref}${who ? " · " + who : ""} · ВЗЕМАНЕ ОТ МЯСТО`;
     const addr = [dlv.street ? dlv.street + (dlv.number ? " " + dlv.number : "") : dlv.text, dlv.details].filter(Boolean).join(", ");
-    return `Поръчка ${ref} · ${DLV_LABEL} · ${addr} · тел. ${phone}`.slice(0, 250);
+    return `Поръчка ${ref}${who ? " · " + who : ""} · ${DLV_LABEL} · ${addr} · тел. ${phone}`.slice(0, 250);
   }
 
   // Адресът отива и в полето „Адрес за доставка“ на Barsy (да може да се взима оттам).
