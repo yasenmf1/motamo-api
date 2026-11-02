@@ -3374,6 +3374,26 @@ module.exports = async function handler(req, res) {
     res.status(200).json({ ok: true, count: heads.length, heads });
     return;
   }
+  // 02.11 — само четене: партиди със срок на годност до `days` дни (по подразбиране 3) и налично количество
+  if (body.action === "lots_expiring") {
+    const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
+    const days = Math.max(0, Math.min(30, Number(body.days) || 3));
+    const today = sofiaToday(), limit = isoPlusDays(today, days);
+    let rows;
+    try { rows = await lotRows({}, user, pass); }
+    catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
+    const out = [];
+    for (const x of rows) {
+      const exp = String(x.lot_exp_date || "").slice(0, 10), qty = Number(x.amount_real) || 0;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(exp) || qty <= 0 || exp > limit) continue;
+      const a = ARTS[String(x.article_id)];
+      out.push({ article_id: Number(x.article_id), name: a ? a.name : String(x.article_name || x.article_id), cat: a ? a.cat : null, lot: x.lot_value || null, exp, expired: exp < today, qty });
+    }
+    out.sort((a, b) => a.exp.localeCompare(b.exp));
+    res.status(200).json({ ok: true, today, days, count: out.length, rows: out });
+    return;
+  }
   if (body.action === "stock") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }

@@ -1751,11 +1751,16 @@ module.exports = async function handler(req, res) {
         // ★ S34 — „Започнах / Приключих" и командите за часове (преди ролите: важи за всички в екипа)
         if (text && await TC.handleMessage(uid, text, u, String(uid) === TG.OWNER_CHAT_ID, hostD)) { res.status(200).json({ ok: true }); return; }
         // 02.11 — агенти: „Поща: текст" (само собственикът) → опашка agent_inbox; агентът я взима до 10 мин и отговаря в Telegram
-        const ma = role === "owner" && text.match(/^(поща)\s*:\s*([\s\S]+)$/i);
+        // „Цех: текст" и снимка с надпис „Цех" (документ за зареждане) → body „photo:<file_id> бележка"
+        const capt = String(msgU.caption || "").trim();
+        const ma = role === "owner" && (text.match(/^(поща|цех)\s*:\s*([\s\S]+)$/i) || (msgU.photo && msgU.photo.length && capt.match(/^(цех)\s*:?\s*([\s\S]*)$/i)));
         if (ma) {
+          const agentName = ma[1].toLowerCase(), photoId = msgU.photo && msgU.photo.length ? msgU.photo[msgU.photo.length - 1].file_id : null;
+          const bodyTxt = (photoId ? `photo:${photoId} ` : "") + ma[2].trim();
           const ar = await fetch(`${SB_URL}/rest/v1/agent_inbox`, { method: "POST", headers: { ...sbHeaders(), Prefer: "return=minimal" },
-            body: JSON.stringify({ agent: ma[1].toLowerCase(), body: ma[2].trim().slice(0, 2000), chat_id: String(uid) }) });
-          await TG.tgSend(ar.ok ? "📬 Поща: приех. Отговарям до 10 минути." : "⚠️ Не успях да предам на Поща. Опитай пак.", String(uid));
+            body: JSON.stringify({ agent: agentName, body: bodyTxt.trim().slice(0, 2000), chat_id: String(uid) }) });
+          const label = agentName === "цех" ? "Цех" : "Поща";
+          await TG.tgSend(ar.ok ? `📬 ${label}: приех. Отговарям до 10 минути.` : `⚠️ Не успях да предам на ${label}. Опитай пак.`, String(uid));
           res.status(200).json({ ok: true }); return;
         }
         // 02.11 — само собственикът: „шега" = показва шегата за деня и получателите; „шега да" = праща я на всички с роля „Точка"
