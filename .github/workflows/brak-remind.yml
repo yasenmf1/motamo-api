@@ -1,0 +1,17 @@
+# Напомняне към точката в 19:00 (София): заявка към цеха + запис на брака (api/transfer.js ?cron=brak_remind).
+# Два часа в UTC (зима 17:00, лято 16:00) — сървърът праща само ако в София е 19 ч.
+name: brak-remind
+on:
+  schedule:
+    - cron: '0 16 * * *'
+    - cron: '0 17 * * *'
+  workflow_dispatch:
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS --retry 2 --retry-delay 10 -X GET \
+            "https://motamo-api.vercel.app/api/transfer?cron=brak_remind" \
+            -H "User-Agent: vercel-cron" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

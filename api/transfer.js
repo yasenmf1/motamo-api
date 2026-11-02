@@ -668,12 +668,13 @@ select.q.tpl:not([value=""]){border-color:var(--sun)}
 </style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Заявка към цеха<small>точка Каравелов · какво да донесат</small></h1>
-${homeBtn(k)}<span class="tabs"><button id="t1" class="on" onclick="tab(1)">Нова заявка</button><button id="t2" onclick="tab(2)">История</button></span></header>
+${homeBtn(k)}<span class="tabs"><button id="t1" class="on" onclick="tab(1)">Нова заявка</button><button id="t2" onclick="tab(2)">История</button><button id="t3" onclick="tab(3)">Брак</button></span></header>
 <div class="wrap">
   ${navBar(k, "shop")}
   <div id="msg" class="msg info">Зареждам наличностите…</div>
   <div id="p1"><table id="tbl"></table></div>
   <div id="p2" style="display:none"><div id="days" class="days"></div><div id="hist"></div></div>
+  <div id="p3" style="display:none"><p style="margin:6px 0 12px;color:var(--dim);font-size:14px">Вечер: напиши колко е останало от пресните заготовки (кг). Това се записва като брак и утре започваме от 0. Ако не е останало нищо, натисни „Няма брак".</p><table id="brt"></table><div style="display:flex;gap:8px;margin-top:12px"><button id="brsend" onclick="brakSend(false)">Запиши брака</button><button class="ghost" onclick="brakSend(true)">Няма брак</button></div></div>
 </div>
 <div class="bar" id="bar">
   <span id="cnt" style="color:var(--dim);font-size:14px">—</span>
@@ -728,9 +729,18 @@ var LBL={pending:'чака цеха',processing:'в процес',done:'доне
 function n3(v){return Math.round(Number(v)*1000)/1000}
 function hhmm(s){var d=new Date(s);return isNaN(d)?'':('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
 function dlabel(d){if(d===TODAY)return 'Днес';var y=new Date(Date.parse(TODAY)-864e5).toISOString().slice(0,10);if(d===y)return 'Вчера';var p=d.split('-');return p[2]+'.'+p[1]}
-function tab(n){$('t1').className=n===1?'on':'';$('t2').className=n===2?'on':'';
-$('p1').style.display=n===1?'':'none';$('p2').style.display=n===2?'':'none';$('bar').style.display=n===1?'':'none';
-if(n===2)hist()}
+function tab(n){$('t1').className=n===1?'on':'';$('t2').className=n===2?'on':'';$('t3').className=n===3?'on':'';
+$('p1').style.display=n===1?'':'none';$('p2').style.display=n===2?'':'none';$('p3').style.display=n===3?'':'none';$('bar').style.display=n===1?'':'none';
+if(n===2)hist();if(n===3)brakDraw()}
+/* 02.11 — „Брак" за деня: пресните заготовки; вечер се пише колко е останало → брак в Barsy на точката */
+function brakDraw(){var h='<tr><th>Заготовка</th><th class="num">В системата</th><th class="num">Остана (кг)</th></tr>';
+items.filter(function(it){return it.zag}).forEach(function(it){h+='<tr><td>'+esc(it.name)+'</td><td class="num">'+(Math.round(it.shop_stock*100)/100)+' '+esc(it.unit)+'</td><td class="num"><input class="bq" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-name="'+esc(it.name)+'"></td></tr>'});
+$('brt').innerHTML=h}
+function brakSend(none){var rows=[];if(!none){document.querySelectorAll('.bq').forEach(function(i){var v=Number(i.value);if(v>0)rows.push({cex_id:Number(i.dataset.id),name:i.dataset.name,qty:v})});
+if(!rows.length){msg('Нищо не е въведено. Ако няма брак, натисни „Няма брак".','err');return}}
+if(!confirm(none?'Записвам: днес НЯМА брак. Продължавам?':'Записвам брак за '+rows.length+' заготовки. Продължавам?'))return;
+busy('Записва се…','Не натискай пак.');
+api({action:'brak_save',items:rows,none:!!none}).then(function(j){free();if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}msg(none?'\\u2713 Записано: днес няма брак.':'\\u2713 Бракът е записан ('+rows.length+' заготовки).','ok');document.querySelectorAll('.bq').forEach(function(i){i.value=''})}).catch(function(e){free();msg('Мрежова грешка: '+e,'err')})}
 function pick(d){SEL=d;drawDays();drawHist()}
 function drawDays(){var h='';DATES.forEach(function(x){h+='<button class="'+(x.date===SEL?'on':'')+'" onclick="pick(&quot;'+x.date+'&quot;)">'+dlabel(x.date)+'</button>'});$('days').innerHTML=h}
 function drawHist(){var rs=ALL.filter(function(r){return r.for_date===SEL});
@@ -1910,6 +1920,27 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // 02.11 — напомняне към точката в 19:00 (София): да пуснат заявка към цеха и да запишат брака. GitHub Actions (два часа в UTC, сървърът праща само в 19 ч).
+  if (req.method === "GET" && q.cron === "brak_remind") {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try {
+      const TG = require("../lib/telegram.js"), today = TG.sofiaDate();
+      const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Sofia", hour: "2-digit", hour12: false }).format(new Date()));
+      if (hour !== 19 && q.force !== "1") { res.status(200).json({ ok: true, sent: false, hour }); return; }
+      const text = "🧹 <b>19:00</b> — пуснете си заявката към цеха за утре и запишете брака (колко заготовки са останали).";
+      const markup = TG.pointKey() ? { inline_keyboard: [[{ text: "📝 Отвори формата", url: "https://motamo-api.vercel.app/api/transfer?view=shop&k=" + TG.pointKey() }]] } : null;
+      let people = [];
+      if (q.target === "owner") people = [{ user_id: TG.OWNER_CHAT_ID }];
+      else { const rr = await fetch(`${TG.SB_URL}/rest/v1/cex_tg_users?select=user_id,name&role=eq.tochka`, { headers: TG.sbH }); people = rr.ok ? await rr.json() : []; }
+      for (const p of people) await TG.tgSend(text, String(p.user_id), today, markup);
+      res.status(200).json({ ok: true, sent: true, to: people.length });
+    } catch (e) { res.status(502).json({ ok: false, error: "remind_failed", message: String(e && e.message).slice(0, 120) }); }
+    return;
+  }
+
   // ★ S37 — напомняния за присъствената форма/ведомостта (GitHub Actions, веднъж дневно): 25-о и последния ден на месеца
   if (req.method === "GET" && q.cron === "salary_remind") {
     const auth = String(req.headers && (req.headers.authorization || "") || "");
@@ -2156,6 +2187,34 @@ module.exports = async function handler(req, res) {
         actions: actions.slice(0, 20),
         raw: String(r.raw || "").slice(0, Number(body.raw_chars) || 1500)
       });
+      return;
+    }
+
+    // ── 02.11 — край на деня: брак на пресните заготовки в точката (запис в Barsy на точката + отчет в Supabase brak_log) ──
+    if (body.action === "brak_save") {
+      const TG = require("../lib/telegram.js"), today = TG.sofiaDate();
+      const rows = (Array.isArray(body.items) ? body.items : [])
+        .map(x => ({ cex_id: Number(x && x.cex_id), name: String((x && x.name) || "").slice(0, 80), qty: Math.round(Number(x && x.qty) * 1000) / 1000 }))
+        .filter(x => MAP[x.cex_id] && x.qty > 0).slice(0, 60);
+      let docId = null, err = null;
+      if (rows.length) {
+        try {
+          const r = await shopRoot({ Storeouts_save: { id: null, action_type: "save_and_close",
+            values: { depot_id: String(SHOP_DEPOT), type_id: "-1", doc_date: null, description: "Брак — край на деня (" + today + ")" },
+            rows: rows.map(x => ({ row_id: "", article_id: MAP[x.cex_id], article_name: x.name, amount: x.qty, notes: "" })) } });
+          const v = r && r.data && r.data.Storeouts_save;
+          if (typeof v === "number" || (typeof v === "string" && /^\d+$/.test(v))) docId = String(v); else err = String((r && r.raw) || JSON.stringify(r && r.data) || "няма отговор").slice(0, 200);
+        } catch (e) { err = String(e && e.message || e).slice(0, 200); }
+      }
+      let logged = false;
+      try {
+        const lr = await fetch(`${SB_URL}/rest/v1/brak_log`, { method: "POST", headers: { ...sbHeaders(), Prefer: "return=minimal" },
+          body: JSON.stringify({ for_date: today, items: rows.map(x => ({ cex_id: x.cex_id, shop_id: MAP[x.cex_id], name: x.name, qty: x.qty })), none: !rows.length, barsy_doc: docId, barsy_error: err }) });
+        logged = lr.ok;
+      } catch (e) { /* лог не успя — отговорът по-долу го казва */ }
+      const lines = rows.map(x => `• ${TG.escHtml(x.name)} — ${String(x.qty).replace(".", ",")}`).join("\n");
+      await TG.tgSend(`🧹 <b>Брак · точка · ${today.split("-").reverse().slice(0, 2).join(".")}</b>\n` + (rows.length ? lines + "\n" + (docId ? `✅ Barsy: изписване №${docId}` : `⚠️ Barsy НЕ записа: ${TG.escHtml(err || "?")}`) : "Няма брак днес."), TG.OWNER_CHAT_ID).catch(() => {});
+      res.status(200).json({ ok: logged || !!docId, logged, barsy_doc: docId, barsy_error: err });
       return;
     }
 
