@@ -3388,6 +3388,21 @@ module.exports = async function handler(req, res) {
     } catch (e) { res.status(504).json({ ok: false, error: "unreachable", message: String(e && e.message) }); }
     return;
   }
+  // 02.11 — само четене: редовете на ЕДНО зареждане/прехвърляне (отваря формата за четене, без запис). body: {host, kind:"load"|"move", id}
+  if (body.action === "ro_doc_rows") {
+    const SHOP = body.host === "shop";
+    const user = SHOP ? process.env.BARSY_USER : process.env.BARSY_CEX_USER, pass = SHOP ? process.env.BARSY_PASS : process.env.BARSY_CEX_PASS;
+    if (!user || !pass) { res.status(500).json({ ok: false, error: "not_configured" }); return; }
+    const id = Number(body.id); if (!id) { res.status(400).json({ ok: false, error: "no_id" }); return; }
+    const kind = body.kind === "move" ? "move" : "load";
+    const m = kind === "move" ? "Storemoves_edit" : "Storeloads_edit", idk = kind === "move" ? "store_move_id" : "store_load_id";
+    try {
+      const r = await cexCallRoot({ [m]: { id, [idk]: id, params: { bid: 1, id } } }, user, pass, SHOP ? "https://motamoshop.barsy.online" : CEX_API);
+      const t = String(r.raw || "");
+      res.status(200).json({ ok: r.ok, status: r.status, length: t.length, raw: t.slice(0, Math.min(Number(body.max) || 30000, 60000)) });
+    } catch (e) { res.status(504).json({ ok: false, error: "unreachable", message: String(e && e.message) }); }
+    return;
+  }
   // 02.11 — само четене: партиди със срок на годност до `days` дни (по подразбиране 3) и налично количество
   if (body.action === "lots_expiring") {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
