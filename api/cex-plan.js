@@ -3074,12 +3074,24 @@ module.exports = async function handler(req, res) {
       for (const x of inv) {
         if (String(x.type_id) !== "11" || String(x.is_anulate) === "1") continue;
         if (!okDates[String(x.create_date || "").slice(0, 10)]) continue;
-        (stok[x.client_id] = stok[x.client_id] || []).push(Number(x.total_all) || 0);
+        (stok[x.client_id] = stok[x.client_id] || []).push({ t: Number(x.total_all) || 0, id: x.inv_id });
       }
     } catch (e) { stok = {}; }
-    const hasStok = (sh) => { const arr = stok[sh.client_id]; if (!arr || !arr.length) return false; const i = arr.findIndex(t => Math.abs(t - (sh.total || 0)) < 0.05); if (i < 0) return false; arr.splice(i, 1); return true; };
+    const hasStok = (sh) => { const arr = stok[sh.client_id]; if (!arr || !arr.length) return false; const i = arr.findIndex(o => Math.abs(o.t - (sh.total || 0)) < 0.05); if (i < 0) return false; arr.splice(i, 1); return true; };
+    const flags = openShops.map(x => hasStok(x));
+    // ★ 02.11 — сумата на сметката и на стоковата може да се различават (Мерканто: сметката е с 11,80 € повече) →
+    // за неразпознатите магазини питаме самите стокови, към коя сметка са вързани (Invoices_get.accounts). Само четене.
+    const linked = new Set();
+    try {
+      const left = []; openShops.forEach((x, i) => { if (!flags[i]) for (const o of (stok[x.client_id] || [])) if (!left.some(l => l.id === o.id)) left.push(o); });
+      for (let i = 0; i < Math.min(left.length, 30); i += 4) {
+        await Promise.all(left.slice(i, i + 4).map(async o => {
+          try { const r = await cexCall("Invoices_get", { inv_id: o.id }, user, pass); for (const a of ((r.data && r.data.accounts) || [])) linked.add(String(a)); } catch (e) { /* няма връзка — остава неотбелязано */ }
+        }));
+      }
+    } catch (e) { /* без допълнителната проверка */ }
     res.status(200).json({ ok: true, date, seeded_accounts: openShops.length,
-      shops: openShops.map(x => { const hs = hasStok(x); return { account_id: x.account_id, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, total: x.total, has_stokova: hs, scheduled: !hs, order: sortObj(x.order || {}, 2) }; }) });
+      shops: openShops.map((x, i) => { const hs = flags[i] || linked.has(String(x.account_id)); return { account_id: x.account_id, client: x.client, rep: x.rep, client_id: x.client_id, person_id: x.person_id, group: x.group, total: x.total, has_stokova: hs, scheduled: !hs, order: sortObj(x.order || {}, 2) }; }) });
     return;
   }
 
