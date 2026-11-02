@@ -1498,6 +1498,15 @@ const BANTER = {
   any: ["Хм, това не е в менюто ми, {n}. 🤔 Аз разбирам само „заявка“ и малко от шеги.", "Много интересно! Нищо не разбрах, но звучи важно. 😄", "{n}, аз съм бот, не гадател. 🔮 Кажи ми „заявка“ и ще се разберем.", "Закачаш ме, а? 😏 Добре, ще ти го върна: аз поне не закъснявам за работа!", "Не мога да отговоря на това, но мога да направя заявка за цеха. Тя поне не се обижда. 📝", "Ей, {n}, не ме разсейвай — пресмятам колко суши ти трябва! 🍣"],
   tail: { tochka: "\n\nАко ти трябва цехът — напиши <b>заявка</b>.", sklad: "\n\nЗа заявките от точката — напиши <b>склад</b>." }
 };
+const JOKES = [
+  "😄 Знаете ли защо ботът не закъснява? Защото няма кой да му каже, че трафикът е лош.",
+  "🍣 Суши ролът казва на ориза: „Хайде, стегни се, днес има много поръчки!“ Оризът: „Лепя се, лепя се...“",
+  "☕ Ботът не пие кафе, но пак е готов за работа. Вие какво обяснение имате?",
+  "🐟 Рибата отиде на интервю. Питат я: „Имате ли опит?“ „Да, много. Работила съм в голяма мрежа.“",
+  "📝 Днес ботът ви желае заявките да са навреме, а сушито да е като в рекламата. 😉",
+  "🥢 Ако пръчиците са две, значи не сте сами. Ако са една, значи ви е отнесло ориза.",
+  "😎 Ботът обяви: днес всички са добри, а най-добри са тези, които пишат заявката преди 10:00."
+];
 function banter(text, role, first) {
   const t = String(text || "").toLowerCase();
   const pool = /здрав|здрас|добро утро|добър ден|добър вечер|привет|хей|здр\b/.test(t) ? BANTER.hi
@@ -1741,6 +1750,16 @@ module.exports = async function handler(req, res) {
         const hostD = (req.headers && req.headers.host) || "motamo-api.vercel.app";
         // ★ S34 — „Започнах / Приключих" и командите за часове (преди ролите: важи за всички в екипа)
         if (text && await TC.handleMessage(uid, text, u, String(uid) === TG.OWNER_CHAT_ID, hostD)) { res.status(200).json({ ok: true }); return; }
+        // 02.11 — само собственикът: „шега" = показва шегата за деня и получателите; „шега да" = праща я на всички с роля „Точка"
+        if (role === "owner" && /^шега(\s+да)?$/i.test(text)) {
+          const rr = await fetch(`${TG.SB_URL}/rest/v1/cex_tg_users?select=user_id,name&role=eq.tochka&order=name`, { headers: TG.sbH });
+          const people = rr.ok ? await rr.json() : [];
+          const joke = JOKES[Math.floor(Date.parse(TG.sofiaDate() + "T12:00:00Z") / 86400000) % JOKES.length];
+          if (!people.length) await TG.tgSend("Няма никой с роля Точка.", String(uid));
+          else if (!/\s+да$/i.test(text)) await TG.tgSend(`😄 Шега за деня:\n\n${joke}\n\nЩе я получат: ${people.map(p => TG.escHtml(p.name || p.user_id)).join(", ")}.\nЗа да я пратя, напиши <b>шега да</b>.`, String(uid));
+          else { for (const p of people) await TG.tgSend(joke, String(p.user_id)); await TG.tgSend(`✅ Шегата е пратена на ${people.length} души.`, String(uid)); }
+          res.status(200).json({ ok: true }); return;
+        }
         if (role === "shofior" || (role === "owner" && (msgU.location || /маршрут/i.test(text)))) {
           if (msgU.location) await DRV.handleLocation(uid, msgU.location, hostD);
           else if (msgU.photo) await DRV.handlePhoto(uid, msgU);
