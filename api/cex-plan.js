@@ -3763,6 +3763,9 @@ async function handlerInner(req, res) {
 };
 
 module.exports = async function handler(req, res) {
+  // отговорът изчаква чакащите записи в журнала (иначе платформата спира функцията веднага след отговора)
+  const _end = res.end.bind(res);
+  res.end = function (...a) { if (ERR_PENDING.length) { Promise.allSettled(ERR_PENDING.splice(0)).then(() => _end(...a)); return res; } return _end(...a); };
   try { await handlerInner(req, res); }
   catch (e) {
     logErr("cex-plan:необработена грешка", e, { action: req && req.body && req.body.action ? String(req.body.action).slice(0, 40) : null });
