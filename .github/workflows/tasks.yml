@@ -60,6 +60,9 @@ jobs:
       - name: Точка · месечен отчет за часовете (последния ден, 21:00)
         continue-on-error: true
         run: if python3 tasks/gate.py chasove '*' 21:00; then python3 tasks/run_notify.py chasove hours.py; fi
+      - name: Новини · сутрешен бриф (всеки ден 7:00)
+        continue-on-error: true
+        run: if python3 tasks/gate.py novini '*' 07:00; then python3 tasks/novini_job.py; fi
       - name: Суха проба (само при ръчно пускане с dry=true)
         if: github.event_name == 'workflow_dispatch' && inputs.dry == 'true'
         run: |
