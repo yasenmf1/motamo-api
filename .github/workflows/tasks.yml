@@ -45,6 +45,20 @@ jobs:
       - name: Цех · вечерно нулиране (22:00)
         continue-on-error: true
         run: if python3 tasks/gate.py ceh-nulirane '*' 22:00; then python3 tasks/ceh_jobs.py night; fi
+      - name: Финанси · седмична сверка (Пн 9:45)
+        continue-on-error: true
+        run: if python3 tasks/gate.py finansi-sedmica 1 09:45; then python3 tasks/run_notify.py finansi finansi.py; fi
+      - name: Финанси · срок на фактурите (15-о и последния ден, 9:45)
+        continue-on-error: true
+        run: |
+          d=$(TZ=Europe/Sofia date +%d); t=$(TZ=Europe/Sofia date -d tomorrow +%d)
+          if { [ "$d" = 15 ] || [ "$t" = 01 ]; } && python3 tasks/gate.py finansi-srok '*' 09:45; then python3 tasks/run_notify.py finansi-srok finansi.py; fi
+      - name: Точка · седмичен преглед (Пн 8:15)
+        continue-on-error: true
+        run: if python3 tasks/gate.py tochka-sedmica 1 08:15; then python3 tasks/run_notify.py tochka-sedmica week.py; fi
+      - name: Точка · месечен отчет за часовете (последния ден, 21:00)
+        continue-on-error: true
+        run: if python3 tasks/gate.py chasove '*' 21:00; then python3 tasks/run_notify.py chasove hours.py; fi
       - name: Суха проба (само при ръчно пускане с dry=true)
         if: github.event_name == 'workflow_dispatch' && inputs.dry == 'true'
         run: |
