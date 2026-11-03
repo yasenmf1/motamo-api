@@ -2501,6 +2501,22 @@ module.exports = async function handler(req, res) {
     const acc = Number(body.account_id); if (!acc) { res.status(400).json({ ok: false, error: "no_account_id" }); return; }
     const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : sofiaToday();
     const DT = 11; // стокова разписка
+    // ★ 03.11 — предпазител: сметката трябва да е от деня на стоковата. На 26.10 решетката е държала
+    // старата сметка 4373 (19.10) → стоковата излезе със старите числа. body.force=true го пропуска.
+    if (body.force !== true) {
+      try {
+        const al = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 800 }, user, pass);
+        let all = al.data || []; if (!Array.isArray(all)) all = Object.values(all);
+        const a = all.find(x => Number(x.account_id) === acc);
+        if (a) {
+          const cd = String(a.create_date || "").slice(0, 10), cl = String(a.close_date || "").slice(0, 10);
+          if (cd !== date && cl !== date) {
+            res.status(200).json({ ok: false, error: "сметка №" + acc + " е от " + (cd || cl || "друга дата") + ", не от " + date + " — за този магазин няма сметка за деня; не правя стокова със стари числа", account_date_mismatch: true, account_id: acc, account_created: cd, account_closed: cl });
+            return;
+          }
+        }
+      } catch (e) { /* не можем да проверим — не спираме работата */ }
+    }
     // 1) зареди формата (хедър полета + грид с редовете, вече с партида)
     const load = await cexCallRoot({ invoices_edit: { params: { bid: 1, doc_type: DT, gen_mode: 1, account_id: acc } } }, user, pass);
     const inner = load.data && load.data.invoices_edit;
