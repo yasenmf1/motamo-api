@@ -74,7 +74,6 @@ jobs:
           python3 tasks/ceh_jobs.py stock --dry | sed 's/k=.*/k=***/'
           python3 tasks/ceh_jobs.py evening --dry
           python3 tasks/ceh_jobs.py night --dry
-          python3 tasks/novini_job.py --dry
           python3 tasks/ads_job.py --dry
       - name: Пулс (облачните задачи са живи)
         if: always()
