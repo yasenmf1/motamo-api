@@ -22,6 +22,7 @@ jobs:
       TELEGRAM_OWNER_CHAT_ID: ${{ secrets.TELEGRAM_OWNER_CHAT_ID }}
       CEX_TOOL_TOKEN: ${{ secrets.CEX_TOOL_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      META_TOKEN: ${{ secrets.META_TOKEN }}
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -63,6 +64,9 @@ jobs:
       - name: Новини · сутрешен бриф (всеки ден 7:00)
         continue-on-error: true
         run: if python3 tasks/gate.py novini '*' 07:00; then python3 tasks/novini_job.py; fi
+      - name: Реклама · дневен преглед (всеки ден 9:30)
+        continue-on-error: true
+        run: if python3 tasks/gate.py ads '*' 09:30; then python3 tasks/ads_job.py; fi
       - name: Суха проба (само при ръчно пускане с dry=true)
         if: github.event_name == 'workflow_dispatch' && inputs.dry == 'true'
         run: |
@@ -71,6 +75,7 @@ jobs:
           python3 tasks/ceh_jobs.py evening --dry
           python3 tasks/ceh_jobs.py night --dry
           python3 tasks/novini_job.py --dry
+          python3 tasks/ads_job.py --dry
       - name: Пулс (облачните задачи са живи)
         if: always()
         run: python3 -c "import sys; sys.path.insert(0, 'tasks'); import lib; lib.heartbeat('cloud')"
