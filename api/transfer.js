@@ -1781,11 +1781,10 @@ module.exports = async function handler(req, res) {
         if (text && await TC.handleMessage(uid, text, u, String(uid) === TG.OWNER_CHAT_ID, hostD)) { res.status(200).json({ ok: true }); return; }
         // 02.11 — агенти: „Поща: текст" (само собственикът) → опашка agent_inbox; агентът я взима до 10 мин и отговаря в Telegram
         // „Цех: текст" и снимка с надпис „Цех" (документ за зареждане) → body „photo:<file_id> бележка"
-        // 03.11 — „оборот" / „точка: оборот" (само собственикът) → оборотът на точката до момента, веднага (без агент)
-        if (role === "owner" && /^(точка\s*:\s*)?оборот\s*[?!.]*$/i.test(text)) {
-          let out; try { out = await require("../lib/turnover.js").report(shopCall); } catch (e) { out = "Оборотът не се чете сега (" + String(e && e.message || e).slice(0, 80) + ")."; }
-          await TG.tgSend(TG.escHtml(out), String(uid));
-          res.status(200).json({ ok: true }); return;
+        // 03.11 — бързи команди (само собственикът): оборот · суровини · цех · сайт · помощ → отговор до секунди, без агент
+        if (role === "owner" && text) {
+          const cr = await require("../lib/bot-commands.js").handle(text, { shopCall, cexToken: () => cexToolKey() });
+          if (cr) { await TG.tgSend(TG.escHtml(cr), String(uid)); res.status(200).json({ ok: true }); return; }
         }
         const capt = String(msgU.caption || "").trim();
         const ma = role === "owner" && (text.match(/^(поща|цех)\s*:\s*([\s\S]+)$/i) || (msgU.photo && msgU.photo.length && capt.match(/^(цех)\s*:?\s*([\s\S]*)$/i)));
