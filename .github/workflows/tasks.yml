@@ -1,0 +1,29 @@
+# Задачи на собственика, които работят в облака (не зависят от компютъра): оборот на точката, наблюдател на поръчките, сутрешно съобщение.
+# GitHub пуска планираното със закъснение и понякога го пропуска — затова на 10 мин, а tasks/gate.py пази всеки слот да мине веднъж (час по София).
+name: tasks
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+concurrency:
+  group: tasks
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      PEEK_TOKEN: ${{ secrets.PEEK_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_OWNER_CHAT_ID: ${{ secrets.TELEGRAM_OWNER_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Наблюдател на поръчките (09:00–21:30)
+        continue-on-error: true
+        run: python3 tasks/watch.py
+      - name: Оборот на точката (Пн–Пт 14:30, 17:30, 19:30)
+        continue-on-error: true
+        run: if python3 tasks/gate.py turnover 1-5 14:30 17:30 19:30; then python3 tasks/turnover.py; fi
+      - name: Сутрешно съобщение за точката (Пн–Пт 8:40)
+        continue-on-error: true
+        run: if python3 tasks/gate.py sutrin 1-5 08:40; then python3 tasks/sutrin.py; fi
