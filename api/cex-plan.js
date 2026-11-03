@@ -2446,6 +2446,7 @@ module.exports = async function handler(req, res) {
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 2000 }, user, pass);
     let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
+    const diag = { http: r.status, accounts: all.length, first: all[0] ? Object.keys(all[0]).slice(0, 12) : null, raw: all.length ? undefined : String(r.raw || "").slice(0, 300) };
     const byKey = {};
     for (const a of all) {
       if (String(a.account_alias || "").includes("CLTEST") || isTrialClient(a)) continue;
@@ -2463,7 +2464,7 @@ module.exports = async function handler(req, res) {
     }
     const objects = Object.values(byKey).sort((x, y) =>
       (x.client || "").localeCompare(y.client || "", "bg") || (x.rep || "").localeCompare(y.rep || "", "bg"));
-    res.status(200).json({ ok: true, count: objects.length, objects });
+    res.status(200).json({ ok: true, count: objects.length, objects, diag });
     return;
   }
 
