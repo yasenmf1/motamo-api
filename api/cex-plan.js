@@ -233,6 +233,7 @@ function cexCall(action, params, user, pass, base) {
       body: JSON.stringify(params || {}), signal
     });
     const text = await r.text(); let d = null; try { d = JSON.parse(text); } catch (e) {}
+    if (d === null && !r.ok) logErr("barsy:" + action, "нечетим отговор, HTTP " + r.status);
     return { ok: r.ok, status: r.status, data: d, raw: text };
   });
 }
@@ -288,7 +289,7 @@ async function producedUnderLot(lot, user, pass) {
       try {
         const r = await cexCall("Reports_lot_list_details", { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { lot_value: String(lot) } }, user, pass);
         if (r && r.ok && r.data) d = r.data;
-      } catch (e) {}
+      } catch (e) { logErr("cex-plan:L291", e); }
       if (d === null) await new Promise(res => setTimeout(res, 200 * (t + 1)));
     }
     if (!d) { rel = false; break; }   // ★ S23: неуспяла страница = справката НЕ е надеждна
@@ -347,7 +348,7 @@ async function reservedOpen(user, pass) {
     try {
       const rows = await cexCall("Orders_getlist", { filters: { account_id: a.account_id } }, user, pass);
       for (const o of (rows.data || [])) { const id = String(o.article_id); if (id) reserved[id] = (reserved[id] || 0) + (Number(o.amount) || 0); }
-    } catch (e) {}
+    } catch (e) { logErr("cex-plan:L350", e); }
   });
   return { reserved, count: open.length };
 }
@@ -467,7 +468,7 @@ async function seedByLot(dateIso, user, pass) {
         const r = await cexCall("Reports_lot_list_details",
           { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { ref_date: [fromD, toD], lot_value: lot } }, user, pass);
         if (r && r.ok && r.data) d = r.data;
-      } catch (e) {}
+      } catch (e) { logErr("cex-plan:L470", e); }
       if (d === null) await new Promise(res => setTimeout(res, 200 * (t + 1)));
     }
     if (!d) break;
@@ -498,7 +499,7 @@ async function reportSalesByArticles(from, to, user, pass, clientId) {
         const r = await cexCall("Reports_sales_by_articles",
           { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: clientId != null ? { ref_date: [from, to], client: clientId } : { ref_date: [from, to] } }, user, pass);
         if (r && r.ok && r.data && Array.isArray(r.data.rows)) { rows = r.data.rows; ok = true; }
-      } catch (e) {}
+      } catch (e) { logErr("cex-plan:L501", e); }
       if (rows === null) await new Promise(res => setTimeout(res, 250 * (t + 1)));
     }
     if (rows === null) { incomplete = true; break; }
@@ -530,7 +531,7 @@ async function reportMarginByClient(from, to, clientIds, user, pass) {
           const cost = (Number(tt.delivery_total_dds) || 0) / VAT_CONST;
           return { rev: Math.round(rev * 100) / 100, cost: Math.round(cost * 100) / 100 };
         }
-      } catch (e) {}
+      } catch (e) { logErr("cex-plan:L533", e); }
       await new Promise(res => setTimeout(res, 200 * (t + 1)));
     }
     return null;
@@ -897,7 +898,7 @@ async function shopFormData(key, dateIso) {
       suggest: sg ? sg.n : (same ? h[same] : (last ? h[last] : 0)), avg: sg ? sg.avg : null, weeks: sg ? sg.weeks : 0 });
   }
   let existing = null;
-  try { const ex = await sbAll(`cex_shop_requests?select=id,for_date,rows,left_qty,swap_qty,note,sent_at,updated_at,applied_at&for_date=eq.${target}&obj_key=eq.${encodeURIComponent(key)}`); existing = ex[0] || null; } catch (e) {}
+  try { const ex = await sbAll(`cex_shop_requests?select=id,for_date,rows,left_qty,swap_qty,note,sent_at,updated_at,applied_at&for_date=eq.${target}&obj_key=eq.${encodeURIComponent(key)}`); existing = ex[0] || null; } catch (e) { logErr("cex-plan:L900", e); }
   return { obj: { key, name: formObjName(key) }, for_date: target, default_date: def, today, dow: dowBg(target), items, existing,
     other: MENU.filter(m => !items.some(i => i.id === m.id)).map(m => ({ id: m.id, name: m.name })) };
 }
@@ -936,7 +937,7 @@ async function shopFormSend(key, body) {
 }
 async function shopRequestsFor(dateIso, host) {
   const list = await sbAll(`cex_shop_requests?select=id,for_date,obj_key,rows,left_qty,swap_qty,note,source,phone,sent_at,updated_at,applied_at,applied_rows&for_date=eq.${dateIso}&order=sent_at.asc`);
-  let accs = {}; try { const day = await dayGet(dateIso); accs = (day.state && day.state.accounts) || {}; } catch (e) {}
+  let accs = {}; try { const day = await dayGet(dateIso); accs = (day.state && day.state.accounts) || {}; } catch (e) { logErr("cex-plan:L939", e); }
   const requests = list.map(x => { const o = CEX_OBJECTS[x.obj_key] || {}; const [c, p] = x.obj_key.split(":");
     const acc = accs[dayKey({ client_id: Number(c), person_id: p ? Number(p) : null })]; return {
     id: x.id, obj_key: x.obj_key, name: formObjName(x.obj_key), client_id: Number(c), person_id: p ? Number(p) : null, group: o.group || "adhoc",
@@ -1408,7 +1409,7 @@ async function computeDayPlan(shopsIn, prodDate, lot, razosDate, withOthers, use
   // 4) липсваща суровина, която я има в склад „Точка" (заредена/прехвърлена там по грешка)
   const inPoint = {};
   if (Object.keys(plan.loadRaw).length) {
-    try { const sm2 = await stockMap(user, pass, 2); for (const id of Object.keys(plan.loadRaw)) { const q = Number(sm2[String(id)]) || 0; if (q > 0) inPoint[id] = round(q); } } catch (e) {}
+    try { const sm2 = await stockMap(user, pass, 2); for (const id of Object.keys(plan.loadRaw)) { const q = Number(sm2[String(id)]) || 0; if (q > 0) inPoint[id] = round(q); } } catch (e) { logErr("cex-plan:L1411", e); }
   }
   const stale = Object.entries(staleMap).map(([l, n]) => ({ lot: l, articles: n }));
   return { plan, sm, underLot: realL, underRel: true, freeStock, others: [], table, stale, oldHeld, hidden, inPoint, withAccount: shopsIn.length - needShops.length, needShops: needShops.length };
@@ -2170,6 +2171,18 @@ restoreGrid();
 }
 
 
+// ── ★ 03.11 — ЖУРНАЛ НА ГРЕШКИТЕ: тихите `catch` вече пишат ред в Supabase `error_log` (source, message, ctx).
+// Не хвърля никога; не пише по-често от веднъж на 5 мин за една и съща (source+message) в една инстанция.
+const ERR_PENDING = [], ERR_SEEN = new Map();
+function logErr(source, e, ctx) {
+  try {
+    const message = String(e && e.message ? e.message : e).slice(0, 300);
+    const k = source + "|" + message.slice(0, 80), now = Date.now();
+    if (ERR_SEEN.has(k) && now - ERR_SEEN.get(k) < 300000) return;
+    ERR_SEEN.set(k, now); if (ERR_SEEN.size > 200) ERR_SEEN.clear();
+    ERR_PENDING.push(sbReq("error_log", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify([{ source: String(source).slice(0, 80), message, ctx: ctx || null }]) }, 3000).catch(() => {}));
+  } catch (x) { /* журналът не бива да чупи нищо */ }
+}
 // ── ★ 03.11 — КЕШ НА BARSY: последните добри отговори на четящите действия се пазят в Supabase `barsy_cache`;
 // при недостъпен Barsy (5xx, таймаут, нечетим отговор) връщаме последния добър отговор с `stale:true`.
 // Пише се САМО непразен успешен отговор (за да не презапишем кеша с празни данни по време на авария).
@@ -2281,7 +2294,7 @@ async function handlerInner(req, res) {
     // Ако няма запис — fallback към сметките (както преди). ?date= задава изрично ден.
     const reqDate = /^\d{4}-\d{2}-\d{2}$/.test(q.date || "") ? q.date : null;
     let snap = null;
-    try { snap = await sbGetPlan(reqDate); } catch (e) {}
+    try { snap = await sbGetPlan(reqDate); } catch (e) { logErr("cex-plan:L2296", e); }
     // ИСТИНАТА за деня са СМЕТКИТЕ (от тях тръгват стоковите). Снимката от „Изчисли" е
     // само последната решетка на собственика — ако сметките са правени на два пъти
     // (снощи + сутринта) или количествата са сменени след „Изчисли", тя се разминава със
@@ -2316,7 +2329,7 @@ async function handlerInner(req, res) {
           if (i < 0) return true; arr.splice(i, 1); return false;
         });
         real.accounts = real.shops.length;
-      } catch (e) {}
+      } catch (e) { logErr("cex-plan:L2331", e); }
     }
     if (real && real.shops.length) {
       const have = new Set(real.shops.map(cexKey));
@@ -2457,6 +2470,7 @@ async function handlerInner(req, res) {
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
   res = withBarsyCache(req, res, body);
+  if (body.action === "log_test") { logErr("cex-plan:проба", new Error("проба на журнала " + new Date().toISOString())); res.status(200).json({ ok: true, logged: true }); return; }
 
   // ── ★ S32 — заявките от формата за деня (таб „📥 Заявки" в инструмента) ──
   if (body.action === "shop_requests") {
@@ -2475,7 +2489,7 @@ async function handlerInner(req, res) {
   // ── ДИАГНОСТИК (само четене): записаната „Изчисли" снимка (за кухнята) ──
   if (body.action === "snapshot") {
     let snap = null;
-    try { snap = await sbGetPlan(/^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : null); } catch (e) {}
+    try { snap = await sbGetPlan(/^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : null); } catch (e) { logErr("cex-plan:L2490", e); }
     if (!snap) { res.status(200).json({ ok: true, snapshot: null }); return; }
     const shops = Array.isArray(snap.shops) ? snap.shops : [];
     const art = body.article || null; // ако е зададено — разбивка по обект за този артикул
@@ -2732,7 +2746,7 @@ async function handlerInner(req, res) {
       const r = await cexCall("Suppliers_getlist", { length: 500 }, user, pass, BASE); let L = r.data || []; if (!Array.isArray(L)) L = Object.values(L);
       const hit = supplierId ? L.find(x => Number(x.supplier_id) === supplierId) : L.find(x => String(x.supplier_name || "").toLowerCase().includes(String(body.supplier || "").toLowerCase()) && body.supplier);
       if (hit) { supplierId = Number(hit.supplier_id); supplierName = hit.supplier_name; }
-    } catch (e) {}
+    } catch (e) { logErr("cex-plan:L2747", e); }
     if (!supplierId) { res.status(200).json({ ok: false, error: "supplier_not_found", supplier: body.supplier || null }); return; }
     // двойно?
     try {
@@ -2740,7 +2754,7 @@ async function handlerInner(req, res) {
       let H = hr.data || []; if (!Array.isArray(H)) H = Object.values(H);
       const dup = H.find(h => String(h.doc_num || "").trim() === docNum && Number(h.supplier_id) === supplierId);
       if (dup) { res.status(200).json({ ok: false, error: "already_loaded", store_load_id: dup.store_load_id }); return; }
-    } catch (e) {}
+    } catch (e) { logErr("cex-plan:L2755", e); }
     // ДДС група: по подразбиране 20% (Б, tax_id 2). За доставка от ЕС без ДДС → body.tax_id=1 (0% А);
     // може и по ред (r.tax_id). Barsy: 1=0% (А), 2=20% (Б), 3=20% (В), 4=9% (Г), 12=7%, 100=0% (Без ДДС).
     const TAX_PCT = { 1: 0, 2: 20, 3: 20, 4: 9, 12: 7, 100: 0 };
@@ -2776,7 +2790,7 @@ async function handlerInner(req, res) {
       let H = hr.data || []; if (!Array.isArray(H)) H = Object.values(H);
       const last = H.find(h => String(h.doc_num || "").trim() === docNum);
       if (last) { lid = last.store_load_id; status = last.status; total = last.total_sum; }
-    } catch (e) {}
+    } catch (e) { logErr("cex-plan:L2791", e); }
     res.status(200).json({ ok: !!lid, draft, store_load_id: lid, status, total_sum: total, ...summary, raw: lid ? undefined : String(sv.raw || "").slice(0, 500) });
     return;
   }
@@ -3406,7 +3420,7 @@ async function handlerInner(req, res) {
     const all = [];
     for (let pg = 1; pg <= 12; pg++) {
       let d = null;
-      try { const r = await cexCall("Reports_lot_list_details", { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { lot_value: lot } }, user, pass); if (r && r.ok) d = r.data; } catch (e) {}
+      try { const r = await cexCall("Reports_lot_list_details", { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, filters: { lot_value: lot } }, user, pass); if (r && r.ok) d = r.data; } catch (e) { logErr("cex-plan:L3421", e); }
       if (!d) break; const rows = Array.isArray(d.rows) ? d.rows : []; all.push(...rows); if (rows.length < 50) break;
     }
     const types = {}; for (const x of all) { const t = x.operation_ref_type || x.operation_type || "?"; types[t] = (types[t] || 0) + 1; }
@@ -3443,7 +3457,7 @@ async function handlerInner(req, res) {
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     let ids = Array.isArray(body.ids) ? body.ids.map(Number).filter(Boolean) : [];
     if (!ids.length) { // ако не са дадени — вземи последните N id-та от списъка
-      try { const hr = await cexCall("Storeloads_getlist", { length: 5000, limit: 5000, order_by: "store_load_id desc" }, user, pass); let L = hr.data || []; if (!Array.isArray(L)) L = Object.values(L); ids = L.map(h => Number(h.store_load_id || h.id)).filter(Boolean).slice(0, Number(body.recent) || 40); } catch (e) {}
+      try { const hr = await cexCall("Storeloads_getlist", { length: 5000, limit: 5000, order_by: "store_load_id desc" }, user, pass); let L = hr.data || []; if (!Array.isArray(L)) L = Object.values(L); ids = L.map(h => Number(h.store_load_id || h.id)).filter(Boolean).slice(0, Number(body.recent) || 40); } catch (e) { logErr("cex-plan:L3458", e); }
     }
     // Пълните данни (сума/доставчик/дата) идват от ЕДИНИЧНОТО четене Storeloads_get.
     const heads = await mapLimit(ids, 8, async (lid) => {
@@ -3547,7 +3561,7 @@ async function handlerInner(req, res) {
     // Storeloads_getlist дава заглавията, Storeloads_get дава редовете (article_id+amount).
     if (body.loads) {
       let heads = [];
-      try { const hr = await cexCall("Storeloads_getlist", { length: 5000, limit: 5000, order_by: "store_load_id desc" }, user, pass); let L = hr.data || []; if (!Array.isArray(L)) L = Object.values(L); heads = L; } catch (e) {}
+      try { const hr = await cexCall("Storeloads_getlist", { length: 5000, limit: 5000, order_by: "store_load_id desc" }, user, pass); let L = hr.data || []; if (!Array.isArray(L)) L = Object.values(L); heads = L; } catch (e) { logErr("cex-plan:L3562", e); }
       const findRows2 = (node) => { let best = null; (function w(x) { if (!x || typeof x !== "object") return; if (Array.isArray(x)) { if (x.length && x[0] && typeof x[0] === "object" && (x[0].article_id != null)) { if (!best || x.length > best.length) best = x; } return x.forEach(w); } for (const k in x) w(x[k]); })(node); return best || []; };
       const ids = heads.map(h => h.store_load_id || h.id).filter(Boolean);
       if (body.debug) {
@@ -3585,7 +3599,7 @@ async function handlerInner(req, res) {
       const PER = 1000;
       const getPage = async (pg) => {
         for (let t = 0; t < 3; t++) {
-          try { const r = await cexCall("Reports_lot_list_details", { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, rows: PER, filters: {} }, user, pass); if (r && r.ok && r.data) return r.data; } catch (e) {}
+          try { const r = await cexCall("Reports_lot_list_details", { active_struct_id: "eStructList_1", action_type: "values", page_num: pg, rows: PER, filters: {} }, user, pass); if (r && r.ok && r.data) return r.data; } catch (e) { logErr("cex-plan:L3600", e); }
           await new Promise(res => setTimeout(res, 150 * (t + 1)));
         }
         return null;
@@ -3609,7 +3623,7 @@ async function handlerInner(req, res) {
       let by_supplier = null;
       if (body.suppliers) {
         let heads = [];
-        try { const hr = await cexCall("Storeloads_getlist", { length: 5000, limit: 5000, order_by: "store_load_id desc" }, user, pass); let L = hr.data || []; if (!Array.isArray(L)) L = Object.values(L); heads = L; } catch (e) {}
+        try { const hr = await cexCall("Storeloads_getlist", { length: 5000, limit: 5000, order_by: "store_load_id desc" }, user, pass); let L = hr.data || []; if (!Array.isArray(L)) L = Object.values(L); heads = L; } catch (e) { logErr("cex-plan:L3624", e); }
         const headById2 = (ref, hs) => hs.find(h => String(h.store_load_id) === String(ref) || String(h.id) === String(ref) || String(h.barsy_id) === String(ref)) || null;
         const supById = {}; for (const h of heads) supById[String(h.store_load_id || h.id)] = { sup: h.supplier_name || "?", date: (h.doc_date || h.date || "").slice(0, 10) };
         const grp = {};
@@ -3749,6 +3763,11 @@ async function handlerInner(req, res) {
 };
 
 module.exports = async function handler(req, res) {
-  await handlerInner(req, res);
+  try { await handlerInner(req, res); }
+  catch (e) {
+    logErr("cex-plan:необработена грешка", e, { action: req && req.body && req.body.action ? String(req.body.action).slice(0, 40) : null });
+    if (!res.headersSent) { try { res.status(500).json({ ok: false, error: "server_error", message: "Грешка в сървъра: " + String(e && e.message).slice(0, 160) }); } catch (x) { /* ignore */ } }
+  }
   if (req._cacheFlush) { try { await req._cacheFlush(); } catch (e) { /* ignore */ } }
+  if (ERR_PENDING.length) { try { await Promise.allSettled(ERR_PENDING.splice(0)); } catch (e) { /* ignore */ } }
 };
