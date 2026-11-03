@@ -2019,7 +2019,7 @@ module.exports = async function handler(req, res) {
   const token = body.token != null ? body.token : q.token;
   // Четящите/диагностичните действия приемат и PEEK_TOKEN (read-only прозорецът за
   // разработка); всичко, което пише, иска пълния токен.
-  const readOnly = ["list", "list_requests", "inspect", "stock_report", "dlv_lines", "suggest_request"].includes(body.action);
+  const readOnly = ["list", "list_requests", "inspect", "stock_report", "dlv_lines", "suggest_request", "brak_today"].includes(body.action);
   const allowed = readOnly ? viewTokens.concat([process.env.PEEK_TOKEN].filter(Boolean)) : viewTokens;
   const staff = ["stock_report", "tg_supply"].includes(body.action) && isStaff(token);
   const skladOk = TG.skladKey() && token === TG.skladKey() && ["list", "list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply", "stock_report", "push_to_shop", "list_zag", "qc_save"].includes(body.action);
@@ -2252,6 +2252,18 @@ module.exports = async function handler(req, res) {
         actions: actions.slice(0, 20),
         raw: String(r.raw || "").slice(0, Number(body.raw_chars) || 1500)
       });
+      return;
+    }
+
+    // ── 03.11 — само четене: записаният брак на точката за деня (за облачното вечерно нулиране; brak_log е затворена за anon) ──
+    if (body.action === "brak_today") {
+      const TG = require("../lib/telegram.js");
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date || "")) ? body.date : TG.sofiaDate();
+      try {
+        const r = await fetch(`${SB_URL}/rest/v1/brak_log?select=items,none,barsy_doc,barsy_error,created_at&for_date=eq.${day}&order=id.asc`, { headers: sbHeaders() });
+        if (!r.ok) { res.status(502).json({ ok: false, error: "brak_read_" + r.status }); return; }
+        res.status(200).json({ ok: true, date: day, rows: await r.json() });
+      } catch (e) { res.status(502).json({ ok: false, error: "brak_read_failed" }); }
       return;
     }
 
