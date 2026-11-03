@@ -2587,7 +2587,14 @@ async function handlerInner(req, res) {
         const a = all.find(x => Number(x.account_id) === acc);
         if (a) {
           const cd = String(a.create_date || "").slice(0, 10), cl = String(a.close_date || "").slice(0, 10);
-          if (cd !== date && cl !== date) {
+          // 03.11 (поправка вечерта): сметките за утрешния разнос се създават ДНЕС, а стоковата е с дата утре — нормален ред.
+          // Блокираме само стара сметка: създадена >1 ден преди деня на стоковата, или 2–3 дни — ако има по-нова сметка за същия магазин.
+          const dayN = iso => Math.round(Date.parse(iso + "T00:00:00Z") / 86400000);
+          const age = cd ? dayN(date) - dayN(cd) : null;
+          const pk = x => String(x.person_id == null ? "" : x.person_id);
+          const newer = all.some(x => Number(x.account_id) > acc && Number(x.client_id) === Number(a.client_id) && pk(x) === pk(a) && !x.is_anulate);
+          const fresh = cl === date || (age != null && age >= -1 && (age <= 1 || (age <= 3 && !newer)));
+          if (!fresh) {
             res.status(200).json({ ok: false, error: "сметка №" + acc + " е от " + (cd || cl || "друга дата") + ", не от " + date + " — за този магазин няма сметка за деня; не правя стокова със стари числа", account_date_mismatch: true, account_id: acc, account_created: cd, account_closed: cl });
             return;
           }
