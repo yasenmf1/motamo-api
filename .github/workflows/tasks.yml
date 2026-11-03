@@ -67,7 +67,7 @@ jobs:
           python3 tasks/ceh_jobs.py stock --dry | sed 's/k=.*/k=***/'
           python3 tasks/ceh_jobs.py evening --dry
           python3 tasks/ceh_jobs.py night --dry
+          cd tasks && python3 llm.py ping
       - name: Пулс (облачните задачи са живи)
         if: always()
         run: python3 -c "import sys; sys.path.insert(0, 'tasks'); import lib; lib.heartbeat('cloud')"
-          cd tasks && python3 llm.py ping
