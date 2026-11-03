@@ -21,6 +21,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_OWNER_CHAT_ID: ${{ secrets.TELEGRAM_OWNER_CHAT_ID }}
       CEX_TOOL_TOKEN: ${{ secrets.CEX_TOOL_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -69,3 +70,4 @@ jobs:
       - name: Пулс (облачните задачи са живи)
         if: always()
         run: python3 -c "import sys; sys.path.insert(0, 'tasks'); import lib; lib.heartbeat('cloud')"
+          cd tasks && python3 llm.py ping
