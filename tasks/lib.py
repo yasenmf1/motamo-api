@@ -77,3 +77,15 @@ def heartbeat(name, note=None):
         sb("task_heartbeat?on_conflict=name", "POST", [{"name": name, "at": dt.datetime.utcnow().isoformat() + "Z", "note": note}], "resolution=merge-duplicates,return=minimal")
     except Exception:
         pass
+
+
+class _SofiaDate(dt.date):
+    @classmethod
+    def today(cls):
+        return sofia_now().date()
+
+
+def patch_today():
+    """datetime.date.today() да връща датата в София (в облака часовникът е UTC)."""
+    import datetime
+    datetime.date = _SofiaDate

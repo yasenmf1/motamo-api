@@ -1,4 +1,4 @@
-# Задачи на собственика, които работят в облака (не зависят от компютъра): оборот на точката, наблюдател на поръчките, сутрешно съобщение.
+# Задачи на собственика, които работят в облака (не зависят от компютъра): точка (оборот, наблюдател, сутрин), цех (суровини 7:30, вечер 20:30, нулиране 22:00), сайт (7:50).
 # GitHub пуска планираното със закъснение и понякога го пропуска — затова на 10 мин, а tasks/gate.py пази всеки слот да мине веднъж (час по София).
 name: tasks
 on:
@@ -16,6 +16,8 @@ jobs:
       PEEK_TOKEN: ${{ secrets.PEEK_TOKEN }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_OWNER_CHAT_ID: ${{ secrets.TELEGRAM_OWNER_CHAT_ID }}
+      CEX_TOOL_TOKEN: ${{ secrets.CEX_TOOL_TOKEN }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - name: Наблюдател на поръчките (09:00–21:30)
@@ -27,3 +29,15 @@ jobs:
       - name: Сутрешно съобщение за точката (Пн–Пт 8:40)
         continue-on-error: true
         run: if python3 tasks/gate.py sutrin 1-5 08:40; then python3 tasks/sutrin.py; fi
+      - name: Цех · суровини за деня (всеки ден 7:30)
+        continue-on-error: true
+        run: if python3 tasks/gate.py ceh-stock '*' 07:30; then python3 tasks/ceh_jobs.py stock; fi
+      - name: Сайт · проверка (всеки ден 7:50)
+        continue-on-error: true
+        run: if python3 tasks/gate.py sait '*' 07:50; then python3 tasks/sait.py; fi
+      - name: Цех · вечерна проверка (20:30)
+        continue-on-error: true
+        run: if python3 tasks/gate.py ceh-vecher '*' 20:30; then python3 tasks/ceh_jobs.py evening; fi
+      - name: Цех · вечерно нулиране (22:00)
+        continue-on-error: true
+        run: if python3 tasks/gate.py ceh-nulirane '*' 22:00; then python3 tasks/ceh_jobs.py night; fi
