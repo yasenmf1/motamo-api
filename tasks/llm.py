@@ -6,7 +6,7 @@ MODEL_SMART = "claude-sonnet-5-5"
 MODEL_CHEAP = "claude-haiku-5-5"
 
 
-def ask(user, system="", model=MODEL_SMART, max_tokens=2000, images=None, timeout=120):
+def ask(user, system="", model=MODEL_SMART, max_tokens=2000, images=None, timeout=120, tools=None):
     """images: списък от (media_type, base64). Връща текста на отговора; при грешка вдига RuntimeError с кратка причина."""
     key = env("ANTHROPIC_API_KEY")
     if not key:
@@ -16,6 +16,8 @@ def ask(user, system="", model=MODEL_SMART, max_tokens=2000, images=None, timeou
     body = {"model": model, "max_tokens": max_tokens, "messages": [{"role": "user", "content": content}]}
     if system:
         body["system"] = system
+    if tools:
+        body["tools"] = tools
     rq = urllib.request.Request("https://api.anthropic.com/v1/messages", json.dumps(body).encode(),
                                 {"content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"})
     try:
