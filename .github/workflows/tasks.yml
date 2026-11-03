@@ -67,6 +67,9 @@ jobs:
       - name: Реклама · дневен преглед (всеки ден 9:30)
         continue-on-error: true
         run: if python3 tasks/gate.py ads '*' 09:30; then python3 tasks/ads_job.py; fi
+      - name: Репорт сметки и стокови (10:30 за сутрешните, 23:30 за вечерните)
+        continue-on-error: true
+        run: if python3 tasks/gate.py stokovi-report '*' 10:30 23:30; then python3 tasks/stokovi_report.py; fi
       - name: Суха проба (само при ръчно пускане с dry=true)
         if: github.event_name == 'workflow_dispatch' && inputs.dry == 'true'
         run: |
