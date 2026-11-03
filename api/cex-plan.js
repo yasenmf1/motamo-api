@@ -2091,7 +2091,8 @@ function updLabs(){$('dlab').textContent=fmtBg($('date').value);$('plab').textCo
 $('date').addEventListener('change',updLabs);$('date').addEventListener('input',updLabs);
 $('pdate').addEventListener('change',updLabs);$('pdate').addEventListener('input',updLabs);updLabs();
 function msg(t,k){var m=$('msg');m.textContent=t;m.className='msg '+(k||'')}
-function api(p){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:$('tok').value},p))}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})})}
+function api(p){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:$('tok').value},p))}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})}).then(function(j){staleBar(j);return j})}
+function staleBar(j){var b=document.getElementById('stalebar');if(j&&j.stale){if(!b){b=document.createElement('div');b.id='stalebar';b.style.cssText='position:sticky;top:0;z-index:9999;background:#fff3cd;color:#7a4b00;padding:8px 12px;font:14px system-ui,sans-serif;border-bottom:1px solid #f0c36d';document.body.insertBefore(b,document.body.firstChild)}b.textContent='⚠ Barsy не отговаря — показвам последните записани данни от '+(j.stale_at_local||'')+'. Не записвай нищо, докато Barsy не се върне.'}else if(b&&j&&j.ok){b.remove()}}
 function seed(){msg('Зареждам…');api({seed_date:$('date').value}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||'')+' '+(j.hint||''),'err');return}shops=j.shops||[];renderGrid();renderPlan(j);if(j.note){msg(j.note,'err')}else{msg('Заредени '+(j.seeded_accounts||0)+' сметки. Коригирай и „Изчисли план".','ok')}}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function schedSeed(){msg('Зареждам по график…');api({action:'schedule_seed',date:$('date').value}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}shops=j.shops||[];renderGrid();$('planbox').innerHTML='';var dn=['нд','пн','вт','ср','чт','пт','сб'][j.dow];var adhoc=(j.seeded_accounts||0)-(j.scheduled_count||0);msg('График за '+dn+': '+(j.scheduled_count||0)+' по график (тикнати) + '+adhoc+' по заявка (нетикнати). Тикни каквото има заявка, коригирай и „Сметки".','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
@@ -2168,7 +2169,55 @@ restoreGrid();
 </script></body></html>`;
 }
 
-module.exports = async function handler(req, res) {
+
+// ── ★ 03.11 — КЕШ НА BARSY: последните добри отговори на четящите действия се пазят в Supabase `barsy_cache`;
+// при недостъпен Barsy (5xx, таймаут, нечетим отговор) връщаме последния добър отговор с `stale:true`.
+// Пише се САМО непразен успешен отговор (за да не презапишем кеша с празни данни по време на авария).
+const BARSY_CACHE = {
+  list_objects:  { maxH: 168, valid: o => o.diag && o.diag.http === 200 && Array.isArray(o.objects) && o.objects.length >= 10 },
+  stock:         { maxH: 36,  valid: o => Array.isArray(o.rows) && o.rows.length > 0 },
+  shortage:      { maxH: 36,  valid: o => o.razos_accounts > 0 },
+  load_razos:    { maxH: 36,  valid: o => Array.isArray(o.shops) && o.shops.length > 0 },
+  lots_expiring: { maxH: 36,  valid: o => o.ok === true && JSON.stringify(o).length > 60 }
+};
+function barsyCacheKey(body) {
+  const b = {}; for (const k of Object.keys(body).sort()) if (!["token", "k", "o", "_sim_barsy_down"].includes(k)) b[k] = body[k];
+  if (!b.date) b._day = sofiaToday();       // без дата → ключът е за днешния ден (вчерашен разнос не се показва за днес)
+  return body.action + ":" + JSON.stringify(b);
+}
+function sofiaHm(iso) {
+  try { const d = new Date(iso); const p = new Intl.DateTimeFormat("bg-BG", { timeZone: "Europe/Sofia", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(d); return p; } catch (e) { return String(iso || ""); }
+}
+function withBarsyCache(req, res, body) {
+  const cfg = BARSY_CACHE[body.action]; if (!cfg) return res;
+  const p = Object.create(res); let code = 200, out, done = false;
+  p.status = function (c) { code = c; return p; };
+  p.json = function (o) { out = o; done = true; return p; };
+  for (const m of ["setHeader", "getHeader", "removeHeader", "end", "write", "send"]) if (typeof res[m] === "function") p[m] = res[m].bind(res);
+  req._cacheFlush = async () => {
+    if (!done) return;
+    const key = barsyCacheKey(body);
+    const down = body._sim_barsy_down === true || code >= 500 ||
+      (out && out.ok === false && /unreach|unavail|barsy|http_5|timeout|failed|502|504/i.test(String(out.error || "") + " " + String(out.message || ""))) ||
+      (out && out.diag && out.diag.http >= 500);
+    try {
+      if (!down && out && out.ok === true && cfg.valid(out)) {
+        const txt = JSON.stringify(out);
+        if (txt.length < 900000) await sbReq(`barsy_cache?on_conflict=key`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify([{ key, data: out, updated_at: new Date().toISOString() }]) }, 8000);
+      } else if (down) {
+        const rows = await sbReq(`barsy_cache?select=data,updated_at&key=eq.${encodeURIComponent(key)}&limit=1`, null, 8000);
+        const hit = rows && rows[0];
+        if (hit && (Date.now() - new Date(hit.updated_at).getTime()) < cfg.maxH * 3600e3) {
+          res.status(200).json(Object.assign({}, hit.data, { stale: true, stale_at: hit.updated_at, stale_at_local: sofiaHm(hit.updated_at), stale_reason: "Barsy не отговаря" }));
+          return;
+        }
+      }
+    } catch (e) { /* кешът не бива да чупи основния отговор */ }
+    res.status(code).json(out);
+  };
+  return p;
+}
+async function handlerInner(req, res) {
   res.setHeader("Cache-Control", "no-store");
   const q = (req.query && typeof req.query === "object") ? req.query : {};
   if (req.method === "GET" && q.view) { const _send = res.send.bind(res); res.send = (html) => _send(withHome(q, html)); }
@@ -2407,6 +2456,7 @@ module.exports = async function handler(req, res) {
   const allowed = isWrite ? strong : strong.concat([process.env.CEX_VIEW_TOKEN]);
   const okJson = allowed.some(t => t && token === t);
   if (!okJson) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+  res = withBarsyCache(req, res, body);
 
   // ── ★ S32 — заявките от формата за деня (таб „📥 Заявки" в инструмента) ──
   if (body.action === "shop_requests") {
@@ -2457,6 +2507,7 @@ module.exports = async function handler(req, res) {
     const user = process.env.BARSY_CEX_USER, pass = process.env.BARSY_CEX_PASS;
     if (!user || !pass) { res.status(500).json({ ok: false, error: "cex_not_configured" }); return; }
     const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 2000 }, user, pass);
+    if (!r.ok) { res.status(503).json({ ok: false, error: "barsy_unavailable", message: "Barsy не отговаря (HTTP " + r.status + ")" }); return; }
     let all = r.data || []; if (!Array.isArray(all)) all = Object.values(all);
     const diag = { http: r.status, accounts: all.length, first: all[0] ? Object.keys(all[0]).slice(0, 12) : null, raw: all.length ? undefined : String(r.raw || "").slice(0, 300) };
     const byKey = {};
@@ -3697,3 +3748,7 @@ module.exports = async function handler(req, res) {
   });
 };
 
+module.exports = async function handler(req, res) {
+  await handlerInner(req, res);
+  if (req._cacheFlush) { try { await req._cacheFlush(); } catch (e) { /* ignore */ } }
+};
