@@ -1584,6 +1584,15 @@ module.exports = async function handler(req, res) {
     try { res.status(200).json(await require("../lib/dlv-watch.js").run({})); } catch (e) { res.status(502).json({ ok: false, error: "dlvwatch_failed", message: String(e && e.message).slice(0, 160) }); }
     return;
   }
+  // ★ 03.11 — пулс на планираните задачи (на 15 мин от GitHub Actions heartbeat.yml): Telegram при закъснение >35 мин и при връщане. ?dry=1 само показва решението.
+  if (req.method === "GET" && q.cron === "heartbeat") {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try { res.status(200).json(await require("../lib/task-heartbeat.js").run({ dry: q.dry === "1" })); } catch (e) { res.status(502).json({ ok: false, error: "heartbeat_failed", message: String(e && e.message).slice(0, 160) }); }
+    return;
+  }
   // ★ S38 — на час: Barsy отговаря ли (публичен + резервен вход); Telegram само при проблем. GitHub Actions barsywatch.yml.
   if (req.method === "GET" && q.cron === "barsywatch") {
     const auth = String(req.headers && (req.headers.authorization || "") || "");

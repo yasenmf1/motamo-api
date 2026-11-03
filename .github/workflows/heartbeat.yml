@@ -1,0 +1,16 @@
+# Пулс на планираните задачи (lib/task-heartbeat.js → /api/transfer?cron=heartbeat). Работи в облака, не зависи от компютъра.
+# Telegram само ако пулсът на агент „Поща“ (на 10 мин) е по-стар от 35 мин в 07–23 ч, и при връщане.
+name: heartbeat
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS --retry 2 --retry-delay 10 -X GET \
+            "https://motamo-api.vercel.app/api/transfer?cron=heartbeat" \
+            -H "User-Agent: vercel-cron" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
