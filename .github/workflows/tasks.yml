@@ -9,13 +9,16 @@ on:
       dry:
         description: 'Суха проба на Цех и Сайт (печата, не праща, не пише в Barsy)'
         default: 'false'
+permissions:
+  contents: read
+  actions: write
 concurrency:
   group: tasks
   cancel-in-progress: false
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     env:
       PEEK_TOKEN: ${{ secrets.PEEK_TOKEN }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -81,3 +84,10 @@ jobs:
       - name: Пулс (облачните задачи са живи)
         if: always()
         run: python3 -c "import sys; sys.path.insert(0, 'tasks'); import lib; lib.heartbeat('cloud')"
+      - name: Следващ кръг (верига — не зависи от графика на GitHub)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          now=$(date +%s); next=$(( (now / 600 + 1) * 600 )); sleep $(( next - now ))
+          gh workflow run tasks.yml --repo "$GITHUB_REPOSITORY" --ref main
