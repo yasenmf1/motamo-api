@@ -5,6 +5,10 @@ on:
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch:
+    inputs:
+      dry:
+        description: 'Суха проба на Цех и Сайт (печата, не праща, не пише в Barsy)'
+        default: 'false'
 concurrency:
   group: tasks
   cancel-in-progress: false
@@ -41,3 +45,10 @@ jobs:
       - name: Цех · вечерно нулиране (22:00)
         continue-on-error: true
         run: if python3 tasks/gate.py ceh-nulirane '*' 22:00; then python3 tasks/ceh_jobs.py night; fi
+      - name: Суха проба (само при ръчно пускане с dry=true)
+        if: github.event_name == 'workflow_dispatch' && inputs.dry == 'true'
+        run: |
+          python3 tasks/sait.py --dry
+          python3 tasks/ceh_jobs.py stock --dry | sed 's/k=.*/k=***/'
+          python3 tasks/ceh_jobs.py evening --dry
+          python3 tasks/ceh_jobs.py night --dry
