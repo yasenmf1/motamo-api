@@ -363,7 +363,8 @@ async function lotRows(filters, user, pass) {
     const rr = await fetch(`${CEX_API}/endpoints/json?bid=1`, { method: "POST",
       headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify({ Lots_GetListAvailability: { params: { bid: 1, article_id: 1, id: 1 }, filters: Object.assign({ has_amount_real_or_reserved: 1 }, filters || {}) } }), signal });
-    const d = await rr.json();
+    const txt = await rr.text(); let d = null;
+    try { d = JSON.parse(txt); } catch (e) { throw new Error("Barsy не отговаря (HTTP " + rr.status + ") — недостъпен е или е в поддръжка; опитай след 1–2 минути"); }
     const rows = d && d.Lots_GetListAvailability;
     if (!Array.isArray(rows)) throw new Error("партидите не се прочетоха от Barsy");
     return rows.filter(x => Number(x.depot_id) === CEX_DEPOT);
@@ -992,7 +993,7 @@ var O=${JSON.stringify(key)},K=${JSON.stringify(tok)},D=null,SEL=null,ITEMS=[];
 function $(i){return document.getElementById(i)}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
-function api(b){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({o:O,k:K},b))}).then(function(r){return r.json()})}
+function api(b){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({o:O,k:K},b))}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})})}
 function dm(iso){var p=iso.split('-');return p[2]+'.'+p[1]}
 function load(date){msg('Зареждам…','info');api({action:'shop_form_data',date:date}).then(function(j){if(!j.ok){msg('Грешка: '+(j.message||j.error||''),'err');return}D=j;SEL=j.for_date;ITEMS=j.items;render();$('msg').className='msg'}).catch(function(e){msg('Няма връзка. Опитай пак.','err')})}
 function render(){var ex=D.existing&&D.existing.for_date===SEL?D.existing:null,exq={},exs={};if(ex){(ex.rows||[]).forEach(function(r){exq[r.id]=r.qty});exs=ex.swap_qty||{}}
@@ -1624,7 +1625,7 @@ input[type=date]{font:15px system-ui;padding:5px 8px;border:1px solid #ccc;borde
 <script>
 var K=${JSON.stringify(k || "")},API='/api/cex-plan',MAXR=5,ST={stops:[],routes:[],auto:[]},DRAG=null;
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-function post(b){b.token=K;return fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json()})}
+function post(b){b.token=K;return fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})})}
 function cityOf(z){return z==='Сливен'||z==='Хасково'?z:'Стара Загора'}
 function isNew(k){var s=stop(k);return !!(s&&s.isNew)}
 function stop(k){return ST.stops.filter(function(s){return s.key===k})[0]}
@@ -2090,7 +2091,7 @@ function updLabs(){$('dlab').textContent=fmtBg($('date').value);$('plab').textCo
 $('date').addEventListener('change',updLabs);$('date').addEventListener('input',updLabs);
 $('pdate').addEventListener('change',updLabs);$('pdate').addEventListener('input',updLabs);updLabs();
 function msg(t,k){var m=$('msg');m.textContent=t;m.className='msg '+(k||'')}
-function api(p){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:$('tok').value},p))}).then(function(r){return r.json()})}
+function api(p){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:$('tok').value},p))}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})})}
 function seed(){msg('Зареждам…');api({seed_date:$('date').value}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||'')+' '+(j.hint||''),'err');return}shops=j.shops||[];renderGrid();renderPlan(j);if(j.note){msg(j.note,'err')}else{msg('Заредени '+(j.seeded_accounts||0)+' сметки. Коригирай и „Изчисли план".','ok')}}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function schedSeed(){msg('Зареждам по график…');api({action:'schedule_seed',date:$('date').value}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}shops=j.shops||[];renderGrid();$('planbox').innerHTML='';var dn=['нд','пн','вт','ср','чт','пт','сб'][j.dow];var adhoc=(j.seeded_accounts||0)-(j.scheduled_count||0);msg('График за '+dn+': '+(j.scheduled_count||0)+' по график (тикнати) + '+adhoc+' по заявка (нетикнати). Тикни каквото има заявка, коригирай и „Сметки".','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}

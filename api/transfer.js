@@ -688,7 +688,7 @@ var K=${JSON.stringify(k)},items=[],DRAFT='motamo-transfer-draft';
 function $(i){return document.getElementById(i)}
 function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
+function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})})}
 function draft(){try{return JSON.parse(localStorage.getItem(DRAFT)||'{}')}catch(e){return{}}}
 function saveDraft(){var d={};document.querySelectorAll('.q').forEach(function(i){if(i.value)d[i.dataset.id]=i.value});try{localStorage.setItem(DRAFT,JSON.stringify(d))}catch(e){}conv();count()}
 function count(){var n=0;document.querySelectorAll('.q').forEach(function(i){if(Number(i.value)>0)n++});$('cnt').textContent=n?(n+' продукта в заявката'):'нищо не е въведено';$('send').disabled=!n}
@@ -792,7 +792,7 @@ function $(i){return document.getElementById(i)}
 function msg(t,c,scroll){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t;
 if(scroll){try{m.scrollIntoView({behavior:'smooth',block:'center'})}catch(e){window.scrollTo(0,0)}}}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
+function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})})}
 var ALL=[],DATES=[],SEL=null,OPEN={};
 var LBL={pending:'чака',processing:'в процес',done:'изпълнена',partial:'частична',failed:'пропадна',cancelled:'отказана'};
 function n3(v){return Math.round(Number(v)*1000)/1000}
@@ -988,7 +988,7 @@ ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
 <script>
 var K=${JSON.stringify(k)},OWN=${isOwner(k) ? "true" : "false"};
 function $(i){return document.getElementById(i)}
-function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
+function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})})}
 if(OWN){
 Promise.all([api({action:'list_requests',days:14}),api({action:'stock_report'})]).then(function(r){
 var q=r[0],s=r[1],bits=[];
@@ -1031,7 +1031,7 @@ ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
 var K=${JSON.stringify(k)};
 function $(i){return document.getElementById(i)}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
+function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})})}
 function n3(v){return Math.round(Number(v)*1000)/1000}
 function dt(s){var d=new Date(s);return isNaN(d)?'':('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
 function load(){api({action:'list_requests',days:14}).then(function(j){
@@ -1074,7 +1074,7 @@ var K=${JSON.stringify(k)},items=[];
 function $(i){return document.getElementById(i)}
 function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
+function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})})}
 function n3(v){return Math.round(Number(v)*1000)/1000}
 function count(){var n=0;document.querySelectorAll('.q').forEach(function(i){if(Number(i.value)>0)n++});$('cnt').textContent=n?(n+' продукта за изпращане'):'нищо не е въведено';$('send').disabled=!n}
 function chk(i){var mx=i.dataset.max;if(mx!==''&&Number(i.value)>Number(mx)){i.value=n3(mx);i.style.borderColor='#d97706'}else{i.style.borderColor=''}count()}
@@ -1134,7 +1134,7 @@ var K=${JSON.stringify(k)},items=[];
 function $(i){return document.getElementById(i)}
 function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.json()})}
+function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})})}
 function n3(v){return Math.round(Number(v)*1000)/1000}
 function today(){var d=new Date(),z=function(x){return('0'+x).slice(-2)};return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}
 function count(){var n=0;document.querySelectorAll('.q').forEach(function(i){if(Number(i.value)>0)n++});$('cnt').textContent=n?(n+' заготовки за производство'):'нищо не е въведено';$('go').disabled=!n}
