@@ -1587,7 +1587,7 @@ module.exports = async function handler(req, res) {
   // ★ 04.11 — push известия за статуса на поръчките: вика се на минута от Supabase pg_cron (ключ k = HMAC от PEEK_TOKEN). ?dry=1 само показва.
   if (req.method === "GET" && q.cron === "push") {
     const P = require("../lib/push.js"), O = require("./order.js");
-    if (!process.env.PEEK_TOKEN || q.k !== P.cronKey()) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    if (!process.env.PEEK_TOKEN || !(await P.cronKeyOk(q.k))) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
     try { res.status(200).json(await P.tick(shopCall, O.accountState, O.findByRef, { dry: q.dry === "1" })); } catch (e) { res.status(502).json({ ok: false, error: "push_failed", message: String(e && e.message).slice(0, 120) }); }
     return;
   }
