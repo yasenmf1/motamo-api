@@ -1,0 +1,18 @@
+# Ръчно пускане на сутрешния бриф „Новини“ веднага (отделно от веригата tasks, за да не се измества от нея).
+name: novini-now
+on:
+  workflow_dispatch:
+concurrency:
+  group: novini-now
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_OWNER_CHAT_ID: ${{ secrets.TELEGRAM_OWNER_CHAT_ID }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      PEEK_TOKEN: ${{ secrets.PEEK_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tasks/novini_job.py
