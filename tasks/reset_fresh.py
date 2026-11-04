@@ -94,3 +94,16 @@ if WRITE and couts:
     after = stock("cex", 2)
     print("ЦЕХ/Точка след записа:", {n: q for i, (n, q) in after.items() if i in cex_fresh})
     print("ЦЕХ/Основен непроменен:", {n: q for i, (n, q) in stock("cex", 1).items() if i in cex_fresh})
+
+
+# ── 3) ЦЕХ, склад „Основен“: само сварен суши ориз (67) — не се ползва на другия ден, вечер се изхвърля (04.11, собственикът: „давай изписването“) ──
+RICE_MAIN_GUARD_KG = 40
+if NIGHT:
+    q = stock("cex", 1).get(67, ("", 0))[1]
+    if q > RICE_MAIN_GUARD_KG:
+        print("ПРЕДПАЗИТЕЛ: сварен ориз в Основен %s кг (над %s) — НЕ записвам, виж ръчно" % (q, RICE_MAIN_GUARD_KG))
+    elif q > 0.0005:
+        r = save("cex", "Storeouts_save", {"id": None, "action_type": "save_and_close",
+                 "values": {"depot_id": "1", "type_id": "-1", "doc_date": None, "description": "Неотчетен остатък на сварен суши ориз в Основен — край на деня (%s)" % TODAY},
+                 "rows": [{"row_id": "", "article_id": 67, "article_name": "заг. Сварен суши ориз", "amount": q, "notes": ""}]}, 67)
+        print("  изписване цех/Основен (ориз %s кг):" % q, r.get("head") or r)
