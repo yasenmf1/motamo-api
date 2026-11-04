@@ -73,6 +73,9 @@ jobs:
       - name: Репорт сметки и стокови (10:30 за сутрешните, 23:30 за вечерните)
         continue-on-error: true
         run: if python3 tasks/gate.py stokovi-report '*' 10:30 23:30; then python3 tasks/stokovi_report.py; fi
+      - name: Новини веднага (ръчно)
+        if: github.event_name == 'workflow_dispatch' && inputs.novini == 'true'
+        run: python3 tasks/novini_job.py
       - name: Суха проба (само при ръчно пускане с dry=true)
         if: github.event_name == 'workflow_dispatch' && inputs.dry == 'true'
         run: |

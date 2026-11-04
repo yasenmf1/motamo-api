@@ -38,7 +38,7 @@ sel_prompt = ("Ето заглавия и линкове от български
               "bg=политика/общество от news.bg и dnes.bg; biz=profit.bg и capital.bg (енергия, суровини, цени, ЕС фондове, AI); "
               "world=Иран/Близък изток, Украйна–Русия, САЩ, ЕС; sport=само sportal.bg (Ливърпул и английско първенство първо).\n\n" + headlines[:14000])
 try:
-    raw = ask(sel_prompt, max_tokens=1200)
+    raw = ask(sel_prompt, max_tokens=4000)
     picks = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
 except Exception as e:
     send("Новини: не успях да подредя брифа (%s)" % str(e)[:120]); sys.exit(0)
@@ -66,7 +66,7 @@ for key, title, desc, n in SECTIONS:
         continue
     material = "\n\n".join("ЗАГЛАВИЕ: %s\nЛИНК: %s\nТЕКСТ: %s" % (titles.get(u, ""), u, texts.get(u) or "(не се чете)") for u in urls)
     try:
-        body = ask("Напиши секцията „%s“ (%s) за %s, %d–%d новини, от тези материали:\n\n%s" % (title, desc, day, n - 1, n + 1, material), system=RULES, max_tokens=2500)
+        body = ask("Напиши секцията „%s“ (%s) за %s, %d–%d новини, от тези материали:\n\n%s" % (title, desc, day, n - 1, n + 1, material), system=RULES, max_tokens=5000)
         send(title + " · " + day + "\n\n" + body[:3300]); sent += 1
     except Exception as e:
         send(title + ": не успях да я напиша (%s)" % str(e)[:100])
@@ -74,7 +74,7 @@ for key, title, desc, n in SECTIONS:
 # „ОЩЕ“: Xpeng/електромобили, Bitcoin, стрийминг премиери — с уеб търсене (ако е разрешено в акаунта)
 try:
     body = ask("Намери накратко днешното по: Xpeng/електромобили (Ясен чака P7+), цена на Bitcoin, нови стрийминг премиери. По 1–2 реда на тема на български; ако няма нищо — кажи го. Само от резултатите от търсенето.",
-               system="Пишеш на български, без markdown.", max_tokens=1200,
+               system="Пишеш на български, без markdown.", max_tokens=3000,
                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}])
     if body:
         send("🔎 ОЩЕ · " + day + "\n\n" + body[:3300]); sent += 1
