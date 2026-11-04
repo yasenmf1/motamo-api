@@ -1584,6 +1584,13 @@ module.exports = async function handler(req, res) {
     try { res.status(200).json(await require("../lib/dlv-watch.js").run({})); } catch (e) { res.status(502).json({ ok: false, error: "dlvwatch_failed", message: String(e && e.message).slice(0, 160) }); }
     return;
   }
+  // ★ 04.11 — push известия за статуса на поръчките: вика се на минута от Supabase pg_cron (ключ k = HMAC от PEEK_TOKEN). ?dry=1 само показва.
+  if (req.method === "GET" && q.cron === "push") {
+    const P = require("../lib/push.js"), O = require("./order.js");
+    if (!process.env.PEEK_TOKEN || q.k !== P.cronKey()) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try { res.status(200).json(await P.tick(shopCall, O.accountState, O.findByRef, { dry: q.dry === "1" })); } catch (e) { res.status(502).json({ ok: false, error: "push_failed", message: String(e && e.message).slice(0, 120) }); }
+    return;
+  }
   // ★ 03.11 — пулс на планираните задачи (на 15 мин от GitHub Actions heartbeat.yml): Telegram при закъснение >35 мин и при връщане. ?dry=1 само показва решението.
   if (req.method === "GET" && q.cron === "heartbeat") {
     const auth = String(req.headers && (req.headers.authorization || "") || "");

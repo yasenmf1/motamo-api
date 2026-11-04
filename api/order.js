@@ -745,6 +745,11 @@ module.exports = async function handler(req, res) {
     await orderStatus(req, res, user, pass);
     return;
   }
+  // ★ 04.11 — push известия: публичният VAPID ключ за абонамент на браузъра
+  if (req.method === "GET" && req.query && req.query.vapid) {
+    try { res.status(200).json({ ok: true, key: require("../lib/push.js").vapid().pub }); } catch (e) { fail(res, 500, "no_key", "push unavailable"); }
+    return;
+  }
   if (req.method !== "POST") {
     fail(res, 405, "method_not_allowed", "Method not allowed");
     return;
@@ -764,6 +769,11 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // --- push абонамент за статуса на поръчка (04.11) ---------------------------
+  if (body.action === "push_subscribe") {
+    try { const r = await require("../lib/push.js").subscribe(body); res.status(r.status).json(r.body); } catch (e) { fail(res, 502, "push_failed", "could not save"); }
+    return;
+  }
   // --- промо код ИТТ: проверка (без поръчка) ---------------------------------
   if (body.action === "promo") {
     const pct = require("../lib/promo.js").pctFor(body.code);
@@ -1376,3 +1386,5 @@ module.exports = async function handler(req, res) {
     ...(dlv ? { mode: "delivery", delivery_fee: feeEur, delivery_status: deliveryStatus, tracking_url: trackingUrl } : {})
   });
 };
+module.exports.accountState = accountState;
+module.exports.findByRef = findByRef;
