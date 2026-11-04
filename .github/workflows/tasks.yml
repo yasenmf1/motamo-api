@@ -96,4 +96,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           now=$(date +%s); next=$(( (now / 600 + 1) * 600 )); sleep $(( next - now ))
-          gh workflow run tasks.yml --repo "$GITHUB_REPOSITORY" --ref main
+          for i in 1 2 3 4 5 6 7 8; do gh workflow run tasks.yml --repo "$GITHUB_REPOSITORY" --ref main && exit 0; sleep 20; done; exit 1
