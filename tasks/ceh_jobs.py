@@ -121,7 +121,21 @@ def night():
     if rc != 0:
         return send("Цех: не успях вечерното нулиране — скриптът върна грешка (код %s)." % rc, "ceh-nulirane")
     lines = [l for l in out.splitlines() if l.strip()]
-    msg = ["Цех · вечер (нулиране) " + sofia_now().strftime("%d.%m"), brak_txt]
+    # 04.11 (собственикът: „изпращай всяка вечер“): сверка на точката след брака и нулирането — артикули с отрицателна наличност
+    # (системата е изписала по рецепти повече, отколкото е заредено) и големи положителни остатъци; само показва, нищо не записва.
+    sver = ""
+    try:
+        rq = urllib.request.Request("https://motamo-api.vercel.app/api/peek", json.dumps({"token": env("PEEK_TOKEN"), "action": "Articles_getlistobject", "host": "shop", "params": {"filters": {"depot_id": 1}, "extra_properties": ["store_amount"]}}).encode(), {"content-type": "application/json"})
+        dd = json.load(urllib.request.urlopen(rq, timeout=60)).get("data")
+        L = dd if isinstance(dd, list) else (dd.get("list") or list(dd.values()))
+        neg = sorted([(float(a.get("store_amount") or 0), a.get("article_name")) for a in L if float(a.get("store_amount") or 0) < -0.05 and a.get("article_name") != "Вода"])
+        if neg:
+            sver = "⚠️ Сверка точка — минус наличност (изписано по рецепти повече от заредено): " + "; ".join("%s %s" % (n, round(q, 2)) for q, n in neg[:12]) + (" …" if len(neg) > 12 else "")
+        else:
+            sver = "✅ Сверка точка: няма артикули с минус наличност."
+    except Exception:
+        sver = "Сверката на точката не се прочете тази вечер."
+    msg = ["Цех · вечер (нулиране) " + sofia_now().strftime("%d.%m"), brak_txt, sver]
     msg += [l[:300] for l in lines]
     send("\n".join(msg)[:3400], "ceh-nulirane")
 
