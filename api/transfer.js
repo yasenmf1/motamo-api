@@ -1598,6 +1598,7 @@ module.exports = async function handler(req, res) {
       if (q.dry === "1") { res.status(200).json({ ok: true, dry: true, ...out }); return; }
       if (out.used != null && out.used < 0.5) { res.status(200).json({ ok: true, skipped: "no_sales" }); return; }
       await TG.tgSend(out.text, TG.OWNER_CHAT_ID, today);
+      await TG.tgSend(out.text, TG.CEX_CHAT_ID, today).catch(() => null); // 04.11: и в групата
       await TG.sentSave("rice_check", today, { extra_kg: out.extra_kg, used: out.used });
       res.status(200).json({ ok: true, sent: true, extra_kg: out.extra_kg });
     } catch (e) { res.status(502).json({ ok: false, error: "rice_failed", message: String(e && e.message).slice(0, 120) }); }
