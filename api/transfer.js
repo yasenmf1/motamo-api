@@ -675,7 +675,7 @@ ${homeBtn(k)}<span class="tabs"><button id="t1" class="on" onclick="tab(1)">Но
   <div id="msg" class="msg info">Зареждам наличностите…</div>
   <div id="p1"><div style="margin:0 0 8px"><button class="ghost" onclick="suggest()">💡 Предложение</button></div><table id="tbl"></table></div>
   <div id="p2" style="display:none"><div id="days" class="days"></div><div id="hist"></div></div>
-  <div id="p3" style="display:none"><p style="margin:6px 0 12px;color:var(--dim);font-size:14px">Вечер: напиши колко е останало от пресните заготовки (кг). Това се записва като брак и утре започваме от 0. Ако не е останало нищо, натисни „Няма брак".</p><table id="brt"></table><div style="display:flex;gap:8px;margin-top:12px"><button id="brsend" onclick="brakSend(false)">Запиши брака</button><button class="ghost" onclick="brakSend(true)">Няма брак</button></div></div>
+  <div id="p3" style="display:none"><p style="margin:6px 0 12px;color:var(--dim);font-size:14px">Напиши колко брак има (развалено, изхвърлено, изпуснато) по всеки артикул — и вечер колко е останало от пресните заготовки. Записва се като брак в Barsy и се сверява със системата. Ако няма, натисни „Няма брак".</p><table id="brt"></table><div style="display:flex;gap:8px;margin-top:12px"><button id="brsend" onclick="brakSend(false)">Запиши брака</button><button class="ghost" onclick="brakSend(true)">Няма брак</button></div></div>
 </div>
 <div class="bar" id="bar">
   <span id="cnt" style="color:var(--dim);font-size:14px">—</span>
@@ -739,8 +739,8 @@ function tab(n){$('t1').className=n===1?'on':'';$('t2').className=n===2?'on':'';
 $('p1').style.display=n===1?'':'none';$('p2').style.display=n===2?'':'none';$('p3').style.display=n===3?'':'none';$('bar').style.display=n===1?'':'none';
 if(n===2)hist();if(n===3)brakDraw()}
 /* 02.11 — „Брак" за деня: пресните заготовки; вечер се пише колко е останало → брак в Barsy на точката */
-function brakDraw(){var h='<tr><th>Заготовка</th><th class="num">В системата</th><th class="num">Остана (кг)</th></tr>';
-items.filter(function(it){return it.zag}).forEach(function(it){h+='<tr><td>'+esc(it.name)+'</td><td class="num">'+(Math.round(it.shop_stock*100)/100)+' '+esc(it.unit)+'</td><td class="num"><input class="bq" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-name="'+esc(it.name)+'"></td></tr>'});
+function brakDraw(){var h='<tr><th>Артикул</th><th class="num">В системата</th><th class="num">Брак (колко)</th></tr>';
+items.filter(function(it){return !it.missing}).slice().sort(function(a,b){return (b.zag?1:0)-(a.zag?1:0)}).forEach(function(it){h+='<tr><td>'+esc(it.name)+'</td><td class="num">'+(Math.round(it.shop_stock*100)/100)+' '+esc(it.unit)+'</td><td class="num"><input class="bq" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-name="'+esc(it.name)+'"></td></tr>'});
 $('brt').innerHTML=h}
 function brakSend(none){var rows=[];if(!none){document.querySelectorAll('.bq').forEach(function(i){var v=Number(i.value);if(v>0)rows.push({cex_id:Number(i.dataset.id),name:i.dataset.name,qty:v})});
 if(!rows.length){msg('Нищо не е въведено. Ако няма брак, натисни „Няма брак".','err');return}}
