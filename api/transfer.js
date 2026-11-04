@@ -1615,7 +1615,8 @@ module.exports = async function handler(req, res) {
     const auth = String(req.headers && (req.headers.authorization || "") || "");
     const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
       || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")))
-      || (process.env.RECONCILE_TOKEN && q.token === process.env.RECONCILE_TOKEN); // 04.11: и от cron-job.org (GitHub графикът не тръгва)
+      || (process.env.RECONCILE_TOKEN && q.token === process.env.RECONCILE_TOKEN) // 04.11: и от cron-job.org (GitHub графикът не тръгва)
+      || (q.k && await require("../lib/push.js").cronKeyOk(q.k)); // и от Supabase pg_cron (на 5 мин)
     if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
     try { res.status(200).json(await require("../lib/task-heartbeat.js").run({ dry: q.dry === "1" })); } catch (e) { res.status(502).json({ ok: false, error: "heartbeat_failed", message: String(e && e.message).slice(0, 160) }); }
     return;
