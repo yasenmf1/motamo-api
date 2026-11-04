@@ -1585,7 +1585,7 @@ module.exports = async function handler(req, res) {
     return;
   }
   // ★ 04.11 — проверка за ориза на точката в 15:00 (Пн–Сб): вика се от Supabase pg_cron в 12:00 и 13:00 UTC; праща САМО между 15:00 и 15:19 София и веднъж на ден. ?dry=1 само показва.
-  if (req.method === "GET" && q.cron === "rice") {
+  if (req.method === "GET" && q.cron === "ricecheck") {
     const P = require("../lib/push.js");
     if (!process.env.PEEK_TOKEN || !(await P.cronKeyOk(q.k))) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
     try {
@@ -1593,12 +1593,12 @@ module.exports = async function handler(req, res) {
       const hm = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
       const dow = new Date(today + "T12:00:00Z").getUTCDay();
       if (q.dry !== "1" && (dow === 0 || hm < "15:00" || hm >= "15:20")) { res.status(200).json({ ok: true, skipped: "not_now", hm }); return; }
-      if (q.dry !== "1" && await TG.sentGet("rice", today)) { res.status(200).json({ ok: true, skipped: "already_sent" }); return; }
+      if (q.dry !== "1" && await TG.sentGet("rice_check", today)) { res.status(200).json({ ok: true, skipped: "already_sent" }); return; }
       const out = await require("../lib/rice.js").check(shopCall, now);
       if (q.dry === "1") { res.status(200).json({ ok: true, dry: true, ...out }); return; }
       if (out.used != null && out.used < 0.5) { res.status(200).json({ ok: true, skipped: "no_sales" }); return; }
       await TG.tgSend(out.text, TG.OWNER_CHAT_ID, today);
-      await TG.sentSave("rice", today, { extra_kg: out.extra_kg, used: out.used });
+      await TG.sentSave("rice_check", today, { extra_kg: out.extra_kg, used: out.used });
       res.status(200).json({ ok: true, sent: true, extra_kg: out.extra_kg });
     } catch (e) { res.status(502).json({ ok: false, error: "rice_failed", message: String(e && e.message).slice(0, 120) }); }
     return;
