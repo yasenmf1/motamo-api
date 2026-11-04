@@ -9,6 +9,9 @@ on:
       dry:
         description: 'Суха проба на Цех и Сайт (печата, не праща, не пише в Barsy)'
         default: 'false'
+      novini:
+        description: 'Пусни Новини веднага (без слот)'
+        default: 'false'
 permissions:
   contents: read
   actions: write
