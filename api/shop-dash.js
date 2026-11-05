@@ -9,6 +9,7 @@
 // Само ЧЕТЕ. Гейт: CEX_VIEW_TOKEN (или силните токени).
 
 const COSTSMOD = require("../lib/costs.js");
+const UIV2 = require("../lib/ui-v2.js");
 const COSTS = COSTSMOD.COSTS || {};
 const PACKAGING = COSTSMOD.PACKAGING || {};
 const FALLBACK_FOOD_COST = COSTSMOD.FALLBACK_FOOD_COST || {};
@@ -241,7 +242,7 @@ function page(data, k) {
   const pctOf = v => tot > 0 ? Math.round((Number(v) || 0) / tot * 100) + "%" : "—";
   const tips = err ? "" : (data.insights || []).map(x => `<li class="${x.t}"><span class="ic">${x.t === "good" ? "✅" : x.t === "warn" ? "⚠️" : x.t === "bad" ? "🔴" : "💡"}</span><span>${esc(x.text)}</span></li>`).join("");
   const pay = err ? { cash: {}, card: {}, other: {} } : data.pay;
-  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">${UIV2.fonts}
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Каравелов · Дашборд</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script><style>
 :root{color-scheme:light}*{box-sizing:border-box}
@@ -309,7 +310,7 @@ td.c{text-align:right;color:#7a8087}tr:nth-child(even) td{background:#fafbfc}
 .wf .out .b .l{font-size:11px;color:#7a8087;text-transform:uppercase}.wf .out .b .v{font-size:23px;font-weight:800;font-variant-numeric:tabular-nums}
 .wf .mini{font-size:12px;color:#7a8087;margin-top:8px}.wf .reset{font:12px system-ui;font-weight:700;border:0;border-radius:7px;padding:5px 12px;background:#f7e1e2;color:#7a0c12;cursor:pointer;margin-top:10px}
 @media(max-width:520px){th,td{padding:8px 10px;font-size:13px}.kpi .v{font-size:22px}}
-</style></head><body>
+${UIV2.css}</style></head><body>
 <header><h1>🍱 Каравелов · Дашборд</h1><div class="d">${err ? "грешка" : esc(data.from) + " – " + esc(data.to) + " · " + (data.accounts || 0) + " сметки · оборот без ДДС"}</div></header>
 <div class="wrap">
 <form class="period" method="get">

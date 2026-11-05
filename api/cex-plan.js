@@ -11,6 +11,7 @@
 // RECONCILE_TOKEN / PAY_HMAC_SECRET / PREVIEW_TOKEN. За view=today и CEX_VIEW_TOKEN.
 
 const crypto = require("crypto");
+const UIV2 = require("../lib/ui-v2.js");
 const DATA = require("../lib/_cexdata.js");
 const PAYROLL = require("../lib/payroll.js");
 const TG = require("../lib/telegram.js");
@@ -951,7 +952,7 @@ async function shopRequestsFor(dateIso, host) {
 }
 function zayavkaPage(key, tok) {
   const name = formObjLabel(key), place = (CEX_OBJECTS[key] || {}).label ? formObjPlace(key) : "";
-  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">${UIV2.fonts}
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
 <title>Заявка · ${esc(name)}</title><style>
 :root{color-scheme:light}*{box-sizing:border-box}
@@ -976,7 +977,7 @@ td.l{text-align:center}td.l input{width:38px;min-width:0;height:34px;padding:0;t
 .send:disabled{opacity:.5}
 .msg{padding:10px 12px;border-radius:10px;margin-top:10px;display:none;font-size:14px}.msg.ok{display:block;background:#e8f5e9;color:#1b5e20}.msg.err{display:block;background:#fde8e8;color:#9b1c1c}.msg.info{display:block;background:#e9f0fb;color:#1a3d7a}
 select{width:100%;padding:10px;font-size:15px;border:1px solid #cfd3d8;border-radius:10px;background:#fff}
-</style></head><body>
+${UIV2.css}</style></head><body>
 <header><h1>${esc(name)}</h1>${place ? `<div class="d">${esc(place)}</div>` : ""}<div class="d" id="hd">Заявка към MOTAMO</div></header>
 <div class="wrap" style="padding-bottom:0"><div class="card" style="text-align:center;padding:14px 12px;border:3px solid #b3121b"><div style="font-size:13px;color:#777">Заявката е за</div><div id="dd" style="font-size:26px;font-weight:900;color:#b3121b;line-height:1.15;margin:4px 0"></div><div id="td" style="font-size:13px;color:#777"></div><a href="#" id="sw" onclick="swap();return false" style="display:inline-block;margin-top:6px;color:#1565c0;font-size:13px">Не е за този ден? Смени</a></div></div>
 <div class="wrap">
@@ -1486,7 +1487,7 @@ function withHome(q, html) {
 }
 
 function todayPage(inner) {
-  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">${UIV2.fonts}
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="180">
 <title>Цех · днес за производство</title><style>
 :root{color-scheme:light}*{box-sizing:border-box}
@@ -1517,7 +1518,7 @@ header .d{font-size:15px;opacity:.93;margin-top:4px}
 .empty h2{margin:0 0 8px;font-size:23px;color:#14171a}
 .note{color:#7a8087;font-size:13px;text-align:center;margin:2px 0 20px}
 @media (max-width:520px){header h1{font-size:22px}.wrap{padding:12px;gap:13px}.card td{font-size:19px;padding:12px 15px}.card td.q{font-size:24px}}
-</style></head><body>${inner}</body></html>`;
+${UIV2.css}</style></head><body>${inner}</body></html>`;
 }
 
 // ── HTML: ЦЕХ ДАШБОРД (красив + интерактивен, Chart.js) ───────────────────────
@@ -1526,7 +1527,7 @@ function reportsHubPage(k) {
   const ek = encodeURIComponent(k || "");
   const cex = `/api/cex-plan?view=dashboard&k=${ek}&nohome=1`;
   const shop = `/api/shop-dash?view=dashboard&k=${ek}&nohome=1`;
-  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">${UIV2.fonts}
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>MOTAMO · Репорти</title><style>
 :root{color-scheme:light}*{box-sizing:border-box}html,body{height:100%}
 body{margin:0;font:15px system-ui,Segoe UI,Roboto,sans-serif;background:#eef0f3;color:#14171a;display:flex;flex-direction:column}
@@ -1540,7 +1541,7 @@ header .brand img{width:30px;height:30px;border-radius:7px;background:#fff;paddi
 .frames{position:relative;flex:1 1 auto;min-height:0}
 .frames iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#eef0f3}
 .frames iframe[hidden]{display:none}
-</style></head><body>
+${UIV2.css}</style></head><body>
 <header>
   <div class="brand"><img src="https://motamo.bg/icons/icon-192.png" alt="" onerror="this.style.display='none'">MOTAMO · Репорти</div>
   <div class="tabs">
@@ -1583,7 +1584,7 @@ async function carryOver(date, have) {
 
 // ── HTML: МАРШРУТИ НА ШОФЬОРА (собственикът влачи обектите в маршрути 1–5; ботът ползва записаното) ──
 function routesPage(k, date) {
-  return `<!doctype html><html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">${UIV2.fonts}<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MOTAMO · Маршрути</title><style>
 *{box-sizing:border-box}body{margin:0;font:15px system-ui,Segoe UI,Roboto,sans-serif;background:#eef0f3;color:#14171a}
 .wrap{max-width:1100px;margin:0 auto;padding:14px}
@@ -1612,7 +1613,7 @@ input[type=date]{font:15px system-ui;padding:5px 8px;border:1px solid #ccc;borde
 .bar .save{background:#c8151f;color:#fff;flex:1}.bar .auto,.bar .add,.bar .clear{background:#eee}
 .bar button[disabled]{opacity:.45;cursor:not-allowed}
 .msg{font-size:14px;color:#0a6b2e;margin:6px 0 0}.msg.err{color:#b3121b}.msg.warn{color:#b06a00}
-</style></head><body><div class="wrap">
+${UIV2.css}</style></head><body><div class="wrap">
 <h1>🚚 Маршрути на шофьора</h1>
 <p class="sub">Обектите със <b>стокова</b> за <input type="date" id="date" value="${esc(date)}"> <span id="state"></span></p>
 <div class="cols">
@@ -1690,7 +1691,7 @@ function dashboardPage(data, k) {
   const gapNeto = err ? 0 : (data.gap_neto != null ? data.gap_neto : (data.total_neto - data.invoiced_neto));
   const waiting = err ? [] : (data.clients || []).filter(c => !c.exempt && c.gap > 0.5).sort((a, b) => b.gap - a.gap);
   const waitRows = waiting.map(c => `<tr><td class="n">${esc(c.name)}</td><td class="q">${bg(c.turnover)}</td><td class="q inv">${bg(c.invoiced)}</td><td class="q gap bad">${bg(c.gap)}</td></tr>`).join("");
-  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">${UIV2.fonts}
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Цех · Дашборд</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script><style>
 :root{color-scheme:light}*{box-sizing:border-box}
@@ -1768,7 +1769,7 @@ tr:nth-child(even) td{background:#fafbfc}
 .wf .mini{font-size:12px;color:#7a8087;margin-top:8px}.wf .reset{font:12px system-ui;font-weight:700;border:0;border-radius:7px;padding:5px 12px;background:#e7eaef;color:#374151;cursor:pointer;margin-top:10px}
 tr.hl td{background:#eafaf4!important}
 @media(max-width:520px){th,td{padding:8px 10px;font-size:13px}.kpi .v{font-size:22px}}
-</style></head><body>
+${UIV2.css}</style></head><body>
 <header><h1>🍣 Цех · Дашборд</h1><div class="d">${err ? "грешка" : esc(data.from) + " – " + esc(data.to) + " · " + (data.accounts || 0) + " сметки · оборот без ДДС"}</div></header>
 <div class="wrap">
 <form class="period" method="get">
@@ -1974,7 +1975,7 @@ if(window.Chart){var mk=Object.keys(LOADSM).sort();if(mk.length){
 
 // ── HTML: репорт за наличности (суровини+заготовки) ───────────────────────────
 function stockPage(inner) {
-  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">${UIV2.fonts}
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Цех · наличности</title><style>
 :root{color-scheme:light}*{box-sizing:border-box}body{font:16px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#fff;color:#111}
 header{background:#b3121b;color:#fff;padding:14px 18px}header h1{margin:0;font-size:22px}header .d{font-size:14px;opacity:.9;margin-top:2px}
@@ -1982,12 +1983,12 @@ header{background:#b3121b;color:#fff;padding:14px 18px}header h1{margin:0;font-s
 table{border-collapse:collapse;width:100%}th,td{padding:9px 12px;border-bottom:1px solid #eee;text-align:left;font-size:16px}
 th{background:#f0f1f3}td.q,th.q{text-align:right;font-weight:800;white-space:nowrap}td.c{color:#888;font-size:13px;text-align:center}
 tr.lo td{background:#fde8e8}tr.lo td.q{color:#9b1c1c}.ok{color:#1b5e20;font-weight:600}.note{color:#666;font-size:13px;margin-top:18px}
-</style></head><body>${inner}</body></html>`;
+${UIV2.css}</style></head><body>${inner}</body></html>`;
 }
 
 // ── HTML: цех лист (наличност + производство + поръчки), четящ ────────────────
 function sheetPage(inner) {
-  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">${UIV2.fonts}
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Цех лист</title><style>
 :root{color-scheme:light}*{box-sizing:border-box}body{font:16px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#eef0f3;color:#14171a}
 header{background:linear-gradient(135deg,#b3121b,#7a0c12);color:#fff;padding:16px 18px;position:sticky;top:0;z-index:5;box-shadow:0 2px 12px rgba(0,0,0,.18)}
@@ -2003,12 +2004,12 @@ td.prod{font-weight:800;color:#b3121b}td.prod.zero{color:#9aa0a6}
 td.blank{background:#fbfcfd;min-width:52px;border-left:1px dashed #d7dade;border-right:1px dashed #d7dade}
 .low{background:#fff7ed}.draft{color:#9a6a00;font-size:12px;background:#fff8e1;padding:8px 14px;border-radius:8px;margin-top:4px}
 .note{color:#7a8087;font-size:12px;text-align:center;margin:4px 0 16px}
-</style></head><body>${inner}</body></html>`;
+${UIV2.css}</style></head><body>${inner}</body></html>`;
 }
 
 // ── HTML: страница за собственика (въвеждане/коригиране) ──────────────────────
 function toolPage() {
-  return `<!doctype html><html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  return `<!doctype html><html lang="bg"><head><meta charset="utf-8">${UIV2.fonts}<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MOTAMO цех — производствен калкулатор</title><style>
 :root{color-scheme:light}*{box-sizing:border-box}body{font:14px system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#eef0f3;color:#1a1a1a}
 header{background:linear-gradient(135deg,#c8151f,#7a0c12);color:#fff;padding:9px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:5;box-shadow:0 2px 12px rgba(122,12,18,.35)}
@@ -2064,7 +2065,7 @@ h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.
 .pick:hover{background:#eef7f0;border-color:#0a7d33}
 .pick.has{opacity:.55}
 .pick .tag{font-size:11px;background:#e2e4e8;color:#555;border-radius:4px;padding:1px 6px;margin-left:6px}
-</style></head><body>
+${UIV2.css}</style></head><body>
 <header><div class="brand"><img src="https://motamo.bg/icons/icon-192.png" alt="MOTAMO" onerror="this.style.display='none'"><h1>MOTAMO цех<small>производство · сметки · стокова</small></h1></div>
 <span id="tokwrap"><input id="tok" type="password" placeholder="токен" size="16"></span>
 <span class="grp"><label>Зареди</label><input id="date" type="date" lang="bg-BG"><b class="dlab" id="dlab"></b><button class="alt" onclick="loadRazos()" title="Зарежда РАЗНОСА за деня = отворените сметки (направени в навечерието/сутринта), без вчерашните затворени. За ③ Стокова.">Отворени сметки</button><button class="alt" onclick="loadByLot()" title="Зарежда сметките от партида L.[деня от Зареди] (±2 дни), през реалните движения. За референтен минал ден или преди ③ Стокова.">↻ По партида</button></span>
