@@ -116,7 +116,7 @@ def night():
                 brak.append("%s — %s" % (it.get("name"), it.get("qty")))
         brak_txt = "Записан брак днес: " + "; ".join(brak) if brak else "Точката не е записала брак днес."
     except Exception:
-        brak_txt = "Записаният брак не се чете от облака (журналът е затворен) — виж го в Barsy на точката."
+        brak_txt = ""  # 05.11: редът „брак не се чете“ е махнат по искане на собственика
     out, rc = run("reset_fresh.py", *(() if DRY else ("night",)), timeout=300)
     if rc != 0:
         return send("Цех: не успях вечерното нулиране — скриптът върна грешка (код %s)." % rc, "ceh-nulirane")
@@ -135,7 +135,7 @@ def night():
             sver = "✅ Сверка точка: няма артикули с минус наличност."
     except Exception:
         sver = "Сверката на точката не се прочете тази вечер."
-    msg = ["Цех · вечер (нулиране) " + sofia_now().strftime("%d.%m"), brak_txt, sver]
+    msg = [x for x in ["Цех · вечер (нулиране) " + sofia_now().strftime("%d.%m"), brak_txt, sver] if x]
     msg += [l[:300] for l in lines]
     send("\n".join(msg)[:3400], "ceh-nulirane")
 
