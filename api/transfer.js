@@ -706,15 +706,29 @@ function shopPage(k) {
 ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}
 select.q.tpl{width:100%;min-width:0;max-width:150px;padding:10px 6px;font:inherit;font-size:15px;border-radius:10px;border:1px solid var(--line);background:var(--card,#1c1f24);color:inherit}
 select.q.tpl:not([value=""]){border-color:var(--sun)}
+/* ★ 05.11 — Брак и Зареждане: карти вместо таблица (нов вид) */
+#brt{display:block;border:0}#brt tbody{display:block}
+#brt tr{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:12px 14px;margin-bottom:10px}
+#brt th{display:none}#brt td{border:0!important;padding:0;background:transparent!important}
+#brt td:first-child{flex:1;min-width:0;font-weight:700;font-size:16px}
+#brt td:nth-child(2){font-size:12.5px;color:var(--dim);text-align:right}#brt td:nth-child(2):before{content:"на склад ";}
+#brt td.num:last-child input{width:92px;height:48px}
+.zar{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:14px 16px;margin-bottom:10px}
+.zar .r1{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.zar .n{font-weight:700;font-size:16px}.zar .q{font:800 22px var(--font-d);font-variant-numeric:tabular-nums}
+.zar .r2{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--dim);margin-top:8px}
+.zar .tg{font-weight:700;padding:3px 10px;border-radius:999px;font-size:12px}
+.zar .tg.bad{background:var(--errbg);color:var(--errfg)}.zar .tg.good{background:var(--okbg);color:var(--okfg)}
 </style></head><body>
 <header><span class="logo" role="img" aria-label="MOTAMO">${LOGO}</span>
 <h1>Заявка към цеха<small>точка Каравелов · какво да донесат</small></h1>
-${homeBtn(k)}<span class="tabs"><button id="t1" class="on" onclick="tab(1)">Нова заявка</button><button id="t2" onclick="tab(2)">История</button><button id="t3" onclick="tab(3)">Брак</button></span></header>
+${homeBtn(k)}<span class="tabs"><button id="t1" class="on" onclick="tab(1)">Нова заявка</button><button id="t2" onclick="tab(2)">История</button><button id="t3" onclick="tab(3)">Брак</button><button id="t4" onclick="tab(4)">Зареждане</button></span></header>
 <div class="wrap">
   ${navBar(k, "shop")}
   <div id="msg" class="msg info">Зареждам наличностите…</div>
   <div id="p1"><div style="margin:0 0 8px"><button class="ghost" onclick="suggest()">💡 Предложение</button></div><table id="tbl"></table></div>
   <div id="p2" style="display:none"><div id="days" class="days"></div><div id="hist"></div></div>
+  <div id="p4" style="display:none"><p style="margin:6px 0 12px;color:var(--dim);font-size:14px">Съставките, които идват с доставка директно на точката (не от цеха): колко има сега и колко да се заредят за седмицата. Само за преглед — какво си заредил, кажи на Ясен.</p><div id="zl"><div class="card" style="color:var(--dim)">Зареждам…</div></div></div>
   <div id="p3" style="display:none"><p style="margin:6px 0 12px;color:var(--dim);font-size:14px">Напиши колко брак има (развалено, изхвърлено, изпуснато) по всеки артикул — и вечер колко е останало от пресните заготовки. Записва се като брак в Barsy и се сверява със системата. Ако няма, натисни „Няма брак".</p><table id="brt"></table><div style="display:flex;gap:8px;margin-top:12px"><button id="brsend" onclick="brakSend(false)">Запиши брака</button><button class="ghost" onclick="brakSend(true)">Няма брак</button></div></div>
 </div>
 <div class="bar" id="bar">
@@ -775,9 +789,18 @@ var LBL={pending:'чака цеха',processing:'в процес',done:'доне
 function n3(v){return Math.round(Number(v)*1000)/1000}
 function hhmm(s){var d=new Date(s);return isNaN(d)?'':('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
 function dlabel(d){if(d===TODAY)return 'Днес';var y=new Date(Date.parse(TODAY)-864e5).toISOString().slice(0,10);if(d===y)return 'Вчера';var p=d.split('-');return p[2]+'.'+p[1]}
-function tab(n){$('t1').className=n===1?'on':'';$('t2').className=n===2?'on':'';$('t3').className=n===3?'on':'';
-$('p1').style.display=n===1?'':'none';$('p2').style.display=n===2?'':'none';$('p3').style.display=n===3?'':'none';$('bar').style.display=n===1?'':'none';
-if(n===2)hist();if(n===3)brakDraw()}
+function tab(n){$('t1').className=n===1?'on':'';$('t2').className=n===2?'on':'';$('t3').className=n===3?'on':'';$('t4').className=n===4?'on':'';
+$('p1').style.display=n===1?'':'none';$('p2').style.display=n===2?'':'none';$('p3').style.display=n===3?'':'none';$('p4').style.display=n===4?'':'none';$('bar').style.display=n===1?'':'none';
+if(n===2)hist();if(n===3)brakDraw();if(n===4)zarDraw()}
+/* 05.11 — „Зареждане": седмичният списък на съставките без цеха (само четене) */
+var ZLOADED=false;
+function zfmt(x){return String(Math.round(x*100)/100).replace('.',',')}
+function zarDraw(){if(ZLOADED)return;
+api({action:'direct_list'}).then(function(j){if(!j.ok){$('zl').innerHTML='<div class="card" style="color:var(--dim)">Не успях да прочета списъка. Опитай пак след малко.</div>';return}
+ZLOADED=true;var h='';(j.rows||[]).forEach(function(r){var need=r.load>0,neg=r.stock<0;
+h+='<div class="zar"><div class="r1"><span class="n">'+esc(r.name)+'</span><span class="q"'+(neg?' style="color:var(--sun)"':'')+'>'+zfmt(r.stock)+' '+esc(r.unit)+'</span></div>'+
+'<div class="r2"><span>седмица ≈ '+zfmt(r.week)+' '+esc(r.unit)+'</span><span class="tg '+(need?'bad':'good')+'">'+(neg?'В минус':need?'Зареди '+zfmt(r.load):'Достатъчно')+'</span></div></div>'});
+$('zl').innerHTML=h||'<div class="card" style="color:var(--dim)">Няма данни.</div>'}).catch(function(){$('zl').innerHTML='<div class="card" style="color:var(--dim)">Мрежова грешка.</div>'})}
 /* 02.11 — „Брак" за деня: пресните заготовки; вечер се пише колко е останало → брак в Barsy на точката */
 function brakDraw(){var h='<tr><th>Артикул</th><th class="num">В системата</th><th class="num">Брак (колко)</th></tr>';
 items.filter(function(it){return !it.missing}).slice().sort(function(a,b){return (b.zag?1:0)-(a.zag?1:0)}).forEach(function(it){h+='<tr><td>'+esc(it.name)+'</td><td class="num">'+(Math.round(it.shop_stock*100)/100)+' '+esc(it.unit)+'</td><td class="num"><input class="bq" type="number" min="0" step="any" inputmode="decimal" data-id="'+it.cex_id+'" data-name="'+esc(it.name)+'"></td></tr>'});
@@ -2111,11 +2134,11 @@ module.exports = async function handler(req, res) {
   const token = body.token != null ? body.token : q.token;
   // Четящите/диагностичните действия приемат и PEEK_TOKEN (read-only прозорецът за
   // разработка); всичко, което пише, иска пълния токен.
-  const readOnly = ["list", "list_requests", "inspect", "stock_report", "dlv_lines", "suggest_request", "brak_today"].includes(body.action);
+  const readOnly = ["list", "list_requests", "inspect", "stock_report", "dlv_lines", "suggest_request", "brak_today", "direct_list"].includes(body.action);
   const allowed = readOnly ? viewTokens.concat([process.env.PEEK_TOKEN].filter(Boolean)) : viewTokens;
   const staff = ["stock_report", "tg_supply"].includes(body.action) && isStaff(token);
   const skladOk = TG.skladKey() && token === TG.skladKey() && ["list", "list_requests", "process_request", "cancel_request", "produce_zag", "tg_supply", "stock_report", "push_to_shop", "list_zag", "qc_save"].includes(body.action);
-  const pointOk = TG.pointKey() && token === TG.pointKey() && ["list", "create_request", "list_requests", "suggest_request", "brak_save"].includes(body.action);
+  const pointOk = TG.pointKey() && token === TG.pointKey() && ["list", "create_request", "list_requests", "suggest_request", "brak_save", "direct_list"].includes(body.action);
   if (!staff && !skladOk && !pointOk && !allowed.some(t => token === t)) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
   // ★ S33 — запис на Контрола на качеството (цех): само добавя редове в `qc_log`, не пипа Barsy.
   if (body.action === "qc_save") {
@@ -2344,6 +2367,13 @@ module.exports = async function handler(req, res) {
         actions: actions.slice(0, 20),
         raw: String(r.raw || "").slice(0, Number(body.raw_chars) || 1500)
       });
+      return;
+    }
+
+    // ── 05.11 — само четене: седмичният списък за зареждане на точката (съставки без цеха), същият като понеделнишкото съобщение
+    if (body.action === "direct_list") {
+      try { const out = await require("../lib/direct-list.js").build(shopCall, new Date()); res.status(200).json({ ok: true, rows: out.rows }); }
+      catch (e) { res.status(502).json({ ok: false, error: "direct_list_failed", message: String(e && e.message).slice(0, 120) }); }
       return;
     }
 
