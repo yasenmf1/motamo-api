@@ -61,13 +61,33 @@ def state_put(name, state):
     sb("task_state?on_conflict=name", "POST", [{"name": name, "state": state, "at": dt.datetime.utcnow().isoformat() + "Z"}], "resolution=merge-duplicates,return=minimal")
 
 
-def notify(text):
+# 05.11: съобщенията на агентите отиват в групата „МОТАМО_Агенти“ (по една тема на агент), за да не се трупа личният чат с бота.
+# Идентификаторите не са тайни. Липсва ли темата или групата откаже — пращаме както преди, в личния чат.
+AGENTS_CHAT = "-1004146364644"
+TOPICS = {"Цех": 5, "Точка": 6, "Сайт": 7, "Финанси": 8, "Новини": 9, "Реклама": 10, "Конкуренти": 11, "Поща": 12}
+TOPIC_BY_SCRIPT = {"ceh_jobs.py": "Цех", "novini_job.py": "Новини", "ads_job.py": "Реклама", "sait.py": "Сайт",
+                   "sutrin.py": "Точка", "turnover.py": "Точка", "watch.py": "Точка", "stokovi_report.py": "Точка",
+                   "week.py": "Точка", "hours.py": "Точка", "finansi.py": "Финанси"}
+TOPIC_BY_NAME = {"finansi": "Финанси", "finansi-srok": "Финанси", "tochka-sedmica": "Точка", "chasove": "Точка"}
+
+
+def _tg_post(tok, payload):
+    rq = urllib.request.Request("https://api.telegram.org/bot%s/sendMessage" % tok, json.dumps(payload).encode(), {"content-type": "application/json"})
+    urllib.request.urlopen(rq, timeout=30)
+
+
+def notify(text, topic=None):
     tok, chat = env("TELEGRAM_BOT_TOKEN"), env("TELEGRAM_OWNER_CHAT_ID")
     if not (tok and chat):
         print("Telegram: липсва ключ"); return False
-    rq = urllib.request.Request("https://api.telegram.org/bot%s/sendMessage" % tok, json.dumps({"chat_id": chat, "text": text[:3500]}).encode(), {"content-type": "application/json"})
+    topic = topic or TOPIC_BY_SCRIPT.get(os.path.basename(sys.argv[0] if sys.argv else ""))
+    if topic in TOPICS:
+        try:
+            _tg_post(tok, {"chat_id": AGENTS_CHAT, "message_thread_id": TOPICS[topic], "text": text[:3500]}); return True
+        except Exception as e:
+            print("Telegram (тема %s): не успя — %s; пращам в личния чат" % (topic, type(e).__name__))
     try:
-        urllib.request.urlopen(rq, timeout=30); return True
+        _tg_post(tok, {"chat_id": chat, "text": text[:3500]}); return True
     except Exception as e:
         print("Telegram: не успя — " + type(e).__name__); return False
 
