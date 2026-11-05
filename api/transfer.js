@@ -1604,6 +1604,24 @@ module.exports = async function handler(req, res) {
     } catch (e) { res.status(502).json({ ok: false, error: "rice_failed", message: String(e && e.message).slice(0, 120) }); }
     return;
   }
+  // ★ 05.11 — понеделнишки списък за зареждане на точката (съставки без цеха): вика се от Supabase pg_cron в 06:00 и 07:00 UTC; праща САМО в понеделник 09:00–09:19 София, веднъж на ден, само на собственика. ?dry=1 само показва.
+  if (req.method === "GET" && q.cron === "directlist") {
+    const P = require("../lib/push.js");
+    if (!process.env.PEEK_TOKEN || !(await P.cronKeyOk(q.k))) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try {
+      const now = new Date(), today = TG.sofiaDate(now);
+      const hm = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
+      const dow = new Date(today + "T12:00:00Z").getUTCDay();
+      if (q.dry !== "1" && (dow !== 1 || hm < "09:00" || hm >= "09:20")) { res.status(200).json({ ok: true, skipped: "not_now", hm }); return; }
+      if (q.dry !== "1" && await TG.sentGet("direct_list", today)) { res.status(200).json({ ok: true, skipped: "already_sent" }); return; }
+      const out = await require("../lib/direct-list.js").build(shopCall, now);
+      if (q.dry === "1") { res.status(200).json({ ok: true, dry: true, ...out }); return; }
+      await TG.tgSend(out.text, TG.OWNER_CHAT_ID, today);
+      await TG.sentSave("direct_list", today, { n: out.rows.filter(r => r.load > 0).length });
+      res.status(200).json({ ok: true, sent: true });
+    } catch (e) { res.status(502).json({ ok: false, error: "directlist_failed", message: String(e && e.message).slice(0, 120) }); }
+    return;
+  }
   // ★ 04.11 — push известия за статуса на поръчките: вика се на минута от Supabase pg_cron (ключ k = HMAC от PEEK_TOKEN). ?dry=1 само показва.
   if (req.method === "GET" && q.cron === "push") {
     const P = require("../lib/push.js"), O = require("./order.js");
