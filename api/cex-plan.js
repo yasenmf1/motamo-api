@@ -2065,7 +2065,29 @@ h2{font-size:15px;margin:18px 0 6px}.plan{display:flex;gap:24px;flex-wrap:wrap}.
 .pick:hover{background:#eef7f0;border-color:#0a7d33}
 .pick.has{opacity:.55}
 .pick .tag{font-size:11px;background:#e2e4e8;color:#555;border-radius:4px;padding:1px 6px;margin-left:6px}
-${UIV2.css}</style></head><body>
+${UIV2.css}
+/* ★ 05.11 — таблицата за производство: по-голямо, по-ясно, по-меко (само външен вид) */
+.wrap{padding:18px 16px}
+.scroll{background:#fff;border:1px solid #E7E3DA!important;box-shadow:0 1px 2px rgba(20,20,20,.04)}
+#grid{font-size:14px}
+#grid th{font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:11px 8px;border-right:1px solid #2c2926!important}
+#grid th.set{background:#4a3d1a!important}
+#grid td{padding:9px 8px;border-bottom:1px solid #EFEBE2;border-right:1px solid #F4F1EA}
+#grid tr:nth-child(even) td{background:#FBFAF7}
+#grid tbody tr:hover td{background:#FDF1F1}
+#grid td.shop{font-weight:600;background:#fff;box-shadow:1px 0 0 #E7E3DA}
+#grid td input{width:54px;height:40px;border:1.5px solid #D9D4C8!important;border-radius:12px!important;font:700 16px Montserrat,system-ui,sans-serif;text-align:center;color:#141414;background:#fff}
+#grid td input:focus{outline:none!important;border-color:#E30613!important;box-shadow:0 0 0 3px rgba(227,6,19,.16)}
+#grid td.set input{background:#FFF7E3}
+#grid td input.selbox{width:20px;height:20px;accent-color:#E30613}
+.sug{color:#6A6862!important;font-weight:600!important;font-size:12.5px!important}
+.stok{background:#E30613!important;border-radius:999px!important;width:auto!important;padding:0 7px}
+h2{font-family:Montserrat,system-ui,sans-serif;font-size:16px;margin:24px 0 10px}
+.plan table{border-radius:18px;overflow:hidden;border:1px solid #E7E3DA}
+.plan table th{background:#181615!important;color:#fff!important}
+.plan table td,.plan table th{border-color:#EFEBE2}
+header .dlab{color:#E30613;font-weight:700}
+</style></head><body>
 <header><div class="brand"><img src="https://motamo.bg/icons/icon-192.png" alt="MOTAMO" onerror="this.style.display='none'"><h1>MOTAMO цех<small>производство · сметки · стокова</small></h1></div>
 <span id="tokwrap"><input id="tok" type="password" placeholder="токен" size="16"></span>
 <span class="grp"><label>Зареди</label><input id="date" type="date" lang="bg-BG"><b class="dlab" id="dlab"></b><button class="alt" onclick="loadRazos()" title="Зарежда РАЗНОСА за деня = отворените сметки (направени в навечерието/сутринта), без вчерашните затворени. За ③ Стокова.">Отворени сметки</button><button class="alt" onclick="loadByLot()" title="Зарежда сметките от партида L.[деня от Зареди] (±2 дни), през реалните движения. За референтен минал ден или преди ③ Стокова.">↻ По партида</button></span>
