@@ -136,6 +136,18 @@ const live = async (body) => (await realFetch('https://motamo-api.vercel.app/api
   r = await run({}, 'GET', { view: 'zayavka', o: '2:4', k: okTok });
   console.log('  верен ключ → статус', r.status, '| страницата носи името:', /Граф Игнатиев/.test(r.html || ''));
   { const sc = [...(r.html || '').matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]); let okz = sc.length > 0; for (const x of sc) { try { new Function(x); } catch (e) { okz = false; console.log('  JS ГРЕШКА (zayavka):', e.message); } } console.log('  скриптът на формата е валиден JS:', okz); }
+  { const tk = k => crypto.createHmac('sha256', 't').update('zayavka:' + k + ':v1').digest('hex').slice(0, 24);
+    for (const key of ['15:35', '15:']) {
+      const rr = await run({}, 'GET', { view: 'zayavka', o: key, k: tk(key) });
+      const rd = await run({ token: undefined, action: 'shop_form_data', o: key, k: tk(key) });
+      const dates = (rd.j.sched || {}).dates || [];
+      const dows = dates.map(d => new Date(d + 'T12:00:00Z').getUTCDay());
+      console.log('  Славекс', key, '→ страница', rr.status, '| артикули', (rd.j.items || []).map(x => x.id).join(','), '| дати', dates.join(','), 'дни', dows.join(','), '(очаквано 2/5) | other:', (rd.j.other || []).length);
+      const bad = await run({ token: undefined, action: 'shop_form_send', o: key, k: tk(key), for_date: '2000-01-04', rows: [{ id: 75, qty: 3 }], phone: '0899123456' });
+      console.log('    грешна дата → ok', bad.j.ok, bad.j.error, '(очаквано closed)');
+      const good = await run({ token: undefined, action: 'shop_form_send', o: key, k: tk(key), for_date: dates[0], rows: [{ id: 75, qty: 3 }, { id: 999, qty: 2 }, { id: 74, qty: 5 }], phone: '0899123456' });
+      console.log('    добра дата → ok', good.j.ok, JSON.stringify(good.j.rows), '(очаквано само артикул 75)');
+    } }
   r = await run({ token: undefined, action: 'shop_form_data', o: '2:4', k: okTok, date: '2026-10-01' });
   const it = (r.j.items || []).map(x => x.name + ' мин.същи=' + (x.last_same ? x.last_same.qty : '-') + ' посл=' + (x.last ? x.last.qty : '-') + ' пр=' + x.suggest);
   console.log('  данни ok', r.j.ok, '| обект', r.j.obj && r.j.obj.name, '| артикули:', JSON.stringify(it));

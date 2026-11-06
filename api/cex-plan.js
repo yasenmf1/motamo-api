@@ -770,6 +770,7 @@ function cexDueOn(group, dow) {
   if (group === "sibies") return true;
   if (group === "merkanto") return dow === 2 || dow === 5;
   if (group === "haskovo") return dow === 1 || dow === 3 || dow === 5;
+  if (group === "yambol") return dow === 2 || dow === 5;
   return false; // adhoc — само по заявка (нетикнато)
 }
 
@@ -795,6 +796,14 @@ const CEX_OBJECTS = {
   "11:23": { group: "merkanto" }, "11:25": { group: "merkanto" }, "11:26": { group: "merkanto" },
   "11:27": { group: "merkanto" }, "11:28": { group: "merkanto" }, "11:29": { group: "merkanto" },
   "11:30": { group: "merkanto" }, "11:31": { group: "merkanto" }, "11:32": { group: "merkanto" },
+  // Ямбол — СЛАВЕКС ЕООД (клиент 15, от 06.11): вторник и петък след Сливен; заявки до понеделник/четвъртък 15:00 (sched);
+  // arts = само тези 6 артикула във формата (цена −20% е въведена в Barsy). „15:" = общият линк за петте (ад-хок, без график).
+  "15:35": { group: "yambol", form: true, label: "Славекс Граф Игнатиев", client: "СЛАВЕКС", rep: "Славекс - Граф Игнатиев", addr: "бул. Граф Игнатиев 42а, Ямбол", arts: [75, 76, 80, 81, 129, 132], sched: { days: [2, 5], cutoff: 15 } },
+  "15:36": { group: "yambol", form: true, label: "Славекс Търговска", client: "СЛАВЕКС", rep: "Славекс - Търговска", addr: "ж.к. Изток, ул. Търговска 34Е, Ямбол", arts: [75, 76, 80, 81, 129, 132], sched: { days: [2, 5], cutoff: 15 } },
+  "15:37": { group: "yambol", form: true, label: "Славекс Златен Рог", client: "СЛАВЕКС", rep: "Славекс - Златен Рог", addr: "ж.к. Златен рог, ул. Дружба 51, Ямбол", arts: [75, 76, 80, 81, 129, 132], sched: { days: [2, 5], cutoff: 15 } },
+  "15:38": { group: "yambol", form: true, label: "Славекс Каранова", client: "СЛАВЕКС", rep: "Славекс - Каранова", addr: "ул. Каранова, Ямбол Център", arts: [75, 76, 80, 81, 129, 132], sched: { days: [2, 5], cutoff: 15 } },
+  "15:39": { group: "yambol", form: true, label: "Славекс Диана", client: "СЛАВЕКС", rep: "Славекс - Диана", addr: "ж.к. Диана, ул. Надежда 15, Ямбол", arts: [75, 76, 80, 81, 129, 132], sched: { days: [2, 5], cutoff: 15 } },
+  "15:": { group: "adhoc", form: true, label: "Славекс — всички магазини", client: "СЛАВЕКС", addr: "общ линк за петте магазина в Ямбол", arts: [75, 76, 80, 81, 129, 132], sched: { days: [2, 5], cutoff: 15 } },
   // Ад-хок / по заявка (показват се, но не се тикат)
   "4:": { group: "adhoc", form: true, label: "A шоп", phone: "+359886403177" }, "8:": { group: "adhoc" }, "8:21": { group: "adhoc" }, "8:22": { group: "adhoc", form: true, label: "Athletic Fitness" },
   "5:": { group: "adhoc" }, "5:16": { group: "adhoc", form: true, label: "Форум" }, "5:17": { group: "adhoc", form: true, label: "Академика" }, "5:18": { group: "adhoc", form: true, label: "Медицински" },   // Тракийски у-т — трите барчета (19.10)
@@ -831,7 +840,7 @@ function formAuth(key, tok) {
 function formObjName(key) {   // пълното име за собственика: „СИБИЕС 11 · СиБиЕс Граф Игнатиев 59 (Бедечка)"
   const o = CEX_OBJECTS[key] || {};
   const place = ROUTE_NAMES[key] || [o.client, o.rep].filter(Boolean).join(" · ") || key;
-  return o.label ? o.label + " · " + place : place;
+  return o.label && o.label !== place ? o.label + " · " + place : place;
 }
 function formObjLabel(key) {  // как го знае управителката: „СИБИЕС 11"; без label — мястото
   const o = CEX_OBJECTS[key] || {};
@@ -880,16 +889,31 @@ async function shopHistory(key, target) {
   }
   return { dates: [...dates].sort(), byArt };
 }
+// Обекти с график на доставка и краен час (Славекс: вт/пт, заявка до 15:00 в деня преди) → следващите дати, за които още се приема.
+function formSchedDates(key) {
+  const s = (CEX_OBJECTS[key] || {}).sched; if (!s) return null;
+  const today = sofiaToday(), [h] = sofiaHM(), out = [];
+  for (let i = 0; i <= 10 && out.length < 2; i++) {
+    const d = isoPlusDays(today, i);
+    if (!s.days.includes(new Date(d + "T12:00:00Z").getUTCDay())) continue;
+    const prev = isoPlusDays(d, -1);
+    if (prev > today || (prev === today && h < s.cutoff)) out.push(d);
+  }
+  return out;
+}
 async function shopFormData(key, dateIso) {
   const today = sofiaToday();
-  const def = formDefaultDate();
-  const target = /^\d{4}-\d{2}-\d{2}$/.test(dateIso || "") && dateIso >= today && dateIso <= isoPlusDays(today, 3) ? dateIso : def;
+  const sd = formSchedDates(key);
+  const def = sd ? sd[0] : formDefaultDate();
+  const target = sd ? (sd.includes(dateIso) ? dateIso : def) : (/^\d{4}-\d{2}-\d{2}$/.test(dateIso || "") && dateIso >= today && dateIso <= isoPlusDays(today, 3) ? dateIso : def);
+  const oArts = (CEX_OBJECTS[key] || {}).arts || null;
   const [hist, sug] = await Promise.all([shopHistory(key, today), computeSuggestion(target).catch(() => ({ by: {} }))]);
   const sgObj = (sug.by || {})[key] || {};
   const dow = new Date(target + "T12:00:00Z").getUTCDay();
   const items = [];
   for (const m of MENU) {
-    const h = hist.byArt[String(m.id)] || hist.byArt[m.id]; if (!h) continue;
+    if (oArts && !oArts.includes(m.id)) continue;
+    const h = hist.byArt[String(m.id)] || hist.byArt[m.id] || (oArts ? {} : null); if (!h) continue;
     const ds = Object.keys(h).sort();
     const last = ds[ds.length - 1];
     const same = ds.filter(d => d !== target && new Date(d + "T12:00:00Z").getUTCDay() === dow).pop();
@@ -900,8 +924,9 @@ async function shopFormData(key, dateIso) {
   }
   let existing = null;
   try { const ex = await sbAll(`cex_shop_requests?select=id,for_date,rows,left_qty,swap_qty,note,sent_at,updated_at,applied_at&for_date=eq.${target}&obj_key=eq.${encodeURIComponent(key)}`); existing = ex[0] || null; } catch (e) { logErr("cex-plan:L900", e); }
-  return { obj: { key, name: formObjName(key) }, for_date: target, default_date: def, today, dow: dowBg(target), items, existing,
-    other: MENU.filter(m => !items.some(i => i.id === m.id)).map(m => ({ id: m.id, name: m.name })) };
+  const sched = sd ? { dates: sd, text: `доставка ${dowBg(target)} ${target.slice(8, 10)}.${target.slice(5, 7)} · заявки до ${dowBg(isoPlusDays(target, -1))} ${(CEX_OBJECTS[key].sched.cutoff)}:00` } : null;
+  return { obj: { key, name: formObjName(key) }, for_date: target, default_date: def, today, dow: dowBg(target), items, existing, sched,
+    other: oArts ? [] : MENU.filter(m => !items.some(i => i.id === m.id)).map(m => ({ id: m.id, name: m.name })) };
 }
 function normPhone(v) {   // „0899 333 568" / „+359 899…" / „00359…" → „+359899333568"; невалиден → ""
   let d = String(v || "").replace(/[^0-9]/g, "");
@@ -911,11 +936,13 @@ function normPhone(v) {   // „0899 333 568" / „+359 899…" / „00359…" �
 async function shopFormSend(key, body) {
   const today = sofiaToday();
   const forDate = String(body.for_date || "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(forDate) || forDate < today || forDate > isoPlusDays(today, 3)) return { ok: false, error: "bad_date", message: "Датата трябва да е днес или до 3 дни напред." };
+  const sd = formSchedDates(key), oArts = (CEX_OBJECTS[key] || {}).arts || null;
+  if (sd) { if (!sd.includes(forDate)) return { ok: false, error: "closed", message: "Тази доставка вече не приема заявки. Отвори линка пак — ще покаже следващата." }; }
+  else if (!/^\d{4}-\d{2}-\d{2}$/.test(forDate) || forDate < today || forDate > isoPlusDays(today, 3)) return { ok: false, error: "bad_date", message: "Датата трябва да е днес или до 3 дни напред." };
   const rows = [];
   for (const r of (Array.isArray(body.rows) ? body.rows : [])) {
     const id = Number(r && r.id), qty = Math.round(Number(r && r.qty));
-    if (!MENU.some(m => m.id === id) || !(qty >= 0 && qty <= 300)) continue;
+    if (!MENU.some(m => m.id === id) || (oArts && !oArts.includes(id)) || !(qty >= 0 && qty <= 300)) continue;
     if (qty > 0) rows.push({ id, name: byId(id).name, qty });
   }
   const qmap = (obj) => { const out = {}; for (const [id, v] of Object.entries(obj && typeof obj === "object" ? obj : {})) { const q = Math.round(Number(v)); if (MENU.some(m => String(m.id) === String(id)) && q > 0 && q <= 300) out[id] = q; } return out; };
@@ -999,7 +1026,7 @@ function api(b){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Ty
 function dm(iso){var p=iso.split('-');return p[2]+'.'+p[1]}
 function load(date){msg('Зареждам…','info');api({action:'shop_form_data',date:date}).then(function(j){if(!j.ok){msg('Грешка: '+(j.message||j.error||''),'err');return}D=j;SEL=j.for_date;ITEMS=j.items;render();$('msg').className='msg'}).catch(function(e){msg('Няма връзка. Опитай пак.','err')})}
 function render(){var ex=D.existing&&D.existing.for_date===SEL?D.existing:null,exq={},exs={};if(ex){(ex.rows||[]).forEach(function(r){exq[r.id]=r.qty});exs=ex.swap_qty||{}}
-$('dd').textContent=dowOf(SEL).toUpperCase()+' '+dm(SEL);$('td').textContent='днес е '+dowOf(D.today)+' '+dm(D.today)+(SEL===D.today?' — доставка днес сутринта':' — доставка утре сутринта');$('hd').textContent='Заявка към MOTAMO';
+$('dd').textContent=dowOf(SEL).toUpperCase()+' '+dm(SEL);$('td').textContent=D.sched?D.sched.text:('днес е '+dowOf(D.today)+' '+dm(D.today)+(SEL===D.today?' — доставка днес сутринта':' — доставка утре сутринта'));$('sw').style.display=(D.sched&&D.sched.dates.length<2)?'none':'inline-block';$('hd').textContent='Заявка към MOTAMO';
 var b='';ITEMS.forEach(function(it){var v=ex?(exq[it.id]||0):it.suggest;var cls=ex?'':'sug';var nm=it.name.replace('НACHI','NACHI');var sub=/NACHI/.test(nm)?'8 хапки':(/^CET/.test(nm)?'16 хапки':'');
 b+='<tr data-id="'+it.id+'"><td class="n">'+esc(nm)+(sub?'<small>'+sub+'</small>':'')+'</td>'
 +'<td class="l"><input type="number" inputmode="numeric" min="0" class="swap" value="'+(exs[it.id]!=null?exs[it.id]:'')+'" placeholder="–"></td>'
@@ -1007,7 +1034,7 @@ b+='<tr data-id="'+it.id+'"><td class="n">'+esc(nm)+(sub?'<small>'+sub+'</small>
 $('tb').innerHTML=b||'<tr><td colspan="3" style="text-align:center;color:#888">Няма история за този магазин. Добави артикул от „+ Друг артикул".</td></tr>';
 if(ex){if(ex.applied_at&&ex.applied_at>=ex.sent_at){msg('✓ ПРИЕТА от MOTAMO в '+hhmm(ex.applied_at)+' (пратена '+hhmm(ex.sent_at)+'). За промяна след това се обадете в цеха.','ok')}else{msg('Пратена в '+hhmm(ex.sent_at)+' — чака потвърждение от MOTAMO. Може да я промените и да натиснете „Прати" пак.','info')}$('note').textContent='Черните числа са вашата пратена заявка за този ден. Ако искате промяна — поправете и натиснете „Прати заявката" пак. „За смяна" = колко броя връщате за подмяна (по желание).'}else{$('note').textContent='Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +. „За смяна" = колко броя връщате за подмяна (по желание).'}
 var os='<option value="">— избери артикул —</option>';(D.other||[]).forEach(function(m){os+='<option value="'+m.id+'">'+esc(m.name.replace('НACHI','NACHI'))+'</option>'});$('othersel').innerHTML=os}
-function swap(){var t=D.today,tm=addDays(t,1);var o=SEL===t?tm:t;if(confirm('Да сменя деня на '+dowOf(o)+' '+dm(o)+'?'))load(o)}
+function swap(){var t=D.today,tm=addDays(t,1);var o=SEL===t?tm:t;if(D.sched){o=D.sched.dates[0]===SEL?D.sched.dates[1]:D.sched.dates[0];if(!o)return}if(confirm('Да сменя деня на '+dowOf(o)+' '+dm(o)+'?'))load(o)}
 function addDays(iso,n){var d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
 function dowOf(iso){return ['неделя','понеделник','вторник','сряда','четвъртък','петък','събота'][new Date(iso+'T12:00:00Z').getUTCDay()]}
 function hhmm(s){var d=new Date(s);return isNaN(d)?'':('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
@@ -1073,7 +1100,7 @@ async function scheduleSeed(dateIso, user, pass) {
   const staleCutStr = staleCut.toISOString().slice(0, 10);
   shops = shops.filter(s => s.scheduled || s.last_date >= staleCutStr);
   // Подредба: първо дължимите днес, после по група, после по име.
-  const grank = { sibies: 0, merkanto: 1, haskovo: 2, adhoc: 3 };
+  const grank = { sibies: 0, merkanto: 1, yambol: 2, haskovo: 3, adhoc: 4 };
   shops.sort((x, y) => (Number(y.scheduled) - Number(x.scheduled)) || ((grank[x.group] || 9) - (grank[y.group] || 9)) || String(x.rep || x.client || "").localeCompare(String(y.rep || y.client || ""), "bg"));
   return { shops, dow };
 }
@@ -1628,7 +1655,7 @@ ${UIV2.css}</style></head><body><div class="wrap">
 var K=${JSON.stringify(k || "")},API='/api/cex-plan',MAXR=5,ST={stops:[],routes:[],auto:[]},DRAG=null;
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function post(b){b.token=K;return fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})})}
-function cityOf(z){return z==='Сливен'||z==='Хасково'?z:'Стара Загора'}
+function cityOf(z){return z==='Сливен'||z==='Хасково'||z==='Ямбол'?z:'Стара Загора'}
 function isNew(k){var s=stop(k);return !!(s&&s.isNew)}
 function stop(k){return ST.stops.filter(function(s){return s.key===k})[0]}
 function load(){var d=document.getElementById('date').value;document.getElementById('state').textContent='зарежда…';
@@ -1647,7 +1674,7 @@ function cityRoute(c){var m=document.getElementById('msg');var p=placed();var ke
   var r=ST.routes.filter(function(x){return x.name===c})[0]||ST.routes.filter(function(x){return !x.keys.length})[0];
   if(!r){if(ST.routes.length>=MAXR){m.className='msg err';m.textContent='Няма свободен маршрут (макс. '+MAXR+').';return}r={name:c,keys:[]};ST.routes.push(r)}
   r.name=c;r.keys=r.keys.concat(keys);m.className='msg';m.textContent='Готов маршрут „'+c+'“ ('+r.keys.length+' об.) — натисни „Запиши за шофьора“.';render()}
-function render(){autoName();var p=placed();var pool='';['Стара Загора','Сливен','Хасково'].forEach(function(c){var all=ST.stops.filter(function(s){return cityOf(s.zone)===c}),ks=all.filter(function(s){return !p[s.key]});
+function render(){autoName();var p=placed();var pool='';['Стара Загора','Сливен','Ямбол','Хасково'].forEach(function(c){var all=ST.stops.filter(function(s){return cityOf(s.zone)===c}),ks=all.filter(function(s){return !p[s.key]});
     var canRoute=c!=='Стара Загора'&&ks.length>0;
     pool+='<div class="city"'+(canRoute?' data-city="'+c+'" title="Натисни — готов маршрут"':'')+'>'+c+' <span style="color:#999;font-weight:400">('+(all.length?(ks.length+' от '+all.length):'няма стокова днес')+')</span>'+(canRoute?' <span style="color:#c8151f;font-weight:700;font-size:12px">· натисни → готов маршрут</span>':'')+'</div>'+(ks.length?ks.map(function(s){return itemHtml(s.key)}).join(''):(all.length?'<div class="hint" style="padding:4px 10px;text-align:left">всички са в маршрути ✓</div>':''))});
   if(!ST.stops.length)pool='<div class="hint">Няма издадени стокови за този ден.</div>';
@@ -2377,7 +2404,7 @@ async function handlerInner(req, res) {
     const tbl = (obj) => Object.keys(obj).sort().map(k => `<tr><td>${esc(k)}</td><td class="q">${round(obj[k])}</td></tr>`).join("");
     const card = (cls, title, obj) => { const n = Object.keys(obj).length; return n ? `<div class="card ${cls}"><h2>${title}<span class="cnt">${n} вида</span></h2><table>${tbl(obj)}</table></div>` : ""; };
     // „По маршрут": разбивка на поръчаните продукти по град (група). Girls пакетират по маршрут.
-    const CITY = [["haskovo", "Хасково"], ["merkanto", "Сливен"], ["sibies", "Ст. Загора"], ["adhoc", "Друго"]];
+    const CITY = [["haskovo", "Хасково"], ["yambol", "Ямбол"], ["merkanto", "Сливен"], ["sibies", "Ст. Загора"], ["adhoc", "Друго"]];
     const byCity = {};
     for (const s of seed.shops) { const g = s.group || "adhoc"; const dst = byCity[g] || (byCity[g] = {}); for (const [k, v] of Object.entries(s.order || {})) dst[k] = (dst[k] || 0) + (Number(v) || 0); }
     const activeCities = CITY.filter(([g]) => byCity[g] && Object.values(byCity[g]).some(v => v > 0));
