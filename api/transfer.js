@@ -1847,7 +1847,7 @@ module.exports = async function handler(req, res) {
         res.status(200).json({ ok: true }); return;
       }
       // собственикът натиска бутон за роля
-      if (up.callback_query && /^(st|ok|pb|pr):/.test(String(up.callback_query.data || ""))) {
+      if (up.callback_query && /^(st|ok|pb|pr|sl|sn|bk):/.test(String(up.callback_query.data || ""))) {
         const cu = await TG.userGet(Number((up.callback_query.from || {}).id));
         if (cu && (cu.role === "shofior" || cu.role === "owner")) { await DRV.handleCallback(up.callback_query, (req.headers && req.headers.host) || "motamo-api.vercel.app"); res.status(200).json({ ok: true }); return; }
       }
