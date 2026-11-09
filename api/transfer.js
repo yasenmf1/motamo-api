@@ -1641,8 +1641,10 @@ module.exports = async function handler(req, res) {
   // ★ S37 — сигнал към собственика, ако ДОСТАВКА (D-…) чака куриер ≥15 мин (на „Очаква куриер“). Vercel cron: отделен запис на 15 мин.
   if (req.method === "GET" && q.cron === "dlvwatch") {
     const auth = String(req.headers && (req.headers.authorization || "") || "");
+    // 09.11: GitHub Actions пуска само ~2×/ден → вика се и от Supabase pg_cron (ключ `k` като при ricecheck)
     const ok = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
-      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")))
+      || (q.k && await require("../lib/push.js").cronKeyOk(q.k));
     if (!ok) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
     try { res.status(200).json(await require("../lib/dlv-watch.js").run({})); } catch (e) { res.status(502).json({ ok: false, error: "dlvwatch_failed", message: String(e && e.message).slice(0, 160) }); }
     return;
