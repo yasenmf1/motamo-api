@@ -3705,7 +3705,14 @@ async function handlerInner(req, res) {
         by_supplier.push({ _debug: true, ld_count: ld.length, header_count: heads.length,
           sample_ld: ld.slice(0, 12).map(x => { const h = headById2(x.ref_id, heads); return { ref: x.ref_id, amount: Number(x.amount) || 0, amount_sum: Number(x.amount_sum) || 0, date: (x.operation_doc_date || "").slice(0, 10), sup: h ? (h.supplier_name || "") : "НЯМА ЗАГЛАВИЕ", total_sum: h ? h.total_sum : null } }) });
       }
-      res.status(200).json({ ok: true, id, name: (ARTS[String(id)] || {}).name, records_total: records, pages_scanned: allData.length, pages_total: totalPages, my_rows: mine.length, by_type: byType, net_in_register: Math.round(net * 1000) / 1000, in_moves_count: ins.length, in_moves: ins.slice(0, 40), by_supplier });
+      // изходите (изписванията) — по ден, тип и партида; body.outs_since = "YYYY-MM-DD"
+      let outs = null;
+      if (body.outs_since) {
+        outs = mine.filter(x => (Number(x.amount) || 0) < 0 && String(x.operation_doc_date || x.create_date || "").slice(0, 10) >= String(body.outs_since))
+          .map(x => ({ date: (x.operation_doc_date || x.create_date || "").slice(0, 16), type: x.operation_ref_type, amount: Number(x.amount) || 0, lot: x.lot_value, ref: x.ref_id, doc: x.operation_doc_name || x.operation_name || x.doc_num || undefined }))
+          .sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(0, 300);
+      }
+      res.status(200).json({ ok: true, id, name: (ARTS[String(id)] || {}).name, records_total: records, pages_scanned: allData.length, pages_total: totalPages, my_rows: mine.length, by_type: byType, net_in_register: Math.round(net * 1000) / 1000, in_moves_count: ins.length, in_moves: ins.slice(0, 40), by_supplier, outs });
       return;
     }
     if (body.debug) { res.status(200).json({ ok: true, id, attempts, sample: rows.slice(0, 6) }); return; }
