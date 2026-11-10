@@ -1606,6 +1606,9 @@ module.exports = async function handler(req, res) {
   // телефона си); старите ключове също се приемат, за да работи един и същ линк.
   const viewTokens = [process.env.OWNER_TOKEN, process.env.TRANSFER_TOKEN, process.env.CEX_VIEW_TOKEN, process.env.RECONCILE_TOKEN, process.env.PREVIEW_TOKEN, process.env.PAY_HMAC_SECRET].filter(Boolean);
 
+  // ★ S43 — данни за таблото „Конкуренти“ (motamo.bg/konkurenti/): ?view=competitors&k=<ключ> (lib/competitors.js; не е нова функция заради лимита от 12)
+  if (q.view === "competitors") return require("../lib/competitors.js")(req, res);
+
   // ★ S25 — сигнал за склада в Telegram групата: Vercel cron всяка сутрин (GET ?cron=stock)
   // или ръчно (POST action tg_stock_alert). Суровини, които НЯМА да стигнат до доставката
   // (+2 дни резерв). Най-много веднъж на ден (Supabase `cex_tg_sent`, kind "stock").
