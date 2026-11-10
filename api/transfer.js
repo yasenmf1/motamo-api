@@ -887,9 +887,10 @@ if(edit)h+='<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><bu
 if(r.status==='partial')h+='<div style="margin-top:12px"><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Опитай пак точката</button></div>';
 h+='</div></div>'});
 $('list').innerHTML=h}
+function prodCall(b){return api(b).then(function(j){if(j&&j.needs_confirm&&confirm('⚠ '+j.error+'\n\nЗаписвам ли го въпреки това?')){return api(Object.assign({},b,{confirm:true}))}return j})}
 function produce(cid,amt,name){amt=Math.round(amt*1000)/1000;if(!confirm('Да произведа '+amt+' от «'+name+'» по рецептата (записва се в Barsy)?'))return;
 busy('Произвеждам…','Записвам производството в Barsy. Не натискай пак.');
-api({action:'produce_zag',cex_id:cid,amount:amt}).then(function(j){free();if(!j.ok){msg('Производството НЕ мина: '+(j.error||''),'err',1);return}msg('✓ Произведено '+amt+' «'+name+'». Провери количествата и натисни «Издай документите».','ok',1);load()}).catch(function(e){free();msg('Мрежова грешка: '+e,'err',1)})}
+prodCall({action:'produce_zag',cex_id:cid,amount:amt}).then(function(j){free();if(!j.ok){msg('Производството НЕ мина: '+(j.error||''),'err',1);return}msg('✓ Произведено '+amt+' «'+name+'». Провери количествата и натисни «Издай документите».','ok',1);load()}).catch(function(e){free();msg('Мрежова грешка: '+e,'err',1)})}
 function tog(id){OPEN[id]=!OPEN[id];renderList()}
 function chk(i){var mx=i.dataset.max;if(mx!==''&&Number(i.value)>Number(mx)){i.value=n3(mx);i.style.borderColor='#d97706'}else{i.style.borderColor=''}}
 function sendMap(id){var m={};document.querySelectorAll('input.q[data-r="'+id+'"]').forEach(function(i){m[i.dataset.id]=Number(i.value)||0});return m}
@@ -1224,7 +1225,7 @@ var ok=[],bad=[],nolot=[];
   if(bad.length)m+=(m?' · ':'')+'\\u26a0 НЕ мина: '+bad.join(' | ');
   msg(m||'Нищо не се произведе.',bad.length?'err':'ok');reload();return}
  var r=rows[idx];
- api({action:'produce_zag',cex_id:r.cex_id,amount:r.amount,date:date}).then(function(j){
+ prodCall({action:'produce_zag',cex_id:r.cex_id,amount:r.amount,date:date}).then(function(j){
   if(j&&j.ok){ok.push(esc(r.name)+' '+n3(r.amount));if(j.no_lot)nolot.push(esc(r.name))}
   else bad.push(esc(r.name)+' — '+esc((j&&(j.error||j.message))||'грешка'));
   next(idx+1)}).catch(function(e){bad.push(esc(r.name)+' — мрежа');next(idx+1)})
@@ -2231,6 +2232,13 @@ module.exports = async function handler(req, res) {
       const cid = Number(body.cex_id), amt = Number(body.amount);
       if (!(ZAG.includes(cid) || PRODUCE_ZAG.includes(cid))) { res.status(200).json({ ok: false, error: "това не е заготовка — не се произвежда тук (зареди доставка)" }); return; }
       if (!(amt > 0 && amt <= 500)) { res.status(200).json({ ok: false, error: "невалидно количество" }); return; }
+      // ★ S43 (10.11) — защита от грешно голямо количество (18–30 кг чеснова майонеза изписваха ~50 кг майонеза в повече).
+      // Над „обичайния максимум“ (≈ 2× препоръчителната наличност от CEX_SHEET) се иска потвърждение; с confirm:true минава.
+      const CONFIRM_ABOVE = { 68: 10, 131: 6, 65: 1, 59: 12, 66: 14, 67: 30 };
+      if (CONFIRM_ABOVE[cid] && amt > CONFIRM_ABOVE[cid] && body.confirm !== true) {
+        res.status(200).json({ ok: false, needs_confirm: true, error: "Много е: " + amt + " (обичайно до " + CONFIRM_ABOVE[cid] + "). Сигурни ли сте?" });
+        return;
+      }
       const host = (req.headers && req.headers.host) || "motamo-api.vercel.app";
       const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : null;
       if (date) {
