@@ -887,7 +887,7 @@ if(edit)h+='<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><bu
 if(r.status==='partial')h+='<div style="margin-top:12px"><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Опитай пак точката</button></div>';
 h+='</div></div>'});
 $('list').innerHTML=h}
-function prodCall(b){return api(b).then(function(j){if(j&&j.needs_confirm&&confirm('⚠ '+j.error+'\n\nЗаписвам ли го въпреки това?')){return api(Object.assign({},b,{confirm:true}))}return j})}
+function prodCall(b,n){n=n||0;return api(b).then(function(j){if(j&&j.needs_confirm&&n<3&&confirm('⚠ '+j.error+'\n\nЗаписвам ли го въпреки това?')){var o={};o[j.flag||'confirm']=true;return prodCall(Object.assign({},b,o),n+1)}return j})}
 function produce(cid,amt,name){amt=Math.round(amt*1000)/1000;if(!confirm('Да произведа '+amt+' от «'+name+'» по рецептата (записва се в Barsy)?'))return;
 busy('Произвеждам…','Записвам производството в Barsy. Не натискай пак.');
 prodCall({action:'produce_zag',cex_id:cid,amount:amt}).then(function(j){free();if(!j.ok){msg('Производството НЕ мина: '+(j.error||''),'err',1);return}msg('✓ Произведено '+amt+' «'+name+'». Провери количествата и натисни «Издай документите».','ok',1);load()}).catch(function(e){free();msg('Мрежова грешка: '+e,'err',1)})}
@@ -2236,8 +2236,32 @@ module.exports = async function handler(req, res) {
       // Над „обичайния максимум“ (≈ 2× препоръчителната наличност от CEX_SHEET) се иска потвърждение; с confirm:true минава.
       const CONFIRM_ABOVE = { 68: 10, 131: 6, 65: 1, 59: 12, 66: 14, 67: 30 };
       if (CONFIRM_ABOVE[cid] && amt > CONFIRM_ABOVE[cid] && body.confirm !== true) {
-        res.status(200).json({ ok: false, needs_confirm: true, error: "Много е: " + amt + " (обичайно до " + CONFIRM_ABOVE[cid] + "). Сигурни ли сте?" });
+        res.status(200).json({ ok: false, needs_confirm: true, flag: "confirm", error: "Много е: " + amt + " (обичайно до " + CONFIRM_ABOVE[cid] + "). Сигурни ли сте?" });
         return;
+      }
+      // ★ S43 — защита от ДВОЙНО натискане (лош интернет: първата заявка е минала, но екранът не е получил отговор).
+      // Същият артикул + същото количество в последните 10 мин → пита, преди да запише второ производство.
+      if (body.confirm_dup !== true) {
+        try {
+          const tdy = sofiaToday();
+          const pr = await cexCall("Storeproductions_getlist", { filters: { date: [tdy, tdy] }, extra_properties: ["all", "details"], order_by: "store_production_id desc", length: 300, limit: 300 });
+          let L = (pr && pr.data && (pr.data.list || pr.data)) || [];
+          if (!Array.isArray(L)) L = Object.values(L);
+          const nowS = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Sofia" })).getTime();
+          const hit = L.find(x => {
+            if (String(x.anulate_flag) === "1") return false;
+            const det = x.details || [];
+            if (det.length !== 1 || Number(det[0].article_id) !== cid) return false;
+            if (Math.abs((Number(det[0].amount_prod != null ? det[0].amount_prod : det[0].amount) || 0) - amt) > 0.0005) return false;
+            const t = new Date(String(x.doc_date || "").replace(" ", "T")).getTime();
+            return t && nowS - t >= -60000 && nowS - t <= 10 * 60000;
+          });
+          if (hit) {
+            const mins = Math.max(0, Math.round((nowS - new Date(String(hit.doc_date).replace(" ", "T")).getTime()) / 60000));
+            res.status(200).json({ ok: false, needs_confirm: true, flag: "confirm_dup", error: "Същото производство (" + amt + ") вече е записано преди " + mins + " мин (№" + (hit.store_production_id || hit.id) + "). Да не е двойно натискане?" });
+            return;
+          }
+        } catch (e) { /* проверката е допълнителна — при грешка не блокираме */ }
       }
       const host = (req.headers && req.headers.host) || "motamo-api.vercel.app";
       const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : null;
