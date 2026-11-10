@@ -68,8 +68,10 @@ else:
 diff = []
 for a in real:
     i = int(a["account_id"])
-    if i in tot_by_acc and abs(tot_by_acc[i] - float(a["total_sum"])) > 0.05:
-        diff.append("%s: сметка %.2f ≠ стокова %.2f" % (who(a), float(a["total_sum"]), tot_by_acc[i]))
+    # реалната сума (след отстъпките по редове) е total_real; total_sum е преди тях
+    pay = float(a.get("total_real") if a.get("total_real") not in (None, "") else a["total_sum"])
+    if i in tot_by_acc and abs(tot_by_acc[i] - pay) > 0.05:
+        diff.append("%s: сметка %.2f ≠ стокова %.2f" % (who(a), pay, tot_by_acc[i]))
 if diff:
     lines.append("⚠ Различни суми: " + "; ".join(diff[:8]))
 extra = [x for x in stok if not any(linked.get(int(a["account_id"])) is x for a in real)]
