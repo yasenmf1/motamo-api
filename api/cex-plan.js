@@ -2332,10 +2332,22 @@ async function handlerInner(req, res) {
       const get = (part) => fetch(`https://${host}/api/cex-plan?view=ownerdata&part=${part}&k=${k}`, { signal: AbortSignal.timeout(45000) }).then(r => r.json()).then(j => (j && j.ok ? j : null)).catch(() => null);
       const [point, cex, stock, orders] = await Promise.all([get("point"), get("cex"), get("stock"), get("orders")]);
       if (!point && !cex && !stock) { res.status(502).json({ ok: false, error: "no_data" }); return; }
-      const text = OM.build({ point, cex, stock, orders }, to);
+      // заявки на магазините без стокова: последните 3 дни + утре (стоковите са в кеша cex_docs; освежаваме го накратко)
+      let reqs = null;
+      try {
+        const day = (d, n) => new Date(Date.parse(d + "T12:00:00Z") + n * 86400000).toISOString().slice(0, 10), f0 = day(to, -3), t1 = day(to, 1);
+        try { await syncDocCache(process.env.BARSY_CEX_USER, process.env.BARSY_CEX_PASS, 8000); } catch (e) { /* кешът е достатъчно прясен */ }
+        const rq = await sbAll(`cex_shop_requests?select=obj_key,for_date&for_date=gte.${f0}&for_date=lte.${t1}`);
+        const docs = await sbAll(`cex_docs?select=client_id,person_id,doc_date&type_id=eq.11&is_anulate=eq.0&doc_date=gte.${f0}&doc_date=lte.${t1}`);
+        const has = (d, key) => { const [c, p] = String(key).split(":"); return docs.some(x => x.doc_date === d && String(x.client_id) === c && (p === "" || p === undefined || String(x.person_id) === p)); };
+        const by = {};
+        for (const r of rq) { const x = by[r.for_date] || (by[r.for_date] = { d: r.for_date, n: 0, noStok: 0 }); x.n++; if (!has(r.for_date, r.obj_key)) x.noStok++; }
+        reqs = Object.values(by).sort((a, b) => a.d.localeCompare(b.d));
+      } catch (e) { reqs = null; }
+      const text = OM.build({ point, cex, stock, orders, reqs }, to);
       const sent = await TGm.tgSend(text, TGm.OWNER_CHAT_ID, null, { inline_keyboard: [[{ text: "📊 Отвори таблото", url: `https://${host}/api/cex-plan?view=owner&k=${k}` }]] });
       if (sent.ok && !force) await TGm.sentSave("morning_board", to, { at: new Date().toISOString() }).catch(() => {});
-      res.status(200).json({ ok: !!sent.ok, sent: !!sent.ok, parts: { point: !!point, cex: !!cex, stock: !!stock, orders: !!orders }, error: sent.error });
+      res.status(200).json({ ok: !!sent.ok, sent: !!sent.ok, parts: { point: !!point, cex: !!cex, stock: !!stock, orders: !!orders, reqs: !!reqs }, error: sent.error });
     } catch (e) { res.status(502).json({ ok: false, error: "morning_failed", message: String(e && e.message).slice(0, 160) }); }
     return;
   }
