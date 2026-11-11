@@ -2003,6 +2003,7 @@ self.addEventListener("notificationclick",function(e){e.notification.close();var
     if (!((TC.hoursKey() && q.k === TC.hoursKey()) || isOwner(q.k))) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп.</body>"); return; }
     try {
       const CD = require("../lib/clockdash.js");
+      if (q.view === "form76" && q.fmt === "xlsx") { const ymx = /^\d{4}-\d{2}$/.test(String(q.m || "")) ? q.m : new Date().toISOString().slice(0, 7); res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); res.setHeader("Content-Disposition", `attachment; filename="forma76-${ymx}${q.site === "cex" || q.site === "shop" ? "-" + q.site : ""}.xlsx"`); res.status(200).send(await CD.form76Xlsx(q.m, q.site)); return; }
       res.setHeader("Content-Type", "text/html; charset=utf-8"); res.setHeader("Cache-Control", "no-store");
       res.status(200).send(q.view === "clockdash" ? await CD.dashPage(q.k) : await CD.form76Page(q.m, q.site));
     } catch (e) { res.status(502).send("Грешка при четене на часовете."); }
@@ -2033,7 +2034,7 @@ self.addEventListener("notificationclick",function(e){e.notification.close();var
       let b = req.body; if (typeof b === "string") { try { b = JSON.parse(b); } catch (e) { b = null; } }
       b = b && typeof b === "object" ? b : {};
       try {
-        if (b.op === "state") { res.status(200).json(await TC.appState(Number(q.u))); return; }
+        if (b.op === "state") { res.status(200).json(await TC.appState(Number(q.u), new Date(), b.ym)); return; }
         if (b.op === "act") { res.status(200).json(await TC.appAct(Number(q.u), String(b.kind || ""), new Date(), b.geo)); return; }
         if (b.op === "push") { res.status(200).json(await require("../lib/clockremind.js").appPush(Number(q.u), b.sub)); return; }
         if (b.op === "undo") { res.status(200).json(await TC.appUndo(Number(q.u), Number(b.id))); return; }
@@ -2055,6 +2056,7 @@ self.addEventListener("notificationclick",function(e){e.notification.close();var
   if (req.method === "GET" && q.view === "hours") {
     if (!((TC.hoursKey() && q.k === TC.hoursKey()) || isOwner(q.k))) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп.</body>"); return; }
     try {
+      if (q.fmt === "xlsx") { const ymx = /^\d{4}-\d{2}$/.test(String(q.m || "")) ? q.m : new Date().toISOString().slice(0, 7); res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); res.setHeader("Content-Disposition", `attachment; filename="chasove-${ymx}.xlsx"`); res.status(200).send(await TC.hoursXlsx(q.m)); return; }
       if (q.fmt === "csv") { res.setHeader("Content-Type", "text/csv; charset=utf-8"); res.setHeader("Content-Disposition", `attachment; filename="chasove-${String(q.m || "").replace(/[^0-9-]/g, "") || "mesec"}.csv"`); res.status(200).send(await TC.hoursCsv(q.m)); return; }
       res.setHeader("Content-Type", "text/html; charset=utf-8"); res.status(200).send(await TC.hoursPage(q.k, q.m));
     } catch (e) { res.status(502).send("Грешка при четене на часовете."); }
