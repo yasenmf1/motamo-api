@@ -1990,6 +1990,37 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // ★ Часовник-приложение: лична връзка на служител ?view=clock&u=<id>&t=<токен> (страница, манифест, API)
+  if (q.view === "clock" || q.view === "clockmanifest" || q.view === "clockapi") {
+    const okLink = TC.clockOk(q.u, q.t);
+    if (!okLink) {
+      if (req.method === "POST") { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+      res.status(403).send("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><body style='font:18px system-ui;padding:24px'>Тази връзка не е активна. Кажи на Ясен.</body>"); return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    if (req.method === "GET" && q.view === "clock") { res.setHeader("Content-Type", "text/html; charset=utf-8"); res.status(200).send(TC.clockPage(q.u, q.t)); return; }
+    if (req.method === "GET" && q.view === "clockmanifest") { res.setHeader("Content-Type", "application/manifest+json; charset=utf-8"); res.status(200).json(TC.clockManifest(q.u, q.t)); return; }
+    if (req.method === "POST" && q.view === "clockapi") {
+      let b = req.body; if (typeof b === "string") { try { b = JSON.parse(b); } catch (e) { b = null; } }
+      b = b && typeof b === "object" ? b : {};
+      try {
+        if (b.op === "state") { res.status(200).json(await TC.appState(Number(q.u))); return; }
+        if (b.op === "act") { res.status(200).json(await TC.appAct(Number(q.u), String(b.kind || ""))); return; }
+        if (b.op === "undo") { res.status(200).json(await TC.appUndo(Number(q.u), Number(b.id))); return; }
+        res.status(400).json({ ok: false, error: "op" });
+      } catch (e) { res.status(502).json({ ok: false, error: "db", message: String(e && e.message).slice(0, 100) }); }
+      return;
+    }
+    res.status(405).json({ ok: false, error: "method" }); return;
+  }
+  // Връзките на всички служители (само собственик): ?view=clockteam&k=<hoursKey>
+  if (req.method === "GET" && q.view === "clockteam") {
+    if (!((TC.hoursKey() && q.k === TC.hoursKey()) || isOwner(q.k))) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп.</body>"); return; }
+    try { res.setHeader("Content-Type", "text/html; charset=utf-8"); res.setHeader("Cache-Control", "no-store"); res.status(200).send(await TC.clockTeamPage("https://" + (req.headers && req.headers.host || "motamo-api.vercel.app") + "/api/transfer")); }
+    catch (e) { res.status(502).send("Грешка."); }
+    return;
+  }
+
   // ★ S34 — таблица „Часове за заплата" (само собственик): ?view=hours&k=<hoursKey>&m=YYYY-MM[&fmt=csv]
   if (req.method === "GET" && q.view === "hours") {
     if (!((TC.hoursKey() && q.k === TC.hoursKey()) || isOwner(q.k))) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп.</body>"); return; }

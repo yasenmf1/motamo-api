@@ -68,6 +68,24 @@ const OWNER = 1153763325; const T = (iso) => new Date(iso);
   const html = await TC.hoursPage("k", "2026-10", T("2026-10-22T10:00:00Z")); ok(/Цех/.test(html) && /Точка/.test(html) && /Мария Тест/.test(html), "уеб таблицата се прави");
   const csv = await TC.hoursCsv("2026-10", T("2026-10-22T10:00:00Z")); ok(csv.split("\n").length >= 4, "CSV има редове");
   ok(TC.parseKind("▶️ Започнах") === "in" && TC.parseKind("⏹ Приключих") === "out" && TC.parseKind("заявка") === null, "разбор на бутоните");
+  // ── приложение + почивка (нов запис -5 в точката) ──
+  await TC.rpc("tc_staff_set", { p_user: -5, p_name: "Роксана Тест", p_site: "shop", p_active: true });
+  const D = (hhmm) => T("2026-11-12T" + hhmm + ":00Z");              // 12.11.2026 — зимно време, София = UTC+2
+  ok(TC.clockOk("-5", TC.clockToken(-5)) && !TC.clockOk("-5", "x".repeat(24)) && !TC.clockOk("-6", TC.clockToken(-5)), "лична връзка: вярна минава, чужда не");
+  let r = await TC.appAct(-5, "break_start", D("08:00")); ok(!r.ok && r.error === "state", "почивка преди начало се отказва");
+  r = await TC.appAct(-5, "in", D("06:00")); ok(r.ok, "започва 08:00 местно");
+  r = await TC.appAct(-5, "in", D("06:01")); ok(!r.ok && r.error === "state", "двойно натискане се отказва");
+  r = await TC.appAct(-5, "break_start", D("10:00")); ok(r.ok, "почивка 12:00");
+  let st = await TC.appState(-5, D("10:10")); ok(st.state === "brk" && st.brkMin === 10, "състояние: на почивка, 10 мин");
+  r = await TC.appAct(-5, "break_end", D("10:30")); ok(r.ok, "връща се 12:30");
+  r = await TC.appAct(-5, "out", D("14:30")); ok(r.ok && r.min === 480, "приключва 16:30 → 8ч30м − 30 мин почивка = 8ч (" + r.min + ")");
+  st = await TC.appState(-5, D("14:31")); ok(st.state === "off" && st.month.min === 480 && st.month.brk === 30, "месец: 480 мин, почивки 30");
+  r = await TC.appAct(-5, "in", D("15:00")); await TC.appAct(-5, "break_start", D("15:30"));
+  r = await TC.appAct(-5, "out", D("16:00")); ok(r.ok, "приключва направо от почивка");
+  const rr = await TC.rpc("tc_rows", { p_from: "2026-11-12", p_to: "2026-11-12" });
+  ok(rr.filter(x => x.kind === "break_end").length === 2, "почивката е затворена автоматично");
+  const u = await TC.appUndo(-5, rr.at(-1).id, new Date(Date.now() + 60000)); ok(u.ok, "отмяна на последния запис");
+  ok(/Роксана Тест/.test(await TC.clockTeamPage("https://h/api/transfer")) && /view=clock/.test(TC.clockPage(-5, "t")), "страниците се правят");
   console.log(fails ? "\nПРОВАЛИ: " + fails : "\nВСИЧКО МИНА");
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(2); });
