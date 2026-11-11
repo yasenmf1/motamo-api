@@ -2331,8 +2331,22 @@ async function handlerInner(req, res) {
     try {
       const TCm = require("../lib/timeclock.js");
       const deps = {
-        shopDashData: require("./shop-dash.js").shopDashData, cexDashData: dashData, stockReport: require("./transfer.js").stockReport,
-        soList: () => TCm.rpc("so_list", { p_limit: 12 }), shopUser: process.env.BARSY_USER, shopPass: process.env.BARSY_PASS, cexUser: process.env.BARSY_CEX_USER, cexPass: process.env.BARSY_CEX_PASS
+        shopDashData: require("./shop-dash.js").shopDashData, stockReport: require("./transfer.js").stockReport,
+        // цех: само затворените сметки (по-лека заявка от пълното табло; Barsy на цеха е бавен — 9 с лимит на заявка)
+        cexAccounts: async (from, to) => {
+          const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 2500 }, process.env.BARSY_CEX_USER, process.env.BARSY_CEX_PASS);
+          if (!r || !r.ok) throw new Error("Barsy цех: " + (r && r.status));
+          let d = r.data && r.data.data; d = Array.isArray(d) ? d : (d && (d.list || (typeof d === "object" ? Object.values(d) : []))) || [];
+          const out = [];
+          for (const a of (Array.isArray(d) ? d : [])) {
+            if (String(a.account_alias || "").includes("CLTEST") || isTrialClient(a)) continue;
+            const day = String(a.close_date || "").slice(0, 10), gross = Number(a.total_sum) || 0;
+            if (!day || day < from || day > to || !gross) continue;
+            out.push({ d: day, v: gross / 1.2, cid: a.client_id != null ? a.client_id : 0, name: a.client_name || ("клиент " + a.client_id) });
+          }
+          return out;
+        },
+        soList: () => TCm.rpc("so_list", { p_limit: 12 }), shopUser: process.env.BARSY_USER, shopPass: process.env.BARSY_PASS
       };
       res.status(200).json(await OD.partData(String(q.part || ""), deps));
     } catch (e) { res.status(502).json({ ok: false, error: "part_failed", message: String(e && e.message).slice(0, 160) }); }

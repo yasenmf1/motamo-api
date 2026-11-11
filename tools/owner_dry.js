@@ -15,11 +15,15 @@ ok(s.length === 3 && s[0].v === 100.13 && s[1].v === 0 && s[2].v === 50, "дни
 const p = OD.pointView({ by_day: { "2026-10-20": 10, "2026-11-02": 200, "2026-11-11": 300 }, accounts: 7, avg_check: 12.345, cmp: { today: 300, lastWeek: 250, hm: "14:30" } }, "2026-10-13", "2026-11-11");
 ok(p.series.length === 30 && p.today === 300 && p.month === 500 && p.total30 === 510 && p.cmp.lastWeek === 250, "точка: днес 300, месец 500 (ноември), 30 дни 510");
 
-// ── цех ──
-const c = OD.cexView({ by_day: { "2026-11-11": 1000, "2026-11-10": 800, "2026-10-31": 50 } },
-  { total_neto: 1000, accounts: 3, clients: [{ client_id: 1, name: "Б", turnover: 300, accounts: 1 }, { client_id: 2, name: "А", turnover: 700, accounts: 2 }, { client_id: 3, name: "Нула", turnover: 0, accounts: 0 }] }, "2026-10-13", "2026-11-11");
-ok(c.today === 1000 && c.stokovi_n === 3 && c.month === 1800 && c.total30 === 1850, "цех: днес 1000, 3 стокови, месец 1800");
-ok(c.clients.length === 2 && c.clients[0].name === "А" && c.clients[0].v === 700, "стокови: най-големият първи, нулевият клиент се скрива");
+// ── цех: от списък сметки ──
+const accs = [
+  { d: "2026-11-11", v: 700, cid: 2, name: "А" }, { d: "2026-11-11", v: 300, cid: 1, name: "Б" },
+  { d: "2026-11-11", v: 100, cid: 2, name: "А" }, { d: "2026-11-10", v: 800, cid: 2, name: "А" },
+  { d: "2026-10-31", v: 50, cid: 3, name: "В" }, { d: "2026-09-01", v: 999, cid: 3, name: "В" }
+];
+const c = OD.cexView(accs, "2026-10-13", "2026-11-11");
+ok(c.today === 1100 && c.stokovi_n === 3 && c.month === 1900 && c.total30 === 1950, "цех: днес 1100, 3 стокови, месец 1900, 30 дни 1950 (септември е извън периода)");
+ok(c.clients.length === 2 && c.clients[0].name === "А" && c.clients[0].v === 800 && c.clients[0].n === 2, "стокови: „А“ първо с 800 € и 2 документа");
 
 // ── склад: известни числа ──
 const rep = {
