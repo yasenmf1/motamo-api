@@ -153,7 +153,7 @@ const OWNER = 1153763325; const T = (iso) => new Date(iso);
   let rb = await REM.cronRemind(T("2026-11-16T09:10:00Z"));                  // 11:10 — точката още не е в прозореца
   ok(rb.brk === 0, "точка: преди 14:00 — няма напомняне за почивка");
   rb = await REM.cronRemind(T("2026-11-16T12:05:00Z"));                      // 14:05
-  ok(rb.brk === 1 && /Почивка/.test(pushes.at(-1).payload.body) && /30 мин/.test(pushes.at(-1).payload.body) && /14:00–16:30/.test(pushes.at(-1).payload.body), "точка: 14:05 — пуш за почивка");
+  ok(rb.brk === 1 && /Почивка/.test(pushes.at(-1).payload.body) && !/автоматично|приспад/.test(pushes.at(-1).payload.body) && /14:00–16:30/.test(pushes.at(-1).payload.body), "точка: 14:05 — пуш за почивка");
   rb = await REM.cronRemind(T("2026-11-16T12:20:00Z"));
   ok(rb.brk === 0, "напомнянето в 14:00 е само веднъж");
   rb = await REM.cronRemind(T("2026-11-16T14:05:00Z"));                      // 16:05 — последно
