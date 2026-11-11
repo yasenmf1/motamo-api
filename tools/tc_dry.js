@@ -169,6 +169,25 @@ const OWNER = 1153763325; const T = (iso) => new Date(iso);
   rb = await REM.cronRemind(T("2026-11-17T10:05:00Z")); ok(rb.brk === 1, "цех: 12:05 — втори прозорец");
   rb = await REM.cronRemind(T("2026-11-17T11:35:00Z")); ok(rb.brk === 1 && /Последен шанс/.test(pushes.at(-1).payload.body), "цех: 13:35 — последно напомняне");
   rb = await REM.cronRemind(T("2026-11-17T12:10:00Z")); ok(rb.brk === 0, "цех: след 14:00 — тихо");
+  // ── автоматичен запис (Митьо: Пн, Вт, Пт по 8 ч) ──
+  await TC.rpc("tc_staff_set", { p_user: -9, p_name: "Митьо Тест", p_site: "cex", p_active: true });
+  let ra = await REM.cronRemind(T("2026-11-16T14:20:00Z"));                  // понеделник 16:20 местно — още рано
+  ok(!ra.auto, "авто: преди 16:35 — не записва");
+  ra = await REM.cronRemind(T("2026-11-16T14:40:00Z"));                      // 16:40
+  ok(ra.auto === 1, "авто: понеделник 16:40 — записва");
+  const m9 = TC.sessions((await TC.rpc("tc_rows", { p_from: "2026-11-16", p_to: "2026-11-16" })).filter(x => x.user_id === -9), T("2026-11-17T10:00:00Z"));
+  ok(m9.length === 1 && Math.round(m9[0].min) === 480 && m9[0].src === "auto" && m9[0].brk === 30 && !m9[0].auto, "авто: 8 ч нетно, със 30 мин почивка, отбелязано „auto“ (" + Math.round(m9[0].min) + ")");
+  ra = await REM.cronRemind(T("2026-11-16T15:00:00Z"));
+  ok(!ra.auto, "авто: втори път същия ден — не дублира");
+  ra = await REM.cronRemind(T("2026-11-18T14:40:00Z"));                      // сряда
+  ok(!ra.auto, "авто: сряда — не записва");
+  ra = await REM.cronRemind(T("2026-11-20T14:40:00Z"));                      // петък
+  ok(ra.auto === 1, "авто: петък — записва");
+  TC.MOCK.log.filter(x => x.user_id === -9 && x.for_date === "2026-11-20").forEach(x => { x.voided_at = new Date().toISOString(); });   // отсъствие: собственикът отменя
+  ra = await REM.cronRemind(T("2026-11-20T15:00:00Z"));
+  ok(!ra.auto && !TC.MOCK.log.some(x => x.user_id === -9 && x.for_date === "2026-11-20" && !x.voided_at), "авто: отменен ден не се връща");
+  ra = await REM.cronRemind(T("2026-12-25T14:40:00Z"));                      // 25.12 — празник (петък)
+  ok(!ra.auto, "авто: официален празник — не записва");
   console.log(fails ? "\nПРОВАЛИ: " + fails : "\nВСИЧКО МИНА");
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(2); });
