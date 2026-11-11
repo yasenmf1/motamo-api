@@ -2352,7 +2352,7 @@ async function handlerInner(req, res) {
             if (String(a.account_alias || "").includes("CLTEST") || isTrialClient(a)) continue;
             const day = String(a.close_date || "").slice(0, 10), gross = Number(a.total_sum) || 0;
             if (!day || day < from || day > to || !gross) continue;
-            out.push({ d: day, v: gross / 1.2, cid: a.client_id != null ? a.client_id : 0, name: a.client_name || ("клиент " + a.client_id) });
+            out.push({ d: day, t: String(a.close_date || "").slice(11, 19), v: gross / 1.2, cid: a.client_id != null ? a.client_id : 0, name: a.client_name || ("клиент " + a.client_id) });
           }
           return out;
         },

@@ -206,15 +206,15 @@ async function shopDashData(from, to, expenses, user, pass) {
     const snow = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Sofia", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date());
     const tdy = snow.slice(0, 10), hms = snow.slice(11, 19), wk = new Date(Date.parse(tdy + "T12:00:00Z") - 7 * 864e5).toISOString().slice(0, 10);
     if (to === tdy) {
-      let t = 0, w = 0;
+      let t = 0, w = 0, tn = 0, wn = 0;
       for (const a of all) {
         if (String(a.account_alias || "").includes("CLTEST")) continue;
         const full = String(a.close_date || ""), day = full.slice(0, 10), tm = full.slice(11, 19);
         const g = Number(a.total_sum != null ? a.total_sum : (a.total_all != null ? a.total_all : a.total)) || 0;
         if (!g || !tm || tm > hms) continue;
-        if (day === tdy) t += round(g / VAT); else if (day === wk) w += round(g / VAT);
+        if (day === tdy) { t += round(g / VAT); tn++; } else if (day === wk) { w += round(g / VAT); wn++; }
       }
-      cmp = { today: round(t), lastWeek: round(w), hm: hms.slice(0, 5) };
+      cmp = { today: round(t), lastWeek: round(w), hm: hms.slice(0, 5), todayN: tn, lastWeekN: wn };
     }
   }
 
