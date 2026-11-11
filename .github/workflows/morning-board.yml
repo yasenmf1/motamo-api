@@ -1,17 +1,23 @@
 # Утринно табло в Telegram: api/cex-plan.js ?cron=morning_board.
 # Два часа в UTC (зима 06:00, лято 05:00 = 08:00 София) — сървърът праща само ако в София е 8 ч и още не е пратено днес.
+# Ръчно пускане с force=true праща веднага (проба).
 name: morning-board
 on:
   schedule:
     - cron: '0 5 * * *'
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Прати веднага (проба), без проверка за 8 часа и за вече пратено'
+        type: boolean
+        default: false
 jobs:
   board:
     runs-on: ubuntu-latest
     steps:
       - run: |
           curl -fsS --retry 2 --retry-delay 15 --max-time 100 -X GET \
-            "https://motamo-api.vercel.app/api/cex-plan?cron=morning_board" \
+            "https://motamo-api.vercel.app/api/cex-plan?cron=morning_board&force=${{ inputs.force && '1' || '0' }}" \
             -H "User-Agent: vercel-cron" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
