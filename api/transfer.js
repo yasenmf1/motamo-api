@@ -1039,6 +1039,7 @@ ${FONTS}${PWA(k)}<style>${CSS}${HUB_CSS}</style></head><body>
 <div class="wrap">
   <div class="hub">
     <a href="?view=shop&k=${encodeURIComponent(k)}"><span><b>Заявка към цеха</b><span>точката поръчва какво да донесат</span></span><span class="go">→</span></a>
+    ${isOwner(k) && require("../lib/ownerdash.js").ownerKey() ? `<a href="/api/cex-plan?view=owner&k=${encodeURIComponent(require("../lib/ownerdash.js").ownerKey())}"><span><b>📊 Табло</b><span>оборот, стокови, склад и какво да се поръча — наведнъж</span></span><span class="go">→</span></a>` : ``}
     ${isOwner(k) ? `
     <a href="?view=cex&k=${encodeURIComponent(k)}"><span><b>Заявки от точката</b><span>цехът изпълнява и издава документите</span></span><span id="pend" class="go">→</span></a>
     <a href="?view=stock&k=${encodeURIComponent(k)}"><span><b>Складът на цеха</b><span>какво няма да стигне до доставката</span></span><span id="short" class="go">→</span></a>
@@ -2364,6 +2365,8 @@ self.addEventListener("notificationclick",function(e){e.notification.close();var
     if (body.action === "tg_supply") {
       const t = String(body.text || "").slice(0, 3500).trim();
       if (!t) { res.status(200).json({ ok: false, error: "празно" }); return; }
+      // запис в историята на поръчките (за таблото на собственика): доставчикът е в първия ред „Поръчка към <име> (…)"
+      try { const mm = /Поръчка към\s+(.+?)\s*(?:\(|:)/.exec(t.split(/\r?\n/)[0] || ""); await TC.rpc("so_add", { p_supplier: mm ? mm[1] : "Заявка за зареждане", p_body: t, p_source: "order_page" }); } catch (e) { /* таблото не е критично */ }
       const r = await TG.tgSend("🧾 <b>Заявка за зареждане от цеха</b>\n\n" + TG.escHtml(t), TG.OWNER_CHAT_ID);
       res.status(200).json(r.ok ? { ok: true } : { ok: false, error: r.error });
       return;
@@ -2818,3 +2821,4 @@ self.addEventListener("notificationclick",function(e){e.notification.close();var
     res.status(500).json({ ok: false, error: String((e && e.message) || e).slice(0, 300) });
   }
 };
+module.exports.stockReport = stockReport;

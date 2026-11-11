@@ -2317,6 +2317,28 @@ async function handlerInner(req, res) {
     return;
   }
 
+  // ★ Табло на собственика: страница (?view=owner&k=<ownerKey>) и данни по части (?view=ownerdata&part=point|cex|stock|orders)
+  if (req.method === "GET" && (view === "owner" || view === "ownerdata")) {
+    const OD = require("../lib/ownerdash.js");
+    if (!OD.keyOk(q.k)) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп — липсва или грешен ключ.</body>"); return; }
+    res.setHeader("Cache-Control", "no-store");
+    if (view === "owner") {
+      const TGm = require("../lib/telegram.js"), TCm = require("../lib/timeclock.js");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(OD.page(q.k, { order: TGm.skladKey() ? "/api/transfer?view=order&k=" + encodeURIComponent(TGm.skladKey()) : "", clock: TCm.hoursKey() ? "/api/transfer?view=clockdash&k=" + encodeURIComponent(TCm.hoursKey()) : "" }));
+      return;
+    }
+    try {
+      const TCm = require("../lib/timeclock.js");
+      const deps = {
+        shopDashData: require("./shop-dash.js").shopDashData, cexDashData: dashData, stockReport: require("./transfer.js").stockReport,
+        soList: () => TCm.rpc("so_list", { p_limit: 12 }), shopUser: process.env.BARSY_USER, shopPass: process.env.BARSY_PASS, cexUser: process.env.BARSY_CEX_USER, cexPass: process.env.BARSY_CEX_PASS
+      };
+      res.status(200).json(await OD.partData(String(q.part || ""), deps));
+    } catch (e) { res.status(502).json({ ok: false, error: "part_failed", message: String(e && e.message).slice(0, 160) }); }
+    return;
+  }
+
   // 2) Четящ екран за цеха (сървърно смята днешния план от днешните сметки).
   // ── ЦЕХ ДАШБОРД (Фаза 1): оборот/фактури по период и клиент ──
   if (req.method === "GET" && view === "dashboard") {

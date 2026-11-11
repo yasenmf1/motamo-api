@@ -200,6 +200,24 @@ async function shopDashData(from, to, expenses, user, pass) {
     return { name: p.name, revenue: p.revenue, prev: pv, delta_abs: round(p.revenue - pv), delta_pct: d };
   });
 
+  // Днес до момента спрямо същия ден миналата седмица ДО СЪЩИЯ ЧАС (честно сравнение за таблото на собственика)
+  let cmp = null;
+  {
+    const snow = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Sofia", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date());
+    const tdy = snow.slice(0, 10), hms = snow.slice(11, 19), wk = new Date(Date.parse(tdy + "T12:00:00Z") - 7 * 864e5).toISOString().slice(0, 10);
+    if (to === tdy) {
+      let t = 0, w = 0;
+      for (const a of all) {
+        if (String(a.account_alias || "").includes("CLTEST")) continue;
+        const full = String(a.close_date || ""), day = full.slice(0, 10), tm = full.slice(11, 19);
+        const g = Number(a.total_sum != null ? a.total_sum : (a.total_all != null ? a.total_all : a.total)) || 0;
+        if (!g || !tm || tm > hms) continue;
+        if (day === tdy) t += round(g / VAT); else if (day === wk) w += round(g / VAT);
+      }
+      cmp = { today: round(t), lastWeek: round(w), hm: hms.slice(0, 5) };
+    }
+  }
+
   const avgCheck = accountsN ? round(totalNeto / accountsN) : 0;
 
   // ── Съвети/наблюдения ───────────────────────────────────────────────────────
@@ -227,7 +245,7 @@ async function shopDashData(from, to, expenses, user, pass) {
   if (downList.length && downList[0].delta_pct < 0) insights.push({ t: "warn", text: `Най-падащ: ${downList[0].name} ▼ ${Math.abs(downList[0].delta_pct).toFixed(0)}% (беше ${money(downList[0].prev)}, сега ${money(downList[0].revenue)}).` });
 
   return { from, to, prev_from: prevFrom, prev_to: prevTo, total_neto: totalNeto, accounts: accountsN,
-    avg_check: avgCheck, by_day: byDay, by_hour: byHour, by_chan_day: byChanDay,
+    avg_check: avgCheck, cmp, by_day: byDay, by_hour: byHour, by_chan_day: byChanDay,
     online_neto: onlineNeto, counter_neto: counterNeto, online_n: onlineN, counter_n: counterN,
     pay: byPay, pay_used: payUsed, cogs, expenses: exp, result, products, by_cat: byCat, movers,
     units_truncated: unitsTrunc, insights,
