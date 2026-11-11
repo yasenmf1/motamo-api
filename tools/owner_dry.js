@@ -48,7 +48,7 @@ const accs = [
 ];
 const c = OD.cexView(accs, "2026-10-01", "2026-11-11", NOW);
 ok(c.today === 1100 && c.stokovi_n === 3 && c.today_clients === 2, "цех: днес 1100, 3 стокови, 2 клиента");
-ok(c.cmp.today === 1000 && c.cmp.lastWeek === 400 && c.cmp.hm === "14:30" && c.cmp.todayN === 2 && c.cmp.lastWeekN === 1, "цех: до 14:30 днес 1000 срещу 400 миналата седмица: " + JSON.stringify(c.cmp));
+ok(c.cmp.today === 1100 && c.cmp.lastWeek === 1399 && c.cmp.todayN === 3 && c.cmp.lastWeekN === 2, "цех: цял ден 1100 срещу миналата седмица 1399 (400+999): " + JSON.stringify(c.cmp));
 ok(c.mtd.cur === 1100 + 999 + 400 + 800 && c.clients[0].name === "А" && c.clients[0].today === 800, "цех: ноември = 3299; най-голям клиент „А“, днес 800");
 ok(c.clients.every(x => x.name !== "В" || x.v === 50), "септември не влиза в 30-те дни (В = 50, не 1049)");
 
