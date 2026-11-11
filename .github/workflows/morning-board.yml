@@ -1,0 +1,17 @@
+# Утринно табло в Telegram: api/cex-plan.js ?cron=morning_board.
+# Два часа в UTC (зима 06:00, лято 05:00 = 08:00 София) — сървърът праща само ако в София е 8 ч и още не е пратено днес.
+name: morning-board
+on:
+  schedule:
+    - cron: '0 5 * * *'
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+jobs:
+  board:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS --retry 2 --retry-delay 15 --max-time 100 -X GET \
+            "https://motamo-api.vercel.app/api/cex-plan?cron=morning_board" \
+            -H "User-Agent: vercel-cron" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

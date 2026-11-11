@@ -2317,6 +2317,28 @@ async function handlerInner(req, res) {
     return;
   }
 
+  // ★ Утринно табло в Telegram (GitHub Actions в 05:00 и 06:00 UTC → праща само в 08:xx София, веднъж на ден): ?cron=morning_board[&force=1]
+  if (req.method === "GET" && q.cron === "morning_board") {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const okc = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET) || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!okc) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try {
+      const OD = require("../lib/ownerdash.js"), OM = require("../lib/ownermorning.js"), TGm = require("../lib/telegram.js");
+      const to = OD.sofiaDate(), hr = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Sofia", hour: "2-digit", hour12: false }).format(new Date())) % 24;
+      const force = q.force === "1";
+      if (!force && hr !== 8) { res.status(200).json({ ok: true, skipped: "not_08" }); return; }
+      if (!force && await TGm.sentGet("morning_board", to).catch(() => null)) { res.status(200).json({ ok: true, skipped: "already" }); return; }
+      const host = (req.headers && req.headers.host) || "motamo-api.vercel.app", k = OD.ownerKey();
+      const get = (part) => fetch(`https://${host}/api/cex-plan?view=ownerdata&part=${part}&k=${k}`, { signal: AbortSignal.timeout(45000) }).then(r => r.json()).then(j => (j && j.ok ? j : null)).catch(() => null);
+      const [point, cex, stock, orders] = await Promise.all([get("point"), get("cex"), get("stock"), get("orders")]);
+      if (!point && !cex && !stock) { res.status(502).json({ ok: false, error: "no_data" }); return; }
+      const text = OM.build({ point, cex, stock, orders }, to);
+      const sent = await TGm.tgSend(text, TGm.OWNER_CHAT_ID, null, { inline_keyboard: [[{ text: "📊 Отвори таблото", url: `https://${host}/api/cex-plan?view=owner&k=${k}` }]] });
+      if (sent.ok && !force) await TGm.sentSave("morning_board", to, { at: new Date().toISOString() }).catch(() => {});
+      res.status(200).json({ ok: !!sent.ok, sent: !!sent.ok, parts: { point: !!point, cex: !!cex, stock: !!stock, orders: !!orders }, error: sent.error });
+    } catch (e) { res.status(502).json({ ok: false, error: "morning_failed", message: String(e && e.message).slice(0, 160) }); }
+    return;
+  }
   // ★ Табло на собственика: страница (?view=owner&k=<ownerKey>) и данни по части (?view=ownerdata&part=point|cex|stock|orders)
   if (req.method === "GET" && (view === "owner" || view === "ownerdata")) {
     const OD = require("../lib/ownerdash.js");
