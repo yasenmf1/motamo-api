@@ -2334,11 +2334,21 @@ async function handlerInner(req, res) {
         shopDashData: require("./shop-dash.js").shopDashData, stockReport: require("./transfer.js").stockReport,
         // цех: само затворените сметки (по-лека заявка от пълното табло; Barsy на цеха е бавен — 9 с лимит на заявка)
         cexAccounts: async (from, to) => {
-          const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 2500 }, process.env.BARSY_CEX_USER, process.env.BARSY_CEX_PASS);
-          if (!r || !r.ok) throw new Error("Barsy цех: " + (r && r.status));
-          let d = r.data && r.data.data; d = Array.isArray(d) ? d : (d && (d.list || (typeof d === "object" ? Object.values(d) : []))) || [];
+          // няколко опита: Barsy понякога връща празен/служебен отговор вместо сметките → не показваме фалшиви нули
+          let rows = null;
+          for (let t = 0; t < 3 && !rows; t++) {
+            try {
+              const r = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 2500 }, process.env.BARSY_CEX_USER, process.env.BARSY_CEX_PASS);
+              let d = r && r.data && r.data.data !== undefined ? r.data.data : (r && r.data);
+              d = Array.isArray(d) ? d : (d && typeof d === "object" ? (Array.isArray(d.list) ? d.list : Object.values(d)) : []);
+              const good = d.filter(a => a && typeof a === "object" && a.close_date !== undefined);
+              if (r && r.ok && good.length) rows = good;
+            } catch (e) { /* пак */ }
+            if (!rows) await new Promise(rs => setTimeout(rs, 700 * (t + 1)));
+          }
+          if (!rows) throw new Error("Barsy цех не върна сметките");
           const out = [];
-          for (const a of (Array.isArray(d) ? d : [])) {
+          for (const a of rows) {
             if (String(a.account_alias || "").includes("CLTEST") || isTrialClient(a)) continue;
             const day = String(a.close_date || "").slice(0, 10), gross = Number(a.total_sum) || 0;
             if (!day || day < from || day > to || !gross) continue;
