@@ -5,7 +5,7 @@ const TG = require("../lib/telegram.js");
 const sent = []; const calls = [];
 TG.tgSend = async (text, chat, keep, markup) => { sent.push({ chat, text, markup }); return { ok: true }; };
 TG.tgApi = async (m, b) => { calls.push({ m, b }); return { ok: true }; };
-TG.sentGet = async () => null; TG.sentSave = async () => {};
+const SENT = {}; TG.sentGet = async (k, d) => SENT[k + "|" + d] || null; TG.sentSave = async (k, d, p) => { SENT[k + "|" + d] = p; };
 global.fetch = async (url) => ({ ok: true, json: async () => [{ user_id: 111, name: "Мария Тест", role: "sklad" }, { user_id: 222, name: "Иван Тест", role: "tochka" }] });
 const TC = require("../lib/timeclock.js");
 let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.log("✗", m); } else console.log("✓", m); };
@@ -70,22 +70,70 @@ const OWNER = 1153763325; const T = (iso) => new Date(iso);
   ok(TC.parseKind("▶️ Започнах") === "in" && TC.parseKind("⏹ Приключих") === "out" && TC.parseKind("заявка") === null, "разбор на бутоните");
   // ── приложение + почивка (нов запис -5 в точката) ──
   await TC.rpc("tc_staff_set", { p_user: -5, p_name: "Роксана Тест", p_site: "shop", p_active: true });
+  const GEO = { lat: TC.SITES.shop.lat + 0.0003, lon: TC.SITES.shop.lon, acc: 20 };   // ~33 м от точката
   const D = (hhmm) => T("2026-11-12T" + hhmm + ":00Z");              // 12.11.2026 — зимно време, София = UTC+2
   ok(TC.clockOk("-5", TC.clockToken(-5)) && !TC.clockOk("-5", "x".repeat(24)) && !TC.clockOk("-6", TC.clockToken(-5)), "лична връзка: вярна минава, чужда не");
-  let r = await TC.appAct(-5, "break_start", D("08:00")); ok(!r.ok && r.error === "state", "почивка преди начало се отказва");
-  r = await TC.appAct(-5, "in", D("06:00")); ok(r.ok, "започва 08:00 местно");
-  r = await TC.appAct(-5, "in", D("06:01")); ok(!r.ok && r.error === "state", "двойно натискане се отказва");
-  r = await TC.appAct(-5, "break_start", D("10:00")); ok(r.ok, "почивка 12:00");
+  let r = await TC.appAct(-5, "break_start", D("08:00"), GEO); ok(!r.ok && r.error === "state", "почивка преди начало се отказва");
+  r = await TC.appAct(-5, "in", D("06:00"), GEO); ok(r.ok, "започва 08:00 местно");
+  r = await TC.appAct(-5, "in", D("06:01"), GEO); ok(!r.ok && r.error === "state", "двойно натискане се отказва");
+  r = await TC.appAct(-5, "break_start", D("10:00"), GEO); ok(r.ok, "почивка 12:00");
   let st = await TC.appState(-5, D("10:10")); ok(st.state === "brk" && st.brkMin === 10, "състояние: на почивка, 10 мин");
-  r = await TC.appAct(-5, "break_end", D("10:30")); ok(r.ok, "връща се 12:30");
-  r = await TC.appAct(-5, "out", D("14:30")); ok(r.ok && r.min === 480, "приключва 16:30 → 8ч30м − 30 мин почивка = 8ч (" + r.min + ")");
+  r = await TC.appAct(-5, "break_end", D("10:30"), GEO); ok(r.ok, "връща се 12:30");
+  r = await TC.appAct(-5, "out", D("14:30"), GEO); ok(r.ok && r.min === 480, "приключва 16:30 → 8ч30м − 30 мин почивка = 8ч (" + r.min + ")");
   st = await TC.appState(-5, D("14:31")); ok(st.state === "off" && st.month.min === 480 && st.month.brk === 30, "месец: 480 мин, почивки 30");
-  r = await TC.appAct(-5, "in", D("15:00")); await TC.appAct(-5, "break_start", D("15:30"));
-  r = await TC.appAct(-5, "out", D("16:00")); ok(r.ok, "приключва направо от почивка");
+  r = await TC.appAct(-5, "in", D("15:00"), GEO); await TC.appAct(-5, "break_start", D("15:30"), GEO);
+  r = await TC.appAct(-5, "out", D("16:00"), GEO); ok(r.ok, "приключва направо от почивка");
   const rr = await TC.rpc("tc_rows", { p_from: "2026-11-12", p_to: "2026-11-12" });
   ok(rr.filter(x => x.kind === "break_end").length === 2, "почивката е затворена автоматично");
   const u = await TC.appUndo(-5, rr.at(-1).id, new Date(Date.now() + 60000)); ok(u.ok, "отмяна на последния запис");
   ok(/Роксана Тест/.test(await TC.clockTeamPage("https://h/api/transfer")) && /view=clock/.test(TC.clockPage(-5, "t")), "страниците се правят");
+  // ── геозона ──
+  let g = await TC.appAct(-5, "in", D("17:00"), { lat: TC.SITES.shop.lat + 0.01, lon: TC.SITES.shop.lon, acc: 10 });
+  ok(!g.ok && g.error === "far" && g.dist > 1000, "далеч от точката (" + g.dist + " м) → отказ");
+  g = await TC.appAct(-5, "in", D("17:00"), { lat: TC.SITES.cex.lat, lon: TC.SITES.cex.lon, acc: 10 });
+  ok(!g.ok && g.error === "far", "човек от точката в цеха → отказ");
+  g = await TC.appAct(-5, "in", D("17:00"), { lat: TC.SITES.shop.lat, lon: TC.SITES.shop.lon, acc: 900 });
+  ok(!g.ok && g.error === "weak", "слаб GPS сигнал → отказ");
+  g = await TC.appAct(-5, "in", D("17:00"));
+  ok(!g.ok && g.error === "geo", "без локация → отказ");
+  g = await TC.appAct(-5, "in", D("17:00"), { lat: "x", lon: 1 });
+  ok(!g.ok && g.error === "geo", "лоши координати → отказ");
+  const geoRows = (await TC.rpc("tc_rows", { p_from: "2026-11-12", p_to: "2026-11-12" })).filter(x => x.source === "app");
+  ok(geoRows.length && geoRows.every(x => x.lat != null && x.dist_m != null && x.dist_m < 100), "записите пазят локацията и разстоянието");
+  // ── пуш напомняния ──
+  const REM = require("../lib/clockremind.js"), pushes = [];
+  REM.setSender(async (sub, payload) => { pushes.push({ sub, payload }); });
+  await TC.rpc("tc_staff_set", { p_user: -6, p_name: "Втори Тест", p_site: "shop", p_active: true });
+  ok((await REM.appPush(-6, { endpoint: "http://x", keys: { p256dh: "a", auth: "b" } })).ok === false, "абонамент без https се отказва");
+  ok((await REM.appPush(-6, { endpoint: "https://push.example/abc", keys: { p256dh: "a", auth: "b" } })).ok, "абонаментът се записва");
+  await REM.appPush(-5, { endpoint: "https://push.example/five", keys: { p256dh: "a", auth: "b" } });
+  ok((await TC.rpc("tc_push_list")).length === 2, "два абонамента в базата");
+  ok((await REM.cronRemind(T("2026-11-12T07:00:00Z"))).skipped === "no_schedule", "без график — не праща нищо");
+  TC.MOCK.sched.push({ user_id: -5, days: [4], start_t: "09:00", end_t: "17:00" });    // 12.11.2026 е четвъртък (ISO 4)
+  TC.MOCK.sched.push({ user_id: -6, days: [4], start_t: "09:00", end_t: "17:00" });
+  let rm = await REM.cronRemind(T("2026-11-12T07:05:00Z"));            // 09:05 местно — още рано
+  ok(rm.start === 0, "преди начало+10 мин — тихо");
+  rm = await REM.cronRemind(T("2026-11-12T07:15:00Z"));                // 09:15
+  ok(rm.start === 1 && rm.sent === 1 && /Започнах/.test(pushes.at(-1).payload.body) && /view=clock&u=-6&t=/.test(pushes.at(-1).payload.url), "09:15 — пуш на човека с абонамент: " + JSON.stringify(rm));
+  rm = await REM.cronRemind(T("2026-11-12T07:25:00Z"));
+  ok(rm.start === 0 && rm.sent === 0, "повторно на 09:25 — не праща втори път");
+  rm = await REM.cronRemind(T("2026-11-12T07:35:00Z"));                // 09:35 — вече +35 мин
+  ok(rm.owner === 1 && sent.some(x => /Още не са отбелязали начало/.test(x.text) && /Втори Тест/.test(x.text)), "собственикът получава списък на неотбелязалите: " + JSON.stringify(rm));
+  // отбелязва се → вечерно напомняне за край
+  await TC.appAct(-5, "in", T("2026-11-12T07:30:00Z"), GEO);
+  rm = await REM.cronRemind(T("2026-11-12T15:20:00Z"));                // 17:20 местно, още на работа
+  ok(rm.end === 1 && /Приключих/.test(pushes.at(-1).payload.body), "17:20 — напомняне за край: " + JSON.stringify(rm));
+  rm = await REM.cronRemind(T("2026-11-12T15:30:00Z"));
+  ok(rm.end === 0, "краят се напомня само веднъж");
+  // таблото и Форма 76
+  const CD = require("../lib/clockdash.js");
+  const dh = await CD.dashPage("k", T("2026-11-12T15:30:00Z"));
+  ok(/Втори Тест/.test(dh) && /leaflet/.test(dh) && /закъсняват/.test(dh), "таблото се прави");
+  const dd = await CD.dashData(T("2026-11-12T08:00:00Z"));
+  ok(dd.people.find(p => p.id === -6).late === true && dd.points.length >= 1, "закъснелият се вижда; точките за картата са налични");
+  const f76 = await CD.form76Page("2026-11", "shop", T("2026-11-12T15:30:00Z"));
+  ok(/Форма 76/.test(f76) && /Роксана Тест/.test(f76), "Форма 76 се прави");
+  ok(CD.nightMin("2026-11-12T19:00:00Z", "2026-11-13T05:00:00Z") === 480, "нощни: 21:00–07:00 местно → 22–06 = 8 ч");
   console.log(fails ? "\nПРОВАЛИ: " + fails : "\nВСИЧКО МИНА");
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(2); });

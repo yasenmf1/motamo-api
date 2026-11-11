@@ -1,0 +1,16 @@
+# Пуш напомняния за часовника (на 10 мин, 05:00–23:59 София ≈ 03–21 UTC): api/transfer.js ?cron=clock_remind.
+# Праща само ако в таблица time_sched има график; всяко напомняне се праща най-много веднъж на ден.
+name: clock-remind
+on:
+  schedule:
+    - cron: '*/10 3-21 * * *'
+  workflow_dispatch:
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS --retry 2 --retry-delay 10 -X GET \
+            "https://motamo-api.vercel.app/api/transfer?cron=clock_remind" \
+            -H "User-Agent: vercel-cron" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

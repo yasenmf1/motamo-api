@@ -1990,6 +1990,35 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // Service worker за пуш напомняния на часовника (обхват /api/)
+  if (req.method === "GET" && q.view === "clocksw") {
+    res.setHeader("Content-Type", "application/javascript; charset=utf-8"); res.setHeader("Service-Worker-Allowed", "/api/"); res.setHeader("Cache-Control", "no-cache");
+    res.status(200).send(`self.addEventListener("install",function(){self.skipWaiting()});self.addEventListener("activate",function(e){e.waitUntil(self.clients.claim())});
+self.addEventListener("push",function(e){var d={};try{d=e.data.json()}catch(x){}e.waitUntil(self.registration.showNotification(d.title||"MOTAMO",{body:d.body||"",tag:d.tag||"clock",renotify:true,icon:"https://motamo.bg/icons/icon-192.png",data:{url:d.url||"/api/"}}))});
+self.addEventListener("notificationclick",function(e){e.notification.close();var u=(e.notification.data&&e.notification.data.url)||"/api/";e.waitUntil(self.clients.matchAll({type:"window",includeUncontrolled:true}).then(function(l){for(var i=0;i<l.length;i++){if("focus" in l[i]){if(l[i].navigate)l[i].navigate(u);return l[i].focus()}}return self.clients.openWindow(u)}))});`);
+    return;
+  }
+  // Табло и Форма 76 (само собственик): ?view=clockdash&k=<hoursKey> · ?view=form76&k=<hoursKey>&m=YYYY-MM&site=cex|shop
+  if (req.method === "GET" && (q.view === "clockdash" || q.view === "form76")) {
+    if (!((TC.hoursKey() && q.k === TC.hoursKey()) || isOwner(q.k))) { res.status(403).send("<!doctype html><meta charset=utf-8><body style='font:16px system-ui;padding:24px'>Няма достъп.</body>"); return; }
+    try {
+      const CD = require("../lib/clockdash.js");
+      res.setHeader("Content-Type", "text/html; charset=utf-8"); res.setHeader("Cache-Control", "no-store");
+      res.status(200).send(q.view === "clockdash" ? await CD.dashPage(q.k) : await CD.form76Page(q.m, q.site));
+    } catch (e) { res.status(502).send("Грешка при четене на часовете."); }
+    return;
+  }
+  // Пуш напомняния за часовете (GitHub Actions на 10 мин): ?cron=clock_remind
+  if (req.method === "GET" && q.cron === "clock_remind") {
+    const auth = String(req.headers && (req.headers.authorization || "") || "");
+    const okc = (process.env.CRON_SECRET && auth === "Bearer " + process.env.CRON_SECRET)
+      || (!process.env.CRON_SECRET && /vercel-cron/i.test(String(req.headers && req.headers["user-agent"] || "")));
+    if (!okc) { res.status(403).json({ ok: false, error: "forbidden" }); return; }
+    try { res.status(200).json(await require("../lib/clockremind.js").cronRemind()); }
+    catch (e) { res.status(502).json({ ok: false, error: "clock_remind_failed", message: String(e && e.message).slice(0, 160) }); }
+    return;
+  }
+
   // ★ Часовник-приложение: лична връзка на служител ?view=clock&u=<id>&t=<токен> (страница, манифест, API)
   if (q.view === "clock" || q.view === "clockmanifest" || q.view === "clockapi") {
     const okLink = TC.clockOk(q.u, q.t);
@@ -1998,14 +2027,15 @@ module.exports = async function handler(req, res) {
       res.status(403).send("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><body style='font:18px system-ui;padding:24px'>Тази връзка не е активна. Кажи на Ясен.</body>"); return;
     }
     res.setHeader("Cache-Control", "no-store");
-    if (req.method === "GET" && q.view === "clock") { res.setHeader("Content-Type", "text/html; charset=utf-8"); res.status(200).send(TC.clockPage(q.u, q.t)); return; }
+    if (req.method === "GET" && q.view === "clock") { res.setHeader("Content-Type", "text/html; charset=utf-8"); res.status(200).send(TC.clockPage(q.u, q.t, require("../lib/push.js").vapid().pub)); return; }
     if (req.method === "GET" && q.view === "clockmanifest") { res.setHeader("Content-Type", "application/manifest+json; charset=utf-8"); res.status(200).json(TC.clockManifest(q.u, q.t)); return; }
     if (req.method === "POST" && q.view === "clockapi") {
       let b = req.body; if (typeof b === "string") { try { b = JSON.parse(b); } catch (e) { b = null; } }
       b = b && typeof b === "object" ? b : {};
       try {
         if (b.op === "state") { res.status(200).json(await TC.appState(Number(q.u))); return; }
-        if (b.op === "act") { res.status(200).json(await TC.appAct(Number(q.u), String(b.kind || ""))); return; }
+        if (b.op === "act") { res.status(200).json(await TC.appAct(Number(q.u), String(b.kind || ""), new Date(), b.geo)); return; }
+        if (b.op === "push") { res.status(200).json(await require("../lib/clockremind.js").appPush(Number(q.u), b.sub)); return; }
         if (b.op === "undo") { res.status(200).json(await TC.appUndo(Number(q.u), Number(b.id))); return; }
         res.status(400).json({ ok: false, error: "op" });
       } catch (e) { res.status(502).json({ ok: false, error: "db", message: String(e && e.message).slice(0, 100) }); }
