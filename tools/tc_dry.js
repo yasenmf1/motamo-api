@@ -8,6 +8,7 @@ TG.tgApi = async (m, b) => { calls.push({ m, b }); return { ok: true }; };
 const SENT = {}; TG.sentGet = async (k, d) => SENT[k + "|" + d] || null; TG.sentSave = async (k, d, p) => { SENT[k + "|" + d] = p; };
 global.fetch = async (url) => ({ ok: true, json: async () => [{ user_id: 111, name: "Мария Тест", role: "sklad" }, { user_id: 222, name: "Иван Тест", role: "tochka" }] });
 const TC = require("../lib/timeclock.js");
+TC.CFG.autoBreakMin = 0;                      // старите проби са без автоматична почивка; новата част я включва
 let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.log("✗", m); } else console.log("✓", m); };
 const OWNER = 1153763325; const T = (iso) => new Date(iso);
 (async () => {
@@ -108,7 +109,7 @@ const OWNER = 1153763325; const T = (iso) => new Date(iso);
   ok((await REM.appPush(-6, { endpoint: "https://push.example/abc", keys: { p256dh: "a", auth: "b" } })).ok, "абонаментът се записва");
   await REM.appPush(-5, { endpoint: "https://push.example/five", keys: { p256dh: "a", auth: "b" } });
   ok((await TC.rpc("tc_push_list")).length === 2, "два абонамента в базата");
-  ok((await REM.cronRemind(T("2026-11-12T07:00:00Z"))).skipped === "no_schedule", "без график — не праща нищо");
+  ok((await REM.cronRemind(T("2026-11-12T07:00:00Z"))).start === 0, "без график — не праща напомняния за начало");
   TC.MOCK.sched.push({ user_id: -5, days: [4], start_t: "09:00", end_t: "17:00" });    // 12.11.2026 е четвъртък (ISO 4)
   TC.MOCK.sched.push({ user_id: -6, days: [4], start_t: "09:00", end_t: "17:00" });
   let rm = await REM.cronRemind(T("2026-11-12T07:05:00Z"));            // 09:05 местно — още рано
@@ -134,6 +135,40 @@ const OWNER = 1153763325; const T = (iso) => new Date(iso);
   const f76 = await CD.form76Page("2026-11", "shop", T("2026-11-12T15:30:00Z"));
   ok(/Форма 76/.test(f76) && /Роксана Тест/.test(f76), "Форма 76 се прави");
   ok(CD.nightMin("2026-11-12T19:00:00Z", "2026-11-13T05:00:00Z") === 480, "нощни: 21:00–07:00 местно → 22–06 = 8 ч");
+  // ── автоматична почивка ──
+  TC.CFG.autoBreakMin = 30;
+  await TC.rpc("tc_staff_set", { p_user: -7, p_name: "Трети Тест", p_site: "shop", p_active: true });
+  const add7 = (k, iso) => TC.rpc("tc_add", { p_user: -7, p_kind: k, p_at: T(iso), p_source: "t" });
+  await add7("in", "2026-11-13T06:00:00Z"); await add7("out", "2026-11-13T14:00:00Z");                                   // 8 ч без почивка
+  await add7("in", "2026-11-14T06:00:00Z"); await add7("break_start", "2026-11-14T09:00:00Z"); await add7("break_end", "2026-11-14T09:20:00Z"); await add7("out", "2026-11-14T14:00:00Z");   // 8 ч със 20 мин почивка
+  await add7("in", "2026-11-15T06:00:00Z"); await add7("out", "2026-11-15T10:00:00Z");                                   // 4 ч
+  const s7 = TC.sessions((await TC.rpc("tc_rows", { p_from: "2026-11-13", p_to: "2026-11-15" })).filter(x => x.user_id === -7), T("2026-11-16T10:00:00Z"));
+  ok(Math.round(s7[0].min) === 450 && s7[0].auto && s7[0].brk === 30, "8 ч без почивка → 7ч 30м (авт. 30 мин): " + Math.round(s7[0].min));
+  ok(Math.round(s7[1].min) === 460 && !s7[1].auto, "със 20 мин почивка → не се добавя втора: " + Math.round(s7[1].min));
+  ok(Math.round(s7[2].min) === 240 && !s7[2].auto, "4 ч смяна — без автоматична почивка");
+  // ── напомняния за почивка по прозорци ──
+  TC.MOCK.sched.push({ user_id: -7, days: [1, 2, 3, 4, 5, 6, 7], start_t: "07:00", end_t: "19:00" });
+  await REM.appPush(-7, { endpoint: "https://push.example/seven", keys: { p256dh: "a", auth: "b" } });
+  await add7("in", "2026-11-16T05:00:00Z");                                  // 07:00 местно, понеделник
+  let rb = await REM.cronRemind(T("2026-11-16T09:10:00Z"));                  // 11:10 — точката още не е в прозореца
+  ok(rb.brk === 0, "точка: преди 14:00 — няма напомняне за почивка");
+  rb = await REM.cronRemind(T("2026-11-16T12:05:00Z"));                      // 14:05
+  ok(rb.brk === 1 && /Почивка/.test(pushes.at(-1).payload.body) && /30 мин/.test(pushes.at(-1).payload.body) && /14:00–16:30/.test(pushes.at(-1).payload.body), "точка: 14:05 — пуш за почивка");
+  rb = await REM.cronRemind(T("2026-11-16T12:20:00Z"));
+  ok(rb.brk === 0, "напомнянето в 14:00 е само веднъж");
+  rb = await REM.cronRemind(T("2026-11-16T14:05:00Z"));                      // 16:05 — последно
+  ok(rb.brk === 1 && /Последен шанс/.test(pushes.at(-1).payload.body), "точка: 16:05 — последно напомняне");
+  rb = await REM.cronRemind(T("2026-11-16T14:40:00Z"));                      // 16:40
+  ok(rb.brk === 0, "след 16:30 — вече не напомня");
+  await TC.rpc("tc_staff_set", { p_user: -8, p_name: "Цехов Тест", p_site: "cex", p_active: true });
+  await REM.appPush(-8, { endpoint: "https://push.example/eight", keys: { p256dh: "a", auth: "b" } });
+  await TC.rpc("tc_add", { p_user: -8, p_kind: "in", p_at: T("2026-11-17T05:00:00Z"), p_source: "t" });   // 07:00 местно
+  rb = await REM.cronRemind(T("2026-11-17T07:50:00Z")); ok(rb.brk === 0, "цех: 09:50 — още не");
+  rb = await REM.cronRemind(T("2026-11-17T08:05:00Z")); ok(rb.brk === 1 && /10:00–11:30 и 12:00–14:00/.test(pushes.at(-1).payload.body), "цех: 10:05 — първи прозорец");
+  rb = await REM.cronRemind(T("2026-11-17T08:30:00Z")); ok(rb.brk === 0, "цех: в същия прозорец — само веднъж");
+  rb = await REM.cronRemind(T("2026-11-17T10:05:00Z")); ok(rb.brk === 1, "цех: 12:05 — втори прозорец");
+  rb = await REM.cronRemind(T("2026-11-17T11:35:00Z")); ok(rb.brk === 1 && /Последен шанс/.test(pushes.at(-1).payload.body), "цех: 13:35 — последно напомняне");
+  rb = await REM.cronRemind(T("2026-11-17T12:10:00Z")); ok(rb.brk === 0, "цех: след 14:00 — тихо");
   console.log(fails ? "\nПРОВАЛИ: " + fails : "\nВСИЧКО МИНА");
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(2); });
