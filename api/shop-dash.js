@@ -163,7 +163,8 @@ async function shopDashData(from, to, expenses, user, pass) {
     if (!sample) sample = a;
     const neto = round(gross / VAT);
     byDay[day] = round((byDay[day] || 0) + neto);
-    const hm = full.length >= 13 ? parseInt(full.slice(11, 13), 10) : NaN;
+    // часът на ПРОДАЖБАТА е кога е създадена сметката (затварянето често е на пачки по-късно: в 18 ч се трупаха сметки от 17 ч)
+    const cr = String(a.create_date || full), hm = cr.length >= 13 ? parseInt(cr.slice(11, 13), 10) : NaN;
     if (!isNaN(hm)) byHour[hm] = round((byHour[hm] || 0) + neto);
     const online = Number(a.client_id) === ONLINE_CLIENT_ID;
     const cd = byChanDay[day] || (byChanDay[day] = { online: 0, counter: 0 });
