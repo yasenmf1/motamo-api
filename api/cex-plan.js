@@ -2356,6 +2356,7 @@ async function handlerInner(req, res) {
           }
           return out;
         },
+        cexMargin: (from, to, ids) => reportMarginByClient(from, to, ids, process.env.BARSY_CEX_USER, process.env.BARSY_CEX_PASS),
         cexArticles: (from, to, cid) => reportSalesByArticles(from, to, process.env.BARSY_CEX_USER, process.env.BARSY_CEX_PASS, cid),
         // месечни обороти от 1 януари: точка = от сметките (дължина 12000, както в таблото на точката); цех = справка „Продажби по сметки“ по месец
         shopMonths: async (y, to) => {
