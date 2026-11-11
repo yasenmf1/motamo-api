@@ -169,6 +169,16 @@ const OWNER = 1153763325; const T = (iso) => new Date(iso);
   rb = await REM.cronRemind(T("2026-11-17T10:05:00Z")); ok(rb.brk === 1, "цех: 12:05 — втори прозорец");
   rb = await REM.cronRemind(T("2026-11-17T11:35:00Z")); ok(rb.brk === 1 && /Последен шанс/.test(pushes.at(-1).payload.body), "цех: 13:35 — последно напомняне");
   rb = await REM.cronRemind(T("2026-11-17T12:10:00Z")); ok(rb.brk === 0, "цех: след 14:00 — тихо");
+  // ── начало по ден: неделя 09:00, иначе 08:00 ──
+  await TC.rpc("tc_staff_set", { p_user: -12, p_name: "Неделен Тест", p_site: "cex", p_active: true });
+  await REM.appPush(-12, { endpoint: "https://push.example/twelve", keys: { p256dh: "a", auth: "b" } });
+  TC.MOCK.sched.push({ user_id: -12, days: [7, 1], start_t: "08:00", end_t: "17:00", start_by_day: { "7": "09:00" } });
+  let rs = await REM.cronRemind(T("2026-11-15T06:30:00Z"));                  // неделя 08:30 местно — началото е 09:00
+  ok(rs.start === 0, "неделя 08:30 — още не е закъснял (начало 09:00)");
+  rs = await REM.cronRemind(T("2026-11-15T07:15:00Z"));                      // 09:15
+  ok(rs.start === 1, "неделя 09:15 — напомня");
+  rs = await REM.cronRemind(T("2026-11-16T06:15:00Z"));                      // понеделник 08:15 — началото е 08:00
+  ok(rs.start === 1, "понеделник 08:15 — напомня (начало 08:00)");
   // ── автоматичен запис (Митьо: Пн, Вт, Пт по 8 ч) ──
   await TC.rpc("tc_staff_set", { p_user: -9, p_name: "Митьо Тест", p_site: "cex", p_active: true });
   let ra = await REM.cronRemind(T("2026-11-16T14:20:00Z"));                  // понеделник 16:20 местно — още рано
