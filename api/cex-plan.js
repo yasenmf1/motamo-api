@@ -2352,8 +2352,39 @@ async function handlerInner(req, res) {
             if (String(a.account_alias || "").includes("CLTEST") || isTrialClient(a)) continue;
             const day = String(a.close_date || "").slice(0, 10), gross = Number(a.total_sum) || 0;
             if (!day || day < from || day > to || !gross) continue;
-            out.push({ d: day, t: String(a.close_date || "").slice(11, 19), v: gross / 1.2, cid: a.client_id != null ? a.client_id : 0, name: a.client_name || ("клиент " + a.client_id) });
+            out.push({ d: day, t: String(a.close_date || "").slice(11, 19), v: gross / 1.2, cid: a.client_id != null ? a.client_id : 0, pid: a.person_id != null ? a.person_id : 0, pn: a.person_name || "", name: a.client_name || ("клиент " + a.client_id) });
           }
+          return out;
+        },
+        // месечни обороти от 1 януари: точка = от сметките (дължина 12000, както в таблото на точката); цех = справка „Продажби по сметки“ по месец
+        shopMonths: async (y, to) => {
+          const SD = require("./shop-dash.js");
+          const r = await SD.shopCall("Accounts_getlist", { order_by: "account_id desc", length: 12000 }, process.env.BARSY_USER, process.env.BARSY_PASS);
+          const rows = SD.arrOf(r); if (!rows.length) throw new Error("Barsy точка не върна сметките");
+          const out = {};
+          for (const a of rows) {
+            if (String(a.account_alias || "").includes("CLTEST")) continue;
+            const day = String(a.close_date || "").slice(0, 10); if (!day || day < y + "-01-01" || day > to) continue;
+            const g = Number(a.total_sum != null ? a.total_sum : (a.total_all != null ? a.total_all : a.total)) || 0; if (!g) continue;
+            out[day.slice(0, 7)] = (out[day.slice(0, 7)] || 0) + g / 1.2;
+          }
+          return out;
+        },
+        cexMonths: async (y, to) => {
+          const cm = +to.slice(5, 7), out = {}, ms = Array.from({ length: cm }, (_, i) => i + 1);
+          const one = async (m) => {
+            const first = y + "-" + String(m).padStart(2, "0") + "-01", last = m === cm ? to : y + "-" + String(m).padStart(2, "0") + "-" + String(new Date(Date.UTC(+y, m, 0)).getUTCDate()).padStart(2, "0");
+            for (let t = 0; t < 3; t++) {
+              try {
+                const r = await cexCall("Reports_sales_by_accounts", { active_struct_id: "eStructList_1", action_type: "values", page_num: 1, filters: { ref_date: [first, last] } }, process.env.BARSY_CEX_USER, process.env.BARSY_CEX_PASS);
+                const tt = r && r.ok && r.data && r.data.totals && r.data.totals.total;
+                if (tt && tt.total_no_dds != null) { out[y + "-" + String(m).padStart(2, "0")] = Number(tt.total_no_dds) || 0; return; }
+              } catch (e) { /* пак */ }
+              await new Promise(rs => setTimeout(rs, 600 * (t + 1)));
+            }
+          };
+          for (let i = 0; i < ms.length; i += 4) await Promise.all(ms.slice(i, i + 4).map(one));
+          if (!Object.keys(out).length) throw new Error("Barsy цех не върна месечните обороти");
           return out;
         },
         soList: () => TCm.rpc("so_list", { p_limit: 12 }), shopUser: process.env.BARSY_USER, shopPass: process.env.BARSY_PASS

@@ -541,3 +541,5 @@ module.exports = async function handler(req, res) {
   res.status(200).send(page(data, q.k));
 };
 module.exports.shopDashData = shopDashData;
+module.exports.shopCall = shopCall;
+module.exports.arrOf = arrOf;
