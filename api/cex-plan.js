@@ -1163,8 +1163,11 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
       try {
         const al = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 600 }, user, pass);
         let all = al.data || []; if (!Array.isArray(all)) all = Object.values(all);
-        const f = all.find(x => String(x.create_date || "").slice(0, 10) === date && String(x.client_id || "") === String(s.client_id || "")
-          && String(x.person_id || "") === String(s.person_id || "") && String(x.is_anulate != null ? x.is_anulate : (x.anulate_flag != null ? x.anulate_flag : "0")) !== "1");
+        // ★ 12.11 — сметката за разнос на 13.11 е създадена още на 12.11 → не искаме СЪЩАТА дата, а от деня преди разноса нататък;
+        // и празна (сума 0) не е сметка на деня. Най-новата първа (списъкът е по номер надолу).
+        const dayBefore = new Date(Date.parse(date + "T12:00:00Z") - 86400000).toISOString().slice(0, 10);
+        const f = all.find(x => String(x.create_date || "").slice(0, 10) >= dayBefore && String(x.client_id || "") === String(s.client_id || "")
+          && String(x.person_id || "") === String(s.person_id || "") && Number(x.total_sum) > 0 && String(x.is_anulate != null ? x.is_anulate : (x.anulate_flag != null ? x.anulate_flag : "0")) !== "1");
         if (f) accId = f.account_id;
         // ★ 12.11 — старата сметка е ИЗТРИТА/анулирана (Barsy помни UUID-то ѝ) → няма активна: създаваме нова със соленo UUID.
         if (!f && !salt) {
