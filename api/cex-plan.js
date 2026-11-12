@@ -1105,8 +1105,8 @@ async function scheduleSeed(dateIso, user, pass) {
   return { shops, dow };
 }
 // UUID за идемпотентност — един и същ за (ден+магазин), за да не се дублира сметка.
-function uuidFor(date, s) {
-  const key = `${date}|${s.client_id || ""}|${s.person_id || ""}|${s.rep || ""}`;
+function uuidFor(date, s, salt) {
+  const key = `${date}|${s.client_id || ""}|${s.person_id || ""}|${s.rep || ""}` + (salt ? `|${salt}` : "");
   const h = crypto.createHash("sha1").update(key).digest("hex");
   const v = "5" + h.slice(13, 16), a = ((parseInt(h[16], 16) & 0x3) | 0x8).toString(16) + h.slice(17, 20);
   return [h.slice(0, 8), h.slice(8, 12), v, a, h.slice(20, 32)].join("-");
@@ -1137,10 +1137,10 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
     // насред деня) Barsy отказва въпреки бройките, а допроизводството трупаше стотици документи
     // (338 CET KAWA на хартия) и изяждаше 60-те секунди. Производството е работа само на
     // ② Артикули; тук при отказ казваме КАКВО липсва. Дублиран UUID = сметката вече я има.
-    let r = null, lastRaw = "", existed = false;
+    let r = null, lastRaw = "", existed = false, salt = "";
     for (let attempt = 0; attempt < 2; attempt++) {
       let thrown = false;
-      try { r = await cexCall("Accounts_place", { account, orders, flag_close_account: 0 }, user, pass); }
+      try { r = await cexCall("Accounts_place", { account: Object.assign({}, account, { uuid: uuidFor(date, s, salt) }), orders, flag_close_account: 0 }, user, pass); }
       catch (e) { r = { ok: false, raw: String(e && e.message) }; thrown = true; }
       if (r.ok) break;
       lastRaw = String(r.raw || "");
@@ -1166,6 +1166,13 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
         const f = all.find(x => String(x.create_date || "").slice(0, 10) === date && String(x.client_id || "") === String(s.client_id || "")
           && String(x.person_id || "") === String(s.person_id || "") && String(x.is_anulate != null ? x.is_anulate : (x.anulate_flag != null ? x.anulate_flag : "0")) !== "1");
         if (f) accId = f.account_id;
+        // ★ 12.11 — старата сметка е ИЗТРИТА/анулирана (Barsy помни UUID-то ѝ) → няма активна: създаваме нова със соленo UUID.
+        if (!f && !salt) {
+          salt = "r" + Date.now().toString(36);
+          const r2 = await cexCall("Accounts_place", { account: Object.assign({}, account, { uuid: uuidFor(date, s, salt) }), orders, flag_close_account: 0 }, user, pass);
+          if (r2 && r2.ok) { r = r2; existed = false; accId = (typeof r2.data === "number" ? r2.data : (r2.data && (r2.data.account_id || r2.data.id))) || null; }
+          else lastRaw = String((r2 && r2.raw) || lastRaw);
+        }
       } catch (e) { /* остава без номер — интерфейсът ще предупреди */ }
     }
     out.push({ client: s.client, rep: s.rep, ok: !!(r && r.ok) || existed, existed: existed || undefined, account_id: accId, items: orders.length,
