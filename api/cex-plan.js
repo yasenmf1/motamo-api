@@ -1137,7 +1137,7 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
     // насред деня) Barsy отказва въпреки бройките, а допроизводството трупаше стотици документи
     // (338 CET KAWA на хартия) и изяждаше 60-те секунди. Производството е работа само на
     // ② Артикули; тук при отказ казваме КАКВО липсва. Дублиран UUID = сметката вече я има.
-    let r = null, lastRaw = "", existed = false, salt = "";
+    let r = null, lastRaw = "", existed = false, salt = "", saltErr = "";
     for (let attempt = 0; attempt < 2; attempt++) {
       let thrown = false;
       try { r = await cexCall("Accounts_place", { account: Object.assign({}, account, { uuid: uuidFor(date, s, salt) }), orders, flag_close_account: 0 }, user, pass); }
@@ -1171,12 +1171,12 @@ async function createAccounts(shops, date, user, pass, lotOverride) {
           salt = "r" + Date.now().toString(36);
           const r2 = await cexCall("Accounts_place", { account: Object.assign({}, account, { uuid: uuidFor(date, s, salt) }), orders, flag_close_account: 0 }, user, pass);
           if (r2 && r2.ok) { r = r2; existed = false; accId = (typeof r2.data === "number" ? r2.data : (r2.data && (r2.data.account_id || r2.data.id))) || null; }
-          else lastRaw = String((r2 && r2.raw) || lastRaw);
+          else { lastRaw = String((r2 && r2.raw) || lastRaw); saltErr = "нова сметка отказана: " + lastRaw.slice(0, 260); }
         }
-      } catch (e) { /* остава без номер — интерфейсът ще предупреди */ }
+      } catch (e) { saltErr = "грешка при нова сметка: " + String(e && e.message).slice(0, 200); }
     }
     out.push({ client: s.client, rep: s.rep, ok: !!(r && r.ok) || existed, existed: existed || undefined, account_id: accId, items: orders.length,
-      error: (r && r.ok) || existed ? undefined : (hint + lastRaw).slice(0, 320) });
+      error: (r && r.ok) || existed ? undefined : (hint + lastRaw).slice(0, 320), salt_error: saltErr || undefined });
   }
   return out;
 }
