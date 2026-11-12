@@ -1406,7 +1406,7 @@ async function computeDayPlan(shopsIn, prodDate, lot, razosDate, withOthers, use
     let all = list.data || []; if (!Array.isArray(all)) all = Object.values(all);
     if (!list.ok || !all.length) throw new Error("сметките не се прочетоха от Barsy");
     const byAcc = {}; for (const x of all) byAcc[String(x.account_id)] = x;
-    for (const sh of withId) { const x = byAcc[String(accIdOf(sh))]; if (x && String(x.is_anulate != null ? x.is_anulate : (x.anulate_flag != null ? x.anulate_flag : "0")) === "1") hasAcc.delete(dayKey(sh)); }
+    for (const sh of withId) { const x = byAcc[String(accIdOf(sh))]; if (!x || String(x.is_anulate != null ? x.is_anulate : (x.anulate_flag != null ? x.anulate_flag : "0")) === "1") hasAcc.delete(dayKey(sh)); } // ★ 12.11 — изтрита сметка (липсва в Barsy) също не държи нищо
   }
   const needShops = shopsIn.filter(sh => !hasAcc.has(dayKey(sh)));
   const agg = Object.assign({}, compute(needShops).agg);
@@ -3387,7 +3387,7 @@ async function handlerInner(req, res) {
     let day_saved = false;
     try {
       const day = await dayGet(date); const st = Object.assign({}, day.state || {}); const accs = Object.assign({}, st.accounts || {});
-      shopsIn.forEach((sh, i) => { const c = created[i]; if (c && c.ok) accs[dayKey(sh)] = { account_id: c.account_id || (accs[dayKey(sh)] && accs[dayKey(sh)].account_id) || null, existed: c.existed || undefined, at: new Date().toISOString() }; });
+      shopsIn.forEach((sh, i) => { const c = created[i]; if (c && c.ok && !c.account_id && c.existed) { delete accs[dayKey(sh)]; return; } /* ★ 12.11 — без нов номер: не пазим стария (изтрития) */ if (c && c.ok) accs[dayKey(sh)] = { account_id: c.account_id || (accs[dayKey(sh)] && accs[dayKey(sh)].account_id) || null, existed: c.existed || undefined, at: new Date().toISOString() }; });
       st.accounts = accs; day_saved = (await daySave(date, st)).ok;
     } catch (e) { day_saved = false; }
     res.status(200).json({ ok: true, created, day_saved });
