@@ -1405,8 +1405,8 @@ async function computeDayPlan(shopsIn, prodDate, lot, razosDate, withOthers, use
     const list = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 600 }, user, pass);
     let all = list.data || []; if (!Array.isArray(all)) all = Object.values(all);
     if (!list.ok || !all.length) throw new Error("сметките не се прочетоха от Barsy");
-    const byAcc = {}; for (const x of all) byAcc[String(x.account_id)] = x; globalThis.__accDbg = withId.slice(0,3).map(sh => byAcc[String(accIdOf(sh))]);
-    for (const sh of withId) { const x = byAcc[String(accIdOf(sh))]; if (!x || String(x.is_anulate != null ? x.is_anulate : (x.anulate_flag != null ? x.anulate_flag : "0")) === "1") hasAcc.delete(dayKey(sh)); } // ★ 12.11 — изтрита сметка (липсва в Barsy) също не държи нищо
+    const byAcc = {}; for (const x of all) byAcc[String(x.account_id)] = x;
+    for (const sh of withId) { const x = byAcc[String(accIdOf(sh))]; if (!x || !(Number(x.total_sum) > 0) || String(x.is_anulate != null ? x.is_anulate : (x.anulate_flag != null ? x.anulate_flag : "0")) === "1") hasAcc.delete(dayKey(sh)); } // ★ 12.11 — изтрита или ПРАЗНА сметка (без редове, сума 0) не държи нищо
   }
   const needShops = shopsIn.filter(sh => !hasAcc.has(dayKey(sh)));
   const agg = Object.assign({}, compute(needShops).agg);
@@ -3471,7 +3471,7 @@ async function handlerInner(req, res) {
     const alreadyNamed = {}; for (const [id, q] of Object.entries(underLot)) { const a = byId(id); if (a && q > 0) alreadyNamed[a.name] = round(q); }
     const out = { lot: lot || "(авто)", lot_exp, prod_date: prodDate, other_accounts: others.map(x => (x.client || "") + (x.rep ? " / " + x.rep : "") + " #" + x.account_id), already_under_lot: sortObj(alreadyNamed, 2), load_raw: sortObj(loadRawNamed, 3), produced_zagotovki: sortObj(zagProduce, 3), produced_rolls: sortObj(rollProduce, 2), produced_sets: sortObj(setProduce, 2),
       table: cdp.table, stale: cdp.stale, in_point: Object.fromEntries(Object.entries(cdp.inPoint).map(([id, q]) => [(byId(id) || {}).name || id, q])), with_account: cdp.withAccount, need_shops: cdp.needShops };
-    if (body.dry === true) { out.dry = true; out.acc_dbg = globalThis.__accDbg; out.with_account_ids = shopsIn.map(x => (x.rep || "") + ":" + (x.account_id || "")); res.status(200).json(out); return; } // ★ 12.11 — суха проба, нищо не пише
+    if (body.dry === true) { out.dry = true; out.with_account_ids = shopsIn.map(x => (x.rep || "") + ":" + (x.account_id || "")); res.status(200).json(out); return; } // ★ 12.11 — суха проба, нищо не пише
     // ★ S28 — ПРЕДПАЗИТЕЛ: производството на СЕТ взима компонентите (НАЧИ) от НАЙ-СТАРАТА партида,
     // включително запазените за отворени сметки → старите сметки после не могат да се приключат.
     // Ако сет от плана има компонент, запазен под по-стара партида → СТОП, нищо не се произвежда.
