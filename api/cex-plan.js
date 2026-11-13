@@ -3056,6 +3056,15 @@ async function handlerInner(req, res) {
       reason_id: gv("reason_id", null), currency_rate: gv("currency_rate", "1"), paymethod_id: gv("paymethod_id", null),
       skip_account_discount_recalculate_flag: null, linked_accounts: ""
     };
+    // ★ 13.11 — страницата вече връща избираемите полета като обект ({client_id, client_name, …}), а запазването иска число → вадим id-то и името.
+    for (const k of ["user_id", "client_id", "person_id", "deal_id", "speditor_id", "reason_id", "paymethod_id", "currency_id"]) {
+      const v = values[k];
+      if (v && typeof v === "object") {
+        const nk = k.replace(/_id$/, "_name");
+        if (nk !== k && v[nk] != null && !values[nk]) values[nk] = v[nk];
+        values[k] = v[k] != null ? v[k] : null;
+      }
+    }
     // 2) текущите редове
     let rr; try { rr = await cexCallRoot({ accounts_edit: { id: acc, action_type: "values", active_struct_id: "eStructListForm_1", params: { id: acc, bid: CEX_BID }, rows: 5000 } }, user, pass); }
     catch (e) { res.status(504).json({ ok: false, error: "cex_unreachable", message: String(e && e.message) }); return; }
