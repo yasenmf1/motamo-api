@@ -3101,7 +3101,7 @@ async function handlerInner(req, res) {
     }
     const saveBody = { Accounts_save: { id: acc, action_type: closeIt ? "save_and_close" : "save_and_continue", values, rows: saveRows } };
     const out = { ok: true, account_id: acc, dry, client: values.client_name, alias: values.account_alias,
-      current: curRows.map(r => ({ article_id: r.article_id, name: r.article_name, amount: r.amount, lot: r.lot_value })),
+      current: curRows.map(r => ({ article_id: r.article_id, name: r.article_name, amount: r.amount, lot: r.lot_value, price: r.current_price })),
       plan, need_price: needPrice, rows_to_save: saveRows.length, save_body: saveBody };
     if (dry) { res.status(200).json(out); return; }
     if (needPrice.length) { res.status(400).json({ ok: false, error: "need_price", need_price: needPrice, hint: "подай target:{<id>:{amount,price}}" }); return; }
