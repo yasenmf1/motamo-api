@@ -2893,6 +2893,7 @@ async function handlerInner(req, res) {
     let L = r.data || []; if (!Array.isArray(L)) L = Object.values(L);
     const types = {}; for (const x of L) { const k = String(x.type_id) + " " + (x.type_name || x.doc_type_name || ""); types[k] = (types[k] || 0) + 1; }
     const pick = L.filter(x => !body.type || String(x.type_id) === String(body.type)).slice(0, Number(body.n) || 3);
+    if (body.compact) { res.status(200).json({ ok: true, count: L.length, list: pick.map(x => ({ inv_id: x.inv_id, num: x.inv_num, type: x.type_id, an: x.is_anulate, total: x.total, client_id: x.client_id, receiver_id: x.receiver_id, date: x.create_date })) }); return; } // ★ 13.11 — кратък списък за сверка на стокови
     res.status(200).json({ ok: true, count: L.length, types, keys: L[0] ? Object.keys(L[0]) : [], sample: JSON.stringify(pick).slice(0, 6000) });
     return;
   }
