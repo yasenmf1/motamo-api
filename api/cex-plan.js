@@ -3078,8 +3078,9 @@ async function handlerInner(req, res) {
       const amount = (v && typeof v === "object") ? Number(v.amount) : Number(v);
       const price = (v && typeof v === "object" && v.price != null) ? Number(v.price) : null;
       const lot = (v && typeof v === "object" && v.lot != null) ? String(v.lot) : null;
+      const discount = (v && typeof v === "object" && v.discount != null) ? Number(v.discount) : null; // ★ 16.11 — % отстъпка на реда (промоция)
       if (isNaN(amount) || amount < 0) continue;
-      tgt[id] = { amount, price, lot };
+      tgt[id] = { amount, price, lot, discount };
     }
     // 4) делти (target − current); премахнат = делта до 0; нов = +target (иска цена)
     const saveRows = [], needPrice = [], plan = [];
@@ -3088,7 +3089,10 @@ async function handlerInner(req, res) {
       const cur = curByArt[id]; const curAmt = cur ? Number(cur.amount) : 0;
       const want = tgt[id] ? tgt[id].amount : 0;
       const delta = round(want - curAmt);
-      if (delta === 0) continue;
+      const wantDisc = (tgt[id] && tgt[id].discount != null && !isNaN(tgt[id].discount)) ? tgt[id].discount : null;
+      const curDisc = cur ? Number(cur.discount || 0) : 0;
+      const discChange = wantDisc != null && !!cur && wantDisc !== curDisc;
+      if (delta === 0 && !discChange) continue;
       const art = byId(id);
       const name = (cur && cur.article_name) || (art && art.name) || String(id);
       let price = cur ? Number(cur.current_price) : (tgt[id] && tgt[id].price != null ? tgt[id].price : null);
@@ -3098,7 +3102,8 @@ async function handlerInner(req, res) {
         package_name: "", package_ratio: "",
         current_price: price.toFixed(2), original_current_price: price.toFixed(2),
         system_current_price: cur ? String(cur.system_current_price) : String(price),
-        discount: "0", total_price: (want * price).toFixed(2),
+        discount: String(wantDisc != null ? wantDisc : (cur ? (cur.discount || 0) : 0)),
+        total_price: (want * price * (1 - (wantDisc != null ? wantDisc : (cur ? Number(cur.discount || 0) : 0)) / 100)).toFixed(2),
         tax_id: cur ? String(cur.tax_id) : String(gv("tax_id", "2")),
         depot_id: cur ? String(cur.depot_id) : String(CEX_DEPOT),
         delivery_price: cur ? String(cur.delivery_price) : "0",
@@ -3107,12 +3112,12 @@ async function handlerInner(req, res) {
         pricelist_id: cur ? String(cur.pricelist_id) : "3"
       };
       if (cur) row.order_id = cur.order_id; // съществуващ ред → носи order_id
-      saveRows.push(row); plan.push({ article_id: id, name, current: curAmt, target: want, delta });
+      saveRows.push(row); plan.push({ article_id: id, name, current: curAmt, target: want, delta, discount: wantDisc, was_discount: curDisc });
     }
     const saveBody = { Accounts_save: { id: acc, action_type: closeIt ? "save_and_close" : "save_and_continue", values, rows: saveRows } };
     const out = { ok: true, account_id: acc, dry, client: values.client_name, alias: values.account_alias,
       current: curRows.map(r => ({ article_id: r.article_id, name: r.article_name, amount: r.amount, lot: r.lot_value, price: r.current_price })),
-      plan, need_price: needPrice, rows_to_save: saveRows.length, save_body: saveBody };
+      plan, need_price: needPrice, rows_to_save: saveRows.length, save_body: saveBody, current_raw: body.raw === true ? curRows : undefined };
     if (dry) { res.status(200).json(out); return; }
     if (needPrice.length) { res.status(400).json({ ok: false, error: "need_price", need_price: needPrice, hint: "подай target:{<id>:{amount,price}}" }); return; }
     if (!saveRows.length) { res.status(200).json({ ok: true, account_id: acc, noop: true, message: "няма промени" }); return; }
