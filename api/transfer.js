@@ -887,7 +887,7 @@ if(edit)h+='<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><bu
 if(r.status==='partial')h+='<div style="margin-top:12px"><button onclick="run(&quot;'+esc(r.id)+'&quot;,true)">Опитай пак точката</button></div>';
 h+='</div></div>'});
 $('list').innerHTML=h}
-function prodCall(b,n){n=n||0;return api(b).then(function(j){if(j&&j.needs_confirm&&n<3&&confirm('⚠ '+j.error+'\n\nЗаписвам ли го въпреки това?')){var o={};o[j.flag||'confirm']=true;return prodCall(Object.assign({},b,o),n+1)}return j})}
+function prodCall(b,n){n=n||0;return api(b).then(function(j){if(j&&j.needs_confirm&&n<3&&confirm('⚠ '+j.error+'\\n\\nЗаписвам ли го въпреки това?')){var o={};o[j.flag||'confirm']=true;return prodCall(Object.assign({},b,o),n+1)}return j})}
 function produce(cid,amt,name){amt=Math.round(amt*1000)/1000;if(!confirm('Да произведа '+amt+' от «'+name+'» по рецептата (записва се в Barsy)?'))return;
 busy('Произвеждам…','Записвам производството в Barsy. Не натискай пак.');
 prodCall({action:'produce_zag',cex_id:cid,amount:amt}).then(function(j){free();if(!j.ok){msg('Производството НЕ мина: '+(j.error||''),'err',1);return}msg('✓ Произведено '+amt+' «'+name+'». Провери количествата и натисни «Издай документите».','ok',1);load()}).catch(function(e){free();msg('Мрежова грешка: '+e,'err',1)})}
