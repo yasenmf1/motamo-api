@@ -10,6 +10,9 @@
     "api/cex-plan.js": {
       "maxDuration": 60
     },
+    "api/transfer.js": {
+      "maxDuration": 60
+    },
     "api/pay-return.js": {
       "maxDuration": 30
     },
