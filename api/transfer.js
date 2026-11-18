@@ -2303,6 +2303,9 @@ self.addEventListener("notificationclick",function(e){e.notification.close();var
       if (!a || a.article_id == null) { res.status(200).json({ ok: false, error: "template_unreadable" }); return; }
       const values = { ...a, article_name: name };
       for (const k of ["article_id", "id", "avg_delivery_price", "delivery_price", "barcode", "article_code", "article_barcode", "last_update", "image", "photo"]) delete values[k];
+      // консуматив: не се продава и не се вижда в онлайн менюто (шаблонът може да е продаван артикул)
+      for (const k of ["pictures", "picture", "slug", "code", "ref_num", "article_aliases", "description_ml", "description_public_ml", "article_name_public_ml", "ref_id", "export_id"]) delete values[k];
+      values.is_public = 0; values.is_for_sale = 0; values.is_for_client_order = 0; values.actual_price = 0;
       if (body.measure_id != null) values.measure_id = Number(body.measure_id);
       if (!write) { res.status(200).json({ ok: true, dry: true, template: a.article_name, name, keys: Object.keys(values), sample: { measure_id: values.measure_id, article_type_id: values.article_type_id, is_public: values.is_public, is_for_sale: values.is_for_sale, parent_id: values.parent_id } }); return; }
       const sv = await shopRoot({ Articles_save: { id: null, action_type: "save", values } });
