@@ -279,6 +279,19 @@ async function sbClaim(id, from, patch) {
     return { ok: r.ok && Array.isArray(d) && d.length > 0, row: Array.isArray(d) ? d[0] : null, raw: r.ok ? "" : t.slice(0, 300) };
   });
 }
+// 18.11 — съобщение „Заредено в точката" (+ сметка за ориза) към собственика и групата, след като заявката е изпълнена.
+async function notifyLoaded(itemsSent, mvId, ldId, hasRest) {
+  const NL = String.fromCharCode(10);
+  const fq = x => String(Math.round(Number(x) * 1000) / 1000).replace(".", ",");
+  const today = TG.sofiaDate();
+  const ls = (itemsSent || []).filter(it => Number(it.sent) > 0 || Number(it.qty) > 0).map(it => "• " + TG.escHtml(it.name) + " — <b>" + fq(it.sent) + " " + TG.escHtml(it.unit || "") + "</b>" + (Number(it.sent) < Number(it.qty) ? " <i>(поискано " + fq(it.qty) + (Number(it.sent) <= 0 ? ", в цеха няма" : "") + ")</i>" : ""));
+  let rice = "";
+  try { rice = NL + NL + (await require("../lib/rice.js").morning(shopCall, new Date())).text; } catch (e) { rice = ""; }
+  const text = "📦 <b>Заредено в точката</b> (цех №" + (mvId || "?") + " → точка №" + (ldId || "?") + ")" + NL + NL + ls.join(NL) + (hasRest ? NL + NL + "Остатъкът е в нова заявка." : "") + rice;
+  await TG.tgSend(text, TG.OWNER_CHAT_ID, today).catch(() => null);
+  await TG.tgSend(text, TG.CEX_CHAT_ID, today).catch(() => null);
+  return text;
+}
 async function sbPatch(id, patch) {
   return withTimeout(async (signal) => {
     const r = await fetch(`${SB_URL}/rest/v1/${SB_TABLE}?id=eq.${encodeURIComponent(id)}`, {
@@ -2624,6 +2637,14 @@ self.addEventListener("notificationclick",function(e){e.notification.close();var
     // сглобява редовете за двата документа и ВРЪЩА статуса обратно на pending.
     // НИЩО не се пише в Barsy, докато не се избере документният модел
     // (вътрешен трансфер vs продажба на вътрешен клиент).
+    // 18.11 — праща наново съобщението „Заредено в точката" за вече изпълнена заявка (силен ключ).
+    if (body.action === "notify_request") {
+      const rows = await sbSelect("id=eq." + encodeURIComponent(String(body.id || "")) + "&limit=1").catch(() => []);
+      const r0 = rows && rows[0];
+      if (!r0 || r0.status !== "done") { res.status(200).json({ ok: false, error: "няма изпълнена заявка с това id" }); return; }
+      const text = await notifyLoaded(r0.items, r0.cex_doc_id, r0.shop_doc_id, false);
+      res.status(200).json({ ok: true, sent: true, text }); return;
+    }
     if (body.action === "process_request") {
       const id = String(body.id || ""); if (!id) { res.status(400).json({ ok: false, error: "no_id" }); return; }
       const write = body.dry === false;
@@ -2823,6 +2844,7 @@ self.addEventListener("notificationclick",function(e){e.notification.close();var
           const ls = itemsSent.filter(it => Number(it.sent) > 0 || Number(it.qty) > 0).map(it => `• ${TG.escHtml(it.name)} — <b>${fq(it.sent)} ${TG.escHtml(it.unit || "")}</b>` + (Number(it.sent) < Number(it.qty) ? ` <i>(поискахте ${fq(it.qty)})</i>` : ""));
           await TG.sendToRole("tochka", "✅ <b>Цехът изпрати</b>\n\n" + ls.join("\n") + (rest.length ? "\n\nОстатъкът е в нова заявка." : ""), TG.plusDays(TG.sofiaDate(), 1));
         } catch (e) {}
+        try { await notifyLoaded(itemsSent, mvId, ldId, rest.length > 0); } catch (e) {}
         res.status(200).json({
           ok: true, dry: false, id, cex_doc_id: mvId, shop_doc_id: ldId, short, rest_id: restId, rest_count: rest.length,
           message: "✓ Готово: цех прехвърляне " + (mvId || "") + " (" + moveRows.length + " реда) → точка зареждане " + (ldId || "") + " (" + loadRows.length + " реда)."
