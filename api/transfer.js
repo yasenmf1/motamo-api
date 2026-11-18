@@ -1676,7 +1676,7 @@ module.exports = async function handler(req, res) {
       const now = new Date(), today = TG.sofiaDate(now);
       const hm = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Sofia", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
       const dow = new Date(today + "T12:00:00Z").getUTCDay();
-      if (q.dry !== "1" && (dow === 0 || hm < "14:30" || hm >= "14:50")) { res.status(200).json({ ok: true, skipped: "not_now", hm }); return; }
+      if (q.dry !== "1" && q.force !== "1" && (dow === 0 || hm < "14:30" || hm >= "14:50")) { res.status(200).json({ ok: true, skipped: "not_now", hm }); return; }
       if (q.dry !== "1" && await TG.sentGet("rice_check", today)) { res.status(200).json({ ok: true, skipped: "already_sent" }); return; }
       const out = await require("../lib/rice.js").check(shopCall, now);
       if (q.dry === "1") { res.status(200).json({ ok: true, dry: true, ...out }); return; }
