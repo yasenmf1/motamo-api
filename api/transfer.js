@@ -1201,6 +1201,7 @@ function msg(t,c){var m=$('msg');m.className='msg '+(c||'info');m.textContent=t}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function api(b){return fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({token:K},b))}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return {ok:false,error:'unavailable',message:'Сървърът не отговаря (код '+r.status+'). Най-често Barsy е недостъпен — опитай след 1–2 минути.'}}})})}
 function n3(v){return Math.round(Number(v)*1000)/1000}
+function prodCall(b,n){n=n||0;return api(b).then(function(j){if(j&&j.needs_confirm&&n<3&&confirm('⚠ '+j.error+'\\n\\nЗаписвам ли го въпреки това?')){var o={};o[j.flag||'confirm']=true;return prodCall(Object.assign({},b,o),n+1)}return j})}
 function today(){var d=new Date(),z=function(x){return('0'+x).slice(-2)};return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}
 function count(){var n=0;document.querySelectorAll('.q').forEach(function(i){if(Number(i.value)>0)n++});$('cnt').textContent=n?(n+' заготовки за производство'):'нищо не е въведено';$('go').disabled=!n}
 function render(){var h='<tr class="hd"><th>Заготовка</th><th>В цеха</th><th>Произведох</th></tr>';
