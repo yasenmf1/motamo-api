@@ -2290,6 +2290,28 @@ self.addEventListener("notificationclick",function(e){e.notification.close();var
       return;
     }
 
+    // ── НОВ АРТИКУЛ В BARSY НА ТОЧКАТА (консуматив/суровина) ────────────────
+    // Клонира формата на съществуващ артикул (template_id; по подразбиране 113 КУПА ПОКЕ), сменя името
+    // и записва като нов. DRY по подразбиране: пише само при `dry:false`. Само пълен токен.
+    if (body.action === "create_article") {
+      const name = String(body.name || "").trim();
+      const tpl = Number(body.template_id) || 113;
+      if (name.length < 2 || name.length > 80) { res.status(400).json({ ok: false, error: "bad_name" }); return; }
+      const write = body.dry === false;
+      const r = await shopRoot({ articles_edit: { id: tpl, action_type: "values", active_struct_id: "eStructForm_1", params: { bid: BID, id: tpl } } });
+      const a = (r.data && r.data.articles_edit) || null;
+      if (!a || a.article_id == null) { res.status(200).json({ ok: false, error: "template_unreadable" }); return; }
+      const values = { ...a, article_name: name };
+      for (const k of ["article_id", "id", "avg_delivery_price", "delivery_price", "barcode", "article_code", "article_barcode", "last_update", "image", "photo"]) delete values[k];
+      if (body.measure_id != null) values.measure_id = Number(body.measure_id);
+      if (!write) { res.status(200).json({ ok: true, dry: true, template: a.article_name, name, keys: Object.keys(values), sample: { measure_id: values.measure_id, article_type_id: values.article_type_id, is_public: values.is_public, is_for_sale: values.is_for_sale, parent_id: values.parent_id } }); return; }
+      const sv = await shopRoot({ Articles_save: { id: null, action_type: "save", values } });
+      const lst = await shopRoot({ Articles_getlistobject: { filters: { article_name: name } } });
+      const found = ((lst.data && lst.data.Articles_getlistobject && lst.data.Articles_getlistobject.list) || (lst.data && lst.data.list) || []).filter(x => x.article_name === name).map(x => x.article_id);
+      res.status(200).json({ ok: found.length > 0, ids: found, raw: found.length ? undefined : String(sv.raw || JSON.stringify(sv.data || "")).slice(0, 300) });
+      return;
+    }
+
     // ── складовото табло (чете живо от Barsy при всяко отваряне) ──
     // ★ S25 — складът произвежда заготовка, която не стига за заявката (само заготовки).
     if (body.action === "produce_zag") {
