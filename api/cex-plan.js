@@ -2192,7 +2192,7 @@ function loadByLot(){var d=$('date').value;var lot='L.'+(d?d.split('-').reverse(
 // Зарежда РАЗНОСА за деня = отворените сметки (направени в навечерието/сутринта), за ③ Стокова.
 function loadRazos(){var d=$('date').value;msg('Зареждам разноса за '+d+'…');api({action:'load_razos',date:d}).then(function(j){if(!j.ok){msg('Грешка: '+(j.error||''),'err');return}shops=j.shops||[];renderGrid();$('planbox').innerHTML='';if(!shops.length){msg('Няма отворени сметки за '+d+'. (Първо ② Сметки, или провери деня.)','err');return}var sc=shops.filter(function(s){return s.has_stokova}).length;msg('Разнос '+d+': '+shops.length+' отворени сметки.'+(sc?(' '+sc+' вече имат стокова (червено „С", разтикнати).'):'')+' Тикни които искаш и натисни ③ Стокова.','ok')}).catch(function(e){msg('Мрежова грешка: '+e,'err')})}
 function markStok(s){try{var i=shops.indexOf(s);var cb=document.querySelector('#grid .selbox[data-i="'+i+'"]');if(!cb||cb.parentNode.querySelector('.stok'))return;var sp=document.createElement('span');sp.className='stok';sp.title='Вече има издадена стокова';sp.textContent='С';cb.parentNode.insertBefore(sp,cb.parentNode.querySelector('div'))}catch(e){}}
-function doStokova(){var pd0=$('pdate').value||$('date').value;var stale=selShops().filter(function(s){return s.account_id&&s.acc_date&&s.acc_date!==pd0});var sel=selShops().filter(function(s){return s.account_id&&!(s.acc_date&&s.acc_date!==pd0)});if(!sel.length){msg('Няма сметки за стокова. Натисни „↻ Зареди по партида" (или ② Сметки), после тикни обектите.','err');return}var pd=$('pdate').value||$('date').value;if(!confirm('Ще СЪЗДАМ стокови за '+sel.length+' обекта (една по една), с дата '+pd+'.'+(stale.length?'\\n⚠ Пропускам '+stale.length+' със стара сметка (от друг ден): '+stale.map(function(s){return shortName(s.client,s.rep)}).join(', ')+' — за тях натисни ② Сметки.':'')+'\\nПродължавам?'))return;var i=0,okc=0,errs=[];
+function doStokova(){var pd0=$('pdate').value||$('date').value;var stale=selShops().filter(function(s){return s.account_id&&s.acc_date&&s.acc_date!==pd0});var dup=selShops().filter(function(s){return s.account_id&&s.has_stokova});var sel=selShops().filter(function(s){return s.account_id&&!s.has_stokova&&!(s.acc_date&&s.acc_date!==pd0)});if(!sel.length){msg('Няма сметки за стокова. Натисни „↻ Зареди по партида" (или ② Сметки), после тикни обектите.','err');return}var pd=$('pdate').value||$('date').value;if(!confirm('Ще СЪЗДАМ стокови за '+sel.length+' обекта (една по една), с дата '+pd+'.'+(stale.length?'\\n⚠ Пропускам '+stale.length+' със стара сметка (от друг ден): '+stale.map(function(s){return shortName(s.client,s.rep)}).join(', ')+' — за тях натисни ② Сметки.':'')+(dup.length?'\\n⚠ Пропускам '+dup.length+' с вече издадена стокова (С).':'')+'\\nПродължавам?'))return;var i=0,okc=0,errs=[];
 function nextStok(){if(i>=sel.length){msg('✓ Стокови: '+okc+'/'+sel.length+' готови'+(errs.length?(' · грешки: '+errs.join(' | ')):''),errs.length?'err':'ok');return}var s=sel[i];msg('Правя стокова '+(i+1)+'/'+sel.length+' ('+shortName(s.client,s.rep)+')…');api({action:'create_stokova',account_id:s.account_id,date:pd}).then(function(j){if(j.ok){okc++;s.has_stokova=true;markStok(s)}else errs.push('#'+s.account_id+': '+(j.error||''));i++;nextStok()}).catch(function(e){errs.push('#'+s.account_id+': мрежа');i++;nextStok()})}
 nextStok()}
 var OBJECTS=[];
@@ -2776,6 +2776,28 @@ async function handlerInner(req, res) {
           if (!fresh) {
             res.status(200).json({ ok: false, error: "сметка №" + acc + " е от " + (cd || cl || "друга дата") + ", не от " + date + " — за този магазин няма сметка за деня; не правя стокова със стари числа", account_date_mismatch: true, account_id: acc, account_created: cd, account_closed: cl });
             return;
+          }
+        }
+      } catch (e) { /* не можем да проверим — не спираме работата */ }
+    }
+    // ★ 18.11 — предпазител срещу ДУБЛИРАНА стокова: ако към тази сметка вече има неанулирана стокова → отказ.
+    // (18.11: „④ Стокови“ с още тикнати Форум/Академика/Медицински издаде втора стокова на сметките 4983–4985.)
+    // body.allow_dup=true го пропуска (нарочен дубликат).
+    if (body.allow_dup !== true) {
+      try {
+        const al2 = await cexCall("Accounts_getlist", { order_by: "account_id desc", length: 800 }, user, pass);
+        let all2 = al2.data || []; if (!Array.isArray(all2)) all2 = Object.values(all2);
+        const a2 = all2.find(x => Number(x.account_id) === acc);
+        if (a2) {
+          const il = await cexCall("Invoices_getlist", { order_by: "inv_id desc", length: 300 }, user, pass);
+          let inv = il.data || []; if (!Array.isArray(inv)) inv = Object.values(inv);
+          const cand = inv.filter(x => String(x.type_id) === "11" && String(x.is_anulate) !== "1" && Number(x.client_id) === Number(a2.client_id)).slice(0, 24);
+          for (let i = 0; i < cand.length; i += 4) {
+            const got = await Promise.all(cand.slice(i, i + 4).map(async o => {
+              try { const r = await cexCall("Invoices_get", { inv_id: o.inv_id }, user, pass); return ((r.data && r.data.accounts) || []).map(String).includes(String(acc)) ? o : null; } catch (e) { return null; }
+            }));
+            const hit = got.find(Boolean);
+            if (hit) { res.status(200).json({ ok: false, error: "за сметка №" + acc + " вече има стокова №" + (hit.inv_num || hit.inv_id) + " — втора не правя", already_has_stokova: true, account_id: acc, inv_id: hit.inv_id, inv_num: hit.inv_num }); return; }
           }
         }
       } catch (e) { /* не можем да проверим — не спираме работата */ }
