@@ -3423,6 +3423,7 @@ async function handlerInner(req, res) {
     // lot: изрична партида от клиента, или „" за без партида, иначе L.<дата>.
     const lotOverride = (typeof body.lot === "string") ? body.lot : undefined;
     const created = await createAccounts(shopsIn, date, user, pass, lotOverride);
+    try { for (const c of created) if (c && c.ok === false) await require("../lib/errlog.js").logError("cex.create_accounts", String(c.error || "?"), { client: c.client, rep: c.rep, date }); } catch (e) {}
     // ★ S27 — помним на СЪРВЪРА кой магазин вече има сметка за тази дата: ② не го брои втори
     // път (сметката му вече е в „запазено"). Не зависи от браузъра/устройството.
     let day_saved = false;

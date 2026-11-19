@@ -2577,6 +2577,7 @@ self.addEventListener("notificationclick",function(e){e.notification.close();var
       catch (e) { out = { ok: false, error: "грешка: " + String(e && e.message).slice(0, 160) }; }
       const took = Date.now() - t0;
       if (!body.test && (!out.ok || took > 8000)) {
+        try { await require("../lib/errlog.js").logError("transfer.create_request", out.ok ? "бавно " + took + " мс" : String(out.error || "?"), { took_ms: took, items: Array.isArray(body.items) ? body.items.length : 0 }); } catch (e) {}
         try { await TG.tgSend(`⚠️ <b>Заявка от точката</b> — ${out.ok ? "мина, но бавно (" + Math.round(took / 1000) + " с)" : "НЕ мина: " + TG.escHtml(String(out.error || "?").slice(0, 200))}`); } catch (e) {}
       }
       res.status(200).json(out);
