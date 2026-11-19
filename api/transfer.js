@@ -1403,7 +1403,7 @@ load();
 const STANDING_REQUEST = [{ cex_id: 67, qty: 8 }];
 // Автоматичното изпълнение: cron ?cron=rice в 9:00; ако в цеха няма 8 кг „на хартия" — произвежда липсата.
 const STANDING_ENABLED = false;   // ★ 15.10 (собственикът): без автоматичен ориз сутрин — Йорданка/складът го праща от екрана „Прехвърляне" колкото трябва; cron=rice остава no-op // 9:00 Пн–Пт (собственикът, 29.09: „произвеждаме и изпращаме всяка сутрин в 9.00")
-async function createRequest(raw, note, tag, silent) {
+async function createRequest(raw, note, tag, silent, dry) {
   const want = new Map();
   for (const r of raw) {
     const id = Number(r && r.cex_id), qty = Number(r && r.qty);
@@ -1436,6 +1436,7 @@ async function createRequest(raw, note, tag, silent) {
     const dup = (recent || []).find(r => sig(r.items) === sig(items));
     if (dup) return { ok: true, id: dup.id, items_count: items.length, duplicate: true };
   } catch (e) {}
+  if (dry) return { ok: true, dry: true, items_count: items.length };   // ★ 19.11 тест режим: всичко проверено, нищо не се записва и не се праща
   const ins = await sbInsert({ for_date: sofiaToday(), status: "pending", items, note: note || null });
   if (!ins.ok) return { ok: false, error: "не се записа: " + ins.raw };
   if (!silent) try {
@@ -2572,10 +2573,10 @@ self.addEventListener("notificationclick",function(e){e.notification.close();var
     if (body.action === "create_request") {
       // ★ 19.11 — тревога към собственика, ако заявката на точката се провали или е бавна (>8 с, преди да е изтекла).
       const t0 = Date.now(); let out;
-      try { out = await createRequest(Array.isArray(body.items) ? body.items : [], body.note || null, ""); }
+      try { out = await createRequest(Array.isArray(body.items) ? body.items : [], body.note || null, "", false, body.test === true); }
       catch (e) { out = { ok: false, error: "грешка: " + String(e && e.message).slice(0, 160) }; }
       const took = Date.now() - t0;
-      if (!out.ok || took > 8000) {
+      if (!body.test && (!out.ok || took > 8000)) {
         try { await TG.tgSend(`⚠️ <b>Заявка от точката</b> — ${out.ok ? "мина, но бавно (" + Math.round(took / 1000) + " с)" : "НЕ мина: " + TG.escHtml(String(out.error || "?").slice(0, 200))}`); } catch (e) {}
       }
       res.status(200).json(out);
