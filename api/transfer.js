@@ -1427,6 +1427,15 @@ async function createRequest(raw, note, tag, silent) {
       shop_stock: (byId[id] || {}).shop_stock, cex_stock: (byId[id] || {}).cex_stock
     };
   });
+  // ★ 19.11 — защита от дубли: същата заявка (същите артикули и количества), записана в последните 5 мин и още чакаща,
+  // значи точката е натиснала пак (бавен отговор/таймаут). Връщаме съществуващата, без нов запис и без ново съобщение.
+  try {
+    const sig = a => (a || []).map(it => Number(it.cex_id) + ":" + Number(it.qty)).sort().join("|");
+    const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const recent = await sbSelect(`for_date=eq.${sofiaToday()}&status=eq.pending&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=10`);
+    const dup = (recent || []).find(r => sig(r.items) === sig(items));
+    if (dup) return { ok: true, id: dup.id, items_count: items.length, duplicate: true };
+  } catch (e) {}
   const ins = await sbInsert({ for_date: sofiaToday(), status: "pending", items, note: note || null });
   if (!ins.ok) return { ok: false, error: "не се записа: " + ins.raw };
   if (!silent) try {
@@ -2561,7 +2570,14 @@ self.addEventListener("notificationclick",function(e){e.notification.close();var
 
     // ── точката праща заявка ──
     if (body.action === "create_request") {
-      const out = await createRequest(Array.isArray(body.items) ? body.items : [], body.note || null, "");
+      // ★ 19.11 — тревога към собственика, ако заявката на точката се провали или е бавна (>8 с, преди да е изтекла).
+      const t0 = Date.now(); let out;
+      try { out = await createRequest(Array.isArray(body.items) ? body.items : [], body.note || null, ""); }
+      catch (e) { out = { ok: false, error: "грешка: " + String(e && e.message).slice(0, 160) }; }
+      const took = Date.now() - t0;
+      if (!out.ok || took > 8000) {
+        try { await TG.tgSend(`⚠️ <b>Заявка от точката</b> — ${out.ok ? "мина, но бавно (" + Math.round(took / 1000) + " с)" : "НЕ мина: " + TG.escHtml(String(out.error || "?").slice(0, 200))}`); } catch (e) {}
+      }
       res.status(200).json(out);
       return;
     }
