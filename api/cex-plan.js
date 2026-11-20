@@ -810,7 +810,7 @@ const CEX_OBJECTS = {
   // нови представители (05.10) — без сметка досега; client/rep са нужни, за да се покажат в „+ Магазин"
   "5:19": { group: "adhoc", form: true, label: "Кафе Винил", client: "Пламен Петров", rep: "кафе Винил" }, "5:20": { group: "adhoc", client: "Пламен Петров", rep: "лог. център Била" },
   "2:34": { group: "adhoc", form: true, label: "СИБИЕС ВУЗ", client: "СИБИЕС ООД", rep: "Студенски общежития" },   // 02.11: нов обект (Barsy №34); adhoc = без график, излиза само при реална поръчка
-  "12:": { group: "adhoc" }, "7:": { group: "adhoc", form: true, label: "Сити" }, "10:": { group: "adhoc", form: true, cal: true, label: "Тара Шуус" }, "13:": { group: "adhoc" }, "3:": { group: "adhoc" }
+  "12:": { group: "adhoc" }, "7:": { group: "adhoc", form: true, label: "Сити" }, "10:": { group: "adhoc", form: true, label: "Тара Шуус" }, "13:": { group: "adhoc" }, "3:": { group: "adhoc" }
 };
 function cexKey(a) { return (a.client_id != null ? a.client_id : "") + ":" + (a.person_id != null ? a.person_id : ""); }
 function cexObj(a) { return CEX_OBJECTS[cexKey(a)] || null; }
@@ -904,8 +904,9 @@ function formSchedDates(key) {
 async function shopFormData(key, dateIso) {
   const today = sofiaToday();
   const sd = formSchedDates(key);
-  const def = sd ? sd[0] : formDefaultDate();
-  const target = sd ? (sd.includes(dateIso) ? dateIso : def) : (/^\d{4}-\d{2}-\d{2}$/.test(dateIso || "") && dateIso >= today && dateIso <= isoPlusDays(today, 3) ? dateIso : def);
+  const isWE = d => { const w = new Date(d + "T12:00:00Z").getUTCDay(); return w === 0 || w === 6; };   // 20.11: събота/неделя — без доставки
+  let def = sd ? sd[0] : formDefaultDate(); if (!sd) while (isWE(def)) def = isoPlusDays(def, 1);
+  const target = sd ? (sd.includes(dateIso) ? dateIso : def) : (/^\d{4}-\d{2}-\d{2}$/.test(dateIso || "") && dateIso >= today && dateIso <= isoPlusDays(today, 3) && !isWE(dateIso) ? dateIso : def);
   const oArts = (CEX_OBJECTS[key] || {}).arts || null;
   const [hist, sug] = await Promise.all([shopHistory(key, today), computeSuggestion(target).catch(() => ({ by: {} }))]);
   const sgObj = (sug.by || {})[key] || {};
@@ -927,14 +928,14 @@ async function shopFormData(key, dateIso) {
   const sched = sd ? { dates: sd, text: `доставка ${dowBg(target)} ${target.slice(8, 10)}.${target.slice(5, 7)} · заявки до ${dowBg(isoPlusDays(target, -1))} ${(CEX_OBJECTS[key].sched.cutoff)}:00` } : null;
   // ★ 20.11 — календар (дни напред) + последна пратена заявка; само за обекти с `cal:true` (Тара Шуус)
   let cal = null;
-  if ((CEX_OBJECTS[key] || {}).cal) {
+  if (!sd) {
     try {
       const enc = encodeURIComponent(key), to = isoPlusDays(today, 3);
       const [rg, lt] = await Promise.all([
         sbReq(`cex_shop_requests?select=for_date&obj_key=eq.${enc}&for_date=gte.${today}&for_date=lte.${to}&limit=10`),
         sbReq(`cex_shop_requests?select=for_date,rows,swap_qty,sent_at,applied_at&obj_key=eq.${enc}&order=sent_at.desc&limit=1`)]);
       const have = new Set((rg || []).map(x => x.for_date)), days = [];
-      for (let d = def; d <= to; d = isoPlusDays(d, 1)) days.push({ date: d, dow: dowBg(d), has: have.has(d) });
+      for (let d = def; d <= to; d = isoPlusDays(d, 1)) if (!isWE(d)) days.push({ date: d, dow: dowBg(d), has: have.has(d) });
       const l = (lt || [])[0];
       cal = { days, last: l ? { for_date: l.for_date, sent_at: l.sent_at, applied_at: l.applied_at || null, rows: l.rows || [], swap: l.swap_qty || {} } : null };
     } catch (e) { logErr("cex-plan:cal", e); }
@@ -952,7 +953,7 @@ async function shopFormSend(key, body) {
   const forDate = String(body.for_date || "");
   const sd = formSchedDates(key), oArts = (CEX_OBJECTS[key] || {}).arts || null;
   if (sd) { if (!sd.includes(forDate)) return { ok: false, error: "closed", message: "Тази доставка вече не приема заявки. Отвори линка пак — ще покаже следващата." }; }
-  else if (!/^\d{4}-\d{2}-\d{2}$/.test(forDate) || forDate < today || forDate > isoPlusDays(today, 3)) return { ok: false, error: "bad_date", message: "Датата трябва да е днес или до 3 дни напред." };
+  else if (!/^\d{4}-\d{2}-\d{2}$/.test(forDate) || forDate < today || forDate > isoPlusDays(today, 3) || [0, 6].includes(new Date(forDate + "T12:00:00Z").getUTCDay())) return { ok: false, error: "bad_date", message: "Датата трябва да е работен ден — до 3 дни напред (без събота и неделя)." };
   const rows = [];
   for (const r of (Array.isArray(body.rows) ? body.rows : [])) {
     const id = Number(r && r.id), qty = Math.round(Number(r && r.qty));
