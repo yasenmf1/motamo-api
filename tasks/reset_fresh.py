@@ -37,6 +37,17 @@ def stock(host, depot=None):
     return {int(a["article_id"]): (a["article_name"], round(float(a.get("store_amount") or 0), 4)) for a in L}
 
 
+def costs(host):
+    """Доставна цена на всеки артикул (средна, иначе последна) — за корекцията-зареждане. Преди 20.11 тук имаше една цена 1,46 за всички (грешка)."""
+    L = peek("Articles_getlistobject", {"filters": {}, "extra_properties": ["avg_delivery_price"]}, host)["data"]["list"]
+    out = {}
+    for a in L:
+        c = float(a.get("avg_delivery_price") or 0) or float(a.get("delivery_price") or 0)
+        if c > 0:
+            out[int(a["article_id"])] = round(c, 6)
+    return out
+
+
 def save(host, method, top, any_id):
     return post("https://motamo-api.vercel.app/api/cex-plan", {"token": key("CEX_TOOL_TOKEN"), "action": "article_form", "host": host, "id": any_id, "method": method, "params": {"id": None}, "top": top})
 
@@ -47,13 +58,17 @@ ZAG = set(l.split(" | ")[1] for l in out.splitlines() if l.startswith("Заго�
 
 # ── 1) ТОЧКА (Barsy motamoshop) ──────────────────────────────────────────
 shop = stock("shop")
+SHOP_COST = costs("shop")
 shop_fresh = {i: v for i, v in shop.items() if v[0] in ZAG or v[0].startswith("заг.")}
 outs, loads = [], []
 for i, (n, q) in sorted(shop_fresh.items()):
     if q > 0.0005:
         outs.append({"row_id": "", "article_id": i, "article_name": n, "amount": q, "notes": ""})
     elif q < -0.0005:
-        cost = 1.46
+        cost = SHOP_COST.get(i)
+        if not cost:  # няма цена в Barsy → не пишем с налучкана; ще се види в справката и се оправя ръчно
+            print("ПРОПУСНАТО (няма доставна цена):", n, q)
+            continue
         amt = round(-q, 4)
         loads.append({"store_load_row_id": "", "article_id": str(i), "original_article_name": n, "amount": str(amt), "current_price": str(cost), "delivery_price": str(cost),
                       "delivery_total": str(round(cost * amt, 2)), "delivery_tax_id": "100", "actual_tax_id": "100", "tax": "0", "tax_sum": "0", "discount": "0",
