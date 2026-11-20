@@ -810,7 +810,7 @@ const CEX_OBJECTS = {
   // нови представители (05.10) — без сметка досега; client/rep са нужни, за да се покажат в „+ Магазин"
   "5:19": { group: "adhoc", form: true, label: "Кафе Винил", client: "Пламен Петров", rep: "кафе Винил" }, "5:20": { group: "adhoc", client: "Пламен Петров", rep: "лог. център Била" },
   "2:34": { group: "adhoc", form: true, label: "СИБИЕС ВУЗ", client: "СИБИЕС ООД", rep: "Студенски общежития" },   // 02.11: нов обект (Barsy №34); adhoc = без график, излиза само при реална поръчка
-  "12:": { group: "adhoc" }, "7:": { group: "adhoc", form: true, label: "Сити" }, "10:": { group: "adhoc", form: true, label: "Тара Шуус" }, "13:": { group: "adhoc" }, "3:": { group: "adhoc" }
+  "12:": { group: "adhoc" }, "7:": { group: "adhoc", form: true, label: "Сити" }, "10:": { group: "adhoc", form: true, cal: true, label: "Тара Шуус" }, "13:": { group: "adhoc" }, "3:": { group: "adhoc" }
 };
 function cexKey(a) { return (a.client_id != null ? a.client_id : "") + ":" + (a.person_id != null ? a.person_id : ""); }
 function cexObj(a) { return CEX_OBJECTS[cexKey(a)] || null; }
@@ -925,7 +925,21 @@ async function shopFormData(key, dateIso) {
   let existing = null;
   try { const ex = await sbAll(`cex_shop_requests?select=id,for_date,rows,left_qty,swap_qty,note,sent_at,updated_at,applied_at&for_date=eq.${target}&obj_key=eq.${encodeURIComponent(key)}`); existing = ex[0] || null; } catch (e) { logErr("cex-plan:L900", e); }
   const sched = sd ? { dates: sd, text: `доставка ${dowBg(target)} ${target.slice(8, 10)}.${target.slice(5, 7)} · заявки до ${dowBg(isoPlusDays(target, -1))} ${(CEX_OBJECTS[key].sched.cutoff)}:00` } : null;
-  return { obj: { key, name: formObjName(key) }, for_date: target, default_date: def, today, dow: dowBg(target), items, existing, sched,
+  // ★ 20.11 — календар (дни напред) + последна пратена заявка; само за обекти с `cal:true` (Тара Шуус)
+  let cal = null;
+  if ((CEX_OBJECTS[key] || {}).cal) {
+    try {
+      const enc = encodeURIComponent(key), to = isoPlusDays(today, 3);
+      const [rg, lt] = await Promise.all([
+        sbReq(`cex_shop_requests?select=for_date&obj_key=eq.${enc}&for_date=gte.${today}&for_date=lte.${to}&limit=10`),
+        sbReq(`cex_shop_requests?select=for_date,rows,swap_qty,sent_at,applied_at&obj_key=eq.${enc}&order=sent_at.desc&limit=1`)]);
+      const have = new Set((rg || []).map(x => x.for_date)), days = [];
+      for (let d = def; d <= to; d = isoPlusDays(d, 1)) days.push({ date: d, dow: dowBg(d), has: have.has(d) });
+      const l = (lt || [])[0];
+      cal = { days, last: l ? { for_date: l.for_date, sent_at: l.sent_at, applied_at: l.applied_at || null, rows: l.rows || [], swap: l.swap_qty || {} } : null };
+    } catch (e) { logErr("cex-plan:cal", e); }
+  }
+  return { obj: { key, name: formObjName(key) }, for_date: target, default_date: def, today, dow: dowBg(target), items, existing, sched, cal,
     other: oArts ? [] : MENU.filter(m => !items.some(i => i.id === m.id)).map(m => ({ id: m.id, name: m.name })) };
 }
 function normPhone(v) {   // „0899 333 568" / „+359 899…" / „00359…" → „+359899333568"; невалиден → ""
@@ -1006,7 +1020,7 @@ td.l{text-align:center}td.l input{width:42px;min-width:0;height:36px;padding:0;t
 select{width:100%;padding:10px;font-size:15px;border:1px solid #cfd3d8;border-radius:10px;background:#fff}
 ${UIV2.css}</style></head><body>
 <header><h1>${esc(name)}</h1>${place ? `<div class="d">${esc(place)}</div>` : ""}<div class="d" id="hd">Заявка към MOTAMO</div></header>
-<div class="wrap" style="padding-bottom:0"><div class="card" style="text-align:center;padding:14px 12px;border:3px solid #b3121b"><div style="font-size:13px;color:#777">Заявката е за</div><div id="dd" style="font-size:26px;font-weight:900;color:#b3121b;line-height:1.15;margin:4px 0"></div><div id="td" style="font-size:13px;color:#777"></div><a href="#" id="sw" onclick="swap();return false" style="display:inline-block;margin-top:6px;color:#1565c0;font-size:13px">Не е за този ден? Смени</a></div></div>
+<div class="wrap" style="padding-bottom:0"><div class="card" style="text-align:center;padding:14px 12px;border:3px solid #b3121b"><div style="font-size:13px;color:#777">Заявката е за</div><div id="dd" style="font-size:26px;font-weight:900;color:#b3121b;line-height:1.15;margin:4px 0"></div><div id="td" style="font-size:13px;color:#777"></div><a href="#" id="sw" onclick="swap();return false" style="display:inline-block;margin-top:6px;color:#1565c0;font-size:13px">Не е за този ден? Смени</a><div class="days" id="cal" style="display:none;margin-top:10px"></div></div><div class="card" id="last" style="display:none;margin-top:12px"></div></div>
 <div class="wrap">
 <div class="card"><table id="t"><thead><tr><th class="c1" style="text-align:left">артикул</th><th class="c4" style="white-space:normal;color:#c2410c;font-weight:800;line-height:1.15">ЗА ПОДМЯНА</th><th class="c5">заявка</th></tr></thead><tbody id="tb"><tr><td colspan="3" style="text-align:center;color:#888">Зареждам…</td></tr></tbody></table>
 <div class="note" id="note">Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +. Оранжевата колона „ЗА ПОДМЯНА“ попълвайте само ако връщате развалена стока.</div>
@@ -1026,7 +1040,7 @@ function api(b){return fetch('/api/cex-plan',{method:'POST',headers:{'Content-Ty
 function dm(iso){var p=iso.split('-');return p[2]+'.'+p[1]}
 function load(date){msg('Зареждам…','info');api({action:'shop_form_data',date:date}).then(function(j){if(!j.ok){msg('Грешка: '+(j.message||j.error||''),'err');return}D=j;SEL=j.for_date;ITEMS=j.items;render();$('msg').className='msg'}).catch(function(e){msg('Няма връзка. Опитай пак.','err')})}
 function render(){var ex=D.existing&&D.existing.for_date===SEL?D.existing:null,exq={},exs={};if(ex){(ex.rows||[]).forEach(function(r){exq[r.id]=r.qty});exs=ex.swap_qty||{}}
-$('dd').textContent=dowOf(SEL).toUpperCase()+' '+dm(SEL);$('td').textContent=D.sched?D.sched.text:('днес е '+dowOf(D.today)+' '+dm(D.today)+(SEL===D.today?' — доставка днес сутринта':' — доставка утре сутринта'));$('sw').style.display=(D.sched&&D.sched.dates.length<2)?'none':'inline-block';$('hd').textContent='Заявка към MOTAMO';
+$('dd').textContent=dowOf(SEL).toUpperCase()+' '+dm(SEL);$('td').textContent=D.sched?D.sched.text:('днес е '+dowOf(D.today)+' '+dm(D.today)+(SEL===D.today?' — доставка днес сутринта':' — доставка утре сутринта'));$('sw').style.display=(D.cal||(D.sched&&D.sched.dates.length<2))?'none':'inline-block';$('hd').textContent='Заявка към MOTAMO';calRender();
 var b='';ITEMS.forEach(function(it){var v=ex?(exq[it.id]||0):it.suggest;var cls=ex?'':'sug';var nm=it.name.replace('НACHI','NACHI');var sub=/NACHI/.test(nm)?'8 хапки':(/^CET/.test(nm)?'16 хапки':'');
 b+='<tr data-id="'+it.id+'"><td class="n">'+esc(nm)+(sub?'<small>'+sub+'</small>':'')+'</td>'
 +'<td class="l"><input type="number" inputmode="numeric" min="0" class="swap" value="'+(exs[it.id]!=null?exs[it.id]:'')+'" placeholder="0"></td>'
@@ -1034,6 +1048,12 @@ b+='<tr data-id="'+it.id+'"><td class="n">'+esc(nm)+(sub?'<small>'+sub+'</small>
 $('tb').innerHTML=b||'<tr><td colspan="3" style="text-align:center;color:#888">Няма история за този магазин. Добави артикул от „+ Друг артикул".</td></tr>';
 if(ex){if(ex.applied_at&&ex.applied_at>=ex.sent_at){msg('✓ ПРИЕТА от MOTAMO в '+hhmm(ex.applied_at)+' (пратена '+hhmm(ex.sent_at)+'). За промяна след това се обадете в цеха.','ok')}else{msg('Пратена в '+hhmm(ex.sent_at)+' — чака потвърждение от MOTAMO. Може да я промените и да натиснете „Прати" пак.','info')}$('note').textContent='Черните числа са вашата пратена заявка за този ден. Ако искате промяна — поправете и натиснете „Прати заявката" пак. Оранжевата колона „ЗА ПОДМЯНА“ попълвайте само ако връщате развалена стока.'}else{$('note').textContent='Синьото число е предложение по това, което обикновено получавате за този ден. Промени го с − и +. Оранжевата колона „ЗА ПОДМЯНА“ попълвайте само ако връщате развалена стока.'}
 var os='<option value="">— избери артикул —</option>';(D.other||[]).forEach(function(m){os+='<option value="'+m.id+'">'+esc(m.name.replace('НACHI','NACHI'))+'</option>'});$('othersel').innerHTML=os}
+function calRender(){var c=D.cal,cw=$('cal'),lw=$('last');if(!c){cw.style.display='none';lw.style.display='none';return}
+var h='';c.days.forEach(function(d){h+='<button onclick="load(\\''+d.date+'\\')" class="'+(d.date===SEL?'on':'')+'">'+esc(dowOf(d.date).slice(0,3).toUpperCase())+'<br>'+dm(d.date)+(d.has?'<br><span style="font-size:11px;color:#0a7d33">✓ пратена</span>':'')+'</button>'});cw.innerHTML=h;cw.style.display='flex';
+var l=c.last;if(!l){lw.style.display='none';return}
+var li='';(l.rows||[]).forEach(function(r){li+='<div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid #f0f1f3"><span>'+esc(String(r.name||'').replace('НACHI','NACHI'))+'</span><b>'+r.qty+'</b></div>'});
+lw.innerHTML='<div style="font-size:13px;color:#777">Последна пратена заявка</div><div style="font-weight:800;margin:2px 0 6px">за '+esc(dowOf(l.for_date))+' '+dm(l.for_date)+' <span style="font-weight:500;color:#888;font-size:13px">· пратена '+dm(String(l.sent_at).slice(0,10))+' '+hhmm(l.sent_at)+'</span></div>'+(li||'<div style="color:#888">0 от всичко</div>')+'<button class="send" style="background:#1565c0;font-size:15px;padding:11px;margin-top:10px" onclick="copyLast()">Попълни по последната</button>';lw.style.display='block'}
+function copyLast(){var l=D.cal&&D.cal.last;if(!l)return;var miss=0,m={};(l.rows||[]).forEach(function(r){m[r.id]=r.qty});document.querySelectorAll('#tb tr[data-id]').forEach(function(tr){var id=tr.getAttribute('data-id'),q=tr.querySelector('.qty');q.value=m[id]||0;q.className='qty';delete m[id]});miss=Object.keys(m).length;msg('Попълнено по последната заявка'+(miss?' (липсват '+miss+' артикула — добави ги от „+ Друг артикул")':'')+'. Провери и прати.','info')}
 function swap(){var t=D.today,tm=addDays(t,1);var o=SEL===t?tm:t;if(D.sched){o=D.sched.dates[0]===SEL?D.sched.dates[1]:D.sched.dates[0];if(!o)return}if(confirm('Да сменя деня на '+dowOf(o)+' '+dm(o)+'?'))load(o)}
 function addDays(iso,n){var d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
 function dowOf(iso){return ['неделя','понеделник','вторник','сряда','четвъртък','петък','събота'][new Date(iso+'T12:00:00Z').getUTCDay()]}
