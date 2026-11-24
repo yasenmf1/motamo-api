@@ -975,6 +975,7 @@ async function shopFormSend(key, body) {
     const swapL = Object.keys(swap).length ? "\n🔁 За смяна: " + Object.entries(swap).map(([id, q]) => TG.escHtml((byId(id) || { name: id }).name.replace("НACHI", "NACHI")) + " " + q).join(", ") : "";
     const text = `📥 <b>Заявка от ${TG.escHtml(formObjName(key))}</b>\nза ${dowBg(forDate)} ${forDate.slice(8, 10)}.${forDate.slice(5, 7)} · пратена ${hm} · ☎ ${TG.escHtml(phone)}\n${lines}${swapL}` + (row.note ? `\nБележка: ${TG.escHtml(row.note)}` : "") + `\n\nИнструмент → 📥 Заявки → „Приложи“.`;
     await TG.tgSend(text, TG.OWNER_CHAT_ID);
+    try { await require("../lib/driver.js").bump("motamo-api.vercel.app"); } catch (e) {}   // 24.11: текущата спирка пак най-долу
   } catch (e) { /* известието не бива да спира заявката */ }
   return { ok: true, for_date: forDate, rows, left, swap, sent_at: now };
 }
