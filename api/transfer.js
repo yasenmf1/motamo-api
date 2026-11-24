@@ -1958,7 +1958,7 @@ module.exports = async function handler(req, res) {
           else { for (const p of people) await TG.tgSend(joke, String(p.user_id)); await TG.tgSend(joke, TG.CEX_CHAT_ID); await TG.tgSend(`✅ Шегата е пратена на ${people.length} души и в групата „МОТАМО".`, String(uid)); }
           res.status(200).json({ ok: true }); return;
         }
-        if (role === "shofior" || (role === "owner" && (msgU.location || /маршрут/i.test(text)))) {
+        if (role === "shofior" || (role === "owner" && (msgU.location || /маршрут|тръгвам/i.test(text)))) {
           if (msgU.location) await DRV.handleLocation(uid, msgU.location, hostD);
           else if (msgU.photo) await DRV.handlePhoto(uid, msgU);
           else await DRV.handleText(uid, text, hostD);
